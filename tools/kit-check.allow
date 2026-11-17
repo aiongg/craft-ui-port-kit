@@ -1,0 +1,15 @@
+# Exceptions for tools/kit-check: one `path<TAB>string` per line, separated by a single tab.
+# A hit in `path` passes only when an occurrence of `string` in the same line covers the matched text.
+# For commit metadata, `path` is `@ident` or `@message`. Keep every entry exact; never allow a bare name.
+# The repository's own URL has to appear where the kit tells people how to install it.
+README.md	aiongg/craft-ui-port-kit
+.claude-plugin/plugin.json	aiongg/craft-ui-port-kit
+.claude-plugin/marketplace.json	aiongg/craft-ui-port-kit
+skills/craft-ui-port/SKILL.md	aiongg/craft-ui-port-kit
+tools/scip/scip_pb2.py	from google.protobuf.internal import builder as _builder
+tools/land/rewrite-rules.txt	regex:/Users/[^\s"'`)\]>,;]*==>/path/to/local
+tools/land/rewrite-rules.txt	regex:/tmp/claude-[^\s"'`)\]>,;]*==>/tmp/scratch
+tools/land/rewrite-rules.txt	regex:\.cache/==>cache/
+tools/land/rewrite-rules.txt	regex:(?![A-Za-z0-9._%+-]*noreply)[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}==>user@example.invalid
+# The one commit is authored by the repository owner's GitHub noreply address.
+@ident	aiongg <67543387+aiongg@users.noreply.github.com>

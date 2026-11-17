@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# check-workflow: parse workflow scripts the way tools/swarm.py loads them.
+#
+# usage: check-workflow [FILE...]      (default: every workflows/*.js in the kit)
+#
+# A workflow script is the body of an async function: it uses top-level `await` and `return`, which
+# `node --check` rejects. This wraps each body as swarm.py does (`export const meta =` becomes
+# `const meta =`, the body goes into an AsyncFunction) and reports syntax errors without running it.
+# Exit 0 when every file parses, 1 otherwise.
+set -euo pipefail
+kit="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [ $# -eq 0 ]; then set -- "$kit"/workflows/*.js; fi
+node -e '
+const fs = require("fs")
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+let bad = 0
+for (const f of process.argv.slice(1)) {
+  const body = fs.readFileSync(f, "utf8").replace(/^\s*export\s+const\s+meta\s*=/m, "const meta =")
+  try {
+    new AsyncFunction("agent", "parallel", "pipeline", "phase", "log", "args", "budget", "workflow", body)
+    console.log(`ok      ${f}`)
+  } catch (e) {
+    bad++
+    console.log(`FAILED  ${f}: ${e.message}`)
+  }
+}
+process.exit(bad ? 1 : 0)
+' "$@"

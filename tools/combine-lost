@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""After combine-area: list lines a set added that the combined tree lacks and no later set removed or changed.
+-X theirs can drop an earlier set's lines silently where two sets edit neighbouring lines; this finds them.
+
+Usage: [REPO=fw|app] combine-lost SET[@REV]...   (same arguments, same order as combine-area; reads the integration
+worktree's HEAD: framework.integration for REPO=fw, app.integration for REPO=app)"""
+import sys as _sys
+if _sys.argv[1:2] in (["-h"], ["--help"]):
+    print(__doc__)
+    _sys.exit(0)
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from portkit import config, track
+
+REPO = os.environ.get("REPO", "fw")
+if REPO not in ("fw", "app"):
+    sys.exit("combine-lost: REPO must be fw or app")
+cfg = config.load()
+J = os.environ.get("J") or str(cfg.path("framework.integration" if REPO == "fw" else "app.integration"))
+SETS = cfg.path("work.sets")
+TREES = cfg.path("work.trees")
+
+
+def git(cwd, *a):
+    return subprocess.run(["git", "-C", str(cwd), *a], capture_output=True, text=True).stdout
+
+
+def diff(s, r):
+    t = TREES / f"{s}-{REPO}"
+    if not t.is_dir():
+        t = TREES / s
+    landed = SETS / s / "landed"
+    b = (landed if REPO == "fw" and landed.exists() else SETS / s / f"base-{REPO}").read_text().strip()
+    added, removed, f = {}, {}, None
+    for line in git(t, "diff", "-U0", b, r).splitlines():
+        if line.startswith("diff --git "):
+            f = None
+        elif line.startswith("+++ "):
+            f = line[6:] if line != "+++ /dev/null" else f
+        elif line.startswith("--- "):
+            src = line[6:] if line != "--- /dev/null" else None
+            f = f or src
+        elif f and line.startswith("+") and line[1:].strip():
+            added.setdefault(f, []).append(line[1:].strip())
+        elif f and line.startswith("-") and line[1:].strip():
+            removed.setdefault(f, set()).add(line[1:].strip())
+    return added, removed
+
+
+def words(line):
+    return set(re.findall(r'[A-Za-z_][A-Za-z0-9_-]*|"[^"]*"', line))
+
+
+def main():
+    sets = [(a.split("@")[0], a.split("@")[1] if "@" in a else "HEAD") for a in sys.argv[1:]]
+    if not sets:
+        sys.exit(__doc__)
+    with track.recorded("combine-lost") as rec:
+        diffs = [diff(s, r) for s, r in sets]
+        lost = changed = 0
+        for i, (s, _) in enumerate(sets):
+            for f, lines in diffs[i][0].items():
+                shown = git(J, "show", f"HEAD:{f}")
+                have = {l.strip() for l in shown.splitlines()}
+                vocab = words(shown)
+                later = set().union(*(d[1].get(f, set()) for d in diffs[i + 1:])) if i + 1 < len(diffs) else set()
+                for l in lines:
+                    if l in have or l in later or (shown == "" and any(f in d[1] for d in diffs[i + 1:])):
+                        continue
+                    # Every word of the line still in the file: re-wrapped or extended by a later set, not dropped.
+                    if words(l) <= vocab:
+                        changed += 1
+                        continue
+                    print(f"LOST {s} {f}: {l[:140]}")
+                    lost += 1
+        summary = f"combine-lost: {lost} line(s) missing; {changed} changed in place (words all present)"
+        print(summary)
+        rec.result(summary, data={"lost": lost, "changed": changed})
+
+
+if __name__ == "__main__":
+    main()

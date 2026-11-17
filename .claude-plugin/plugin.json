@@ -1,0 +1,9 @@
+{
+  "name": "craft-ui-port",
+  "version": "0.1.0",
+  "description": "Run the port of a craft app's legacy egui UI onto the craft framework: the lead skill, with the kit's process, rules, prompts, tools and progress dashboard.",
+  "homepage": "https://github.com/aiongg/craft-ui-port-kit",
+  "repository": "https://github.com/aiongg/craft-ui-port-kit",
+  "license": "MIT OR Apache-2.0",
+  "keywords": ["craft", "egui", "port", "migration", "rust"]
+}

@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Write one area's sets, N at a time. A set with more Files rows than pipeline.agent_files_over goes to agent mode in
+# rounds of pipeline.agent_round_turns turns (each round a fresh context; `--continue` while its check.md names a
+# scripted error or the last round ran out of turns, at most pipeline.agent_continue_rounds rounds); smaller sets go
+# to the one-shot pipeline (`port-set run`). Every set is rachecked.
+# Resumes a killed run: sets already in the log are skipped; an agent-mode set whose trees hold uncommitted work gets
+# that work committed and checked, then goes straight to the --continue rounds.
+#
+# Usage: run-area NAME SHARED-LIST DEFAULT-LIST [N]
+#   SHARED-LIST   set ids (one per line) written with models.write_shared: sets that change a shared mechanism
+#   DEFAULT-LIST  set ids written with models.write
+#   N             sets at a time (default pipeline.parallel)
+# Log (appended): <work.sets>/area-NAME.log. Each set's output is in <work.sets>/<set>/.
+set -u
+. "$(dirname "$(readlink -f "$0")")/portkit/lib.sh"
+track_self run-area "$0" "$@"
+
+[ $# -ge 3 ] || die "usage: run-area NAME SHARED-LIST DEFAULT-LIST [N]"
+name=$1; shared=$2; default=$3
+sets=$(cfgr work.sets); trees=$(cfgr work.trees); sheets=$(cfgr work.sheets)
+n=${4:-$(cfgr pipeline.parallel)}
+files_over=$(cfgr pipeline.agent_files_over); round_turns=$(cfgr pipeline.agent_round_turns)
+rounds=$(cfgr pipeline.agent_continue_rounds); run_turns=$(cfgr pipeline.run_max_turns)
+m_default=$(cfgr models.write); m_shared=$(cfgr models.write_shared)
+log=$sets/area-$name.log
+export TOOLS sets trees sheets files_over round_turns rounds run_turns log
+
+one() {
+  s=$1; model=$2; d=$sets/$s
+  # A set whose plan check did not finish (cut by a limit, or no end line and no summary in its log) is not written.
+  pcm=$d/plancheck.md
+  if [ ! -f "$pcm" ] || grep -qiE 'usage limit|hit your .{0,20}limit' "$pcm" ||
+     { ! grep -q '@@@ END' "$pcm" && ! grep -q "^plancheck $s:" "$d/plancheck.log" 2>/dev/null; }; then
+    echo "$(date -u +%H:%M) $s ($model): SKIPPED: plan check unfinished (rerun port-set plancheck $s)"; return
+  fi
+  # Files rows of the sheet's "## Files" table.
+  files=$(sed -n '/^## Files/,/^## /p' "$sheets/$s.md" | grep -c '^| `')
+  if [ "$files" -gt "$files_over" ]; then
+    dirty=
+    for t in "$trees/$s" "$trees/$s"-*; do
+      [ -d "$t" ] && [ -n "$(git -C "$t" status --porcelain)" ] && dirty=1 &&
+        git -C "$t" add -A && git -C "$t" commit -qm "$s: partly written (run interrupted)"
+    done
+    if [ -n "$dirty" ]; then
+      "$TOOLS/port-set" check "$s" > "$d/agent.log" 2>&1
+    else
+      "$TOOLS/port-set" agent "$s" --model "$model" --max-turns "$round_turns" > "$d/agent.log" 2>&1
+    fi
+    last=$d/agent.log
+    for r in $(seq 1 "$rounds"); do
+      # Another round while the scripted check names an error (rust-analyzer's cross-set errors wait for the batch
+      # recheck) or the last round ran out of turns with its work unfinished.
+      sed -n '/^## Errors/,/^## Warnings/p' "$d/check.md" 2>/dev/null | grep -vE '^(## |none$|$|compile error \(rust-analyzer\)|full type|required by|- )' | grep -q . ||
+        grep -q 'OUT OF TURNS' "$last" || break
+      last=$d/agent-cont-$r.log
+      "$TOOLS/port-set" agent "$s" --continue --model "$model" --max-turns "$round_turns" > "$last" 2>&1
+    done
+    "$TOOLS/port-set" racheck "$s" >> "$d/agent.log" 2>&1
+    out=$(cat "$d"/agent*.log | grep -E '^(agent|racheck|check|OUT)' | tr '\n' ' ')
+  else
+    "$TOOLS/port-set" run "$s" --skip-plancheck --model "$model" --max-turns "$run_turns" > "$d/run.log" 2>&1
+    out=$(grep -E '^(apply|check|racheck|OPEN|BLOCKED|OUT OF TURNS|done)' "$d/run.log" | tr '\n' ' ')
+    # A pipeline answer can block on what its bundle lacks (or withdraw a block it wrote); an agent reads the trees.
+    if grep -q '^BLOCKED' "$d/run.log"; then
+      "$TOOLS/port-set" agent "$s" --model "$model" --max-turns "$round_turns" > "$d/agent.log" 2>&1
+      "$TOOLS/port-set" racheck "$s" >> "$d/agent.log" 2>&1
+      out="pipeline BLOCKED, agent retry: $(grep -E '^(agent|racheck|check|OUT|BLOCKED)' "$d/agent.log" | tr '\n' ' ')"
+    fi
+    # A one-shot that left planned rows untouched or tests undeleted gets agent rounds until the scripted check is clean.
+    for r in $(seq 1 "$rounds"); do
+      grep -qE '^(untouched|test not deleted):' "$d/check.md" 2>/dev/null || break
+      "$TOOLS/port-set" agent "$s" --continue --model "$model" --max-turns "$round_turns" > "$d/agent-cont-$r.log" 2>&1
+      out="$out; untouched rows, agent round $r: $(grep -E '^(agent|check|OUT)' "$d/agent-cont-$r.log" | tr '\n' ' ')"
+    done
+  fi
+  echo "$(date -u +%H:%M) $s ($model, $files files): $(echo "$out" | cut -c1-400)"
+}
+export -f one
+
+mkdir -p "$sets"
+{ sed "/^[[:space:]]*\$/d; s/\$/ $m_shared/" "$shared"; sed "/^[[:space:]]*\$/d; s/\$/ $m_default/" "$default"; } |
+  xargs -P "$n" -L1 bash -c 'grep -q "^[0-9:]* $0 (" "$log" 2>/dev/null && exit 0; mkdir -p "$sets/$0"; one "$0" "$1" | tee -a "$log"'
+echo "$(date -u +%H:%M) area $name done" | tee -a "$log"

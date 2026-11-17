@@ -1,0 +1,59 @@
+#!/bin/bash
+# Seed a new cargo target dir from a warm one of the same repo, so a new worktree
+# reuses every already-built dependency instead of rebuilding it:
+#   seed-target <new-target-dir> <warm-target-dir> [<worktree>]
+# Dependency artifacts are hardlinked (no extra disk until rebuilt). build/
+# (build-script OUT_DIRs, which scripts may rewrite in place), .fingerprint/ and
+# .d files are real copies. The worktree's own outputs (test binaries, examples,
+# libs) are removed, not linked: some are rewritten in place, which through a
+# shared link corrupted the warm dir while it was still in use. Use the same
+# toolchain for both dirs.
+# The worktree's own crates must rebuild, but their fingerprints can look fresh:
+# cargo compares source mtimes with the fingerprint, and the warm dir may have
+# been built after the new worktree was checked out. So their fingerprints are
+# dropped. <worktree> defaults to the git top level of the current directory.
+set -eu
+[ $# -eq 2 ] || [ $# -eq 3 ] || { echo "usage: seed-target <new-target-dir> <warm-target-dir> [<worktree>]" >&2; exit 2; }
+new=$1 warm=$2
+worktree=${3:-$(git rev-parse --show-toplevel 2>/dev/null || true)}
+[ -n "$worktree" ] && [ -f "$worktree/Cargo.toml" ] || {
+  echo "seed-target: run it inside the new worktree, or pass the worktree as the third argument" >&2; exit 2; }
+[ -f "$warm/CACHEDIR.TAG" ] || { echo "seed-target: $warm is not a cargo target dir" >&2; exit 1; }
+[ ! -e "$new" ] || { echo "seed-target: $new already exists" >&2; exit 1; }
+
+mkdir -p "$(dirname "$new")"
+cp -al "$warm" "$new"
+# Replace the hardlinked build/ and .fingerprint/ trees with real copies.
+find "$warm" -mindepth 2 -maxdepth 3 -type d \( -name build -o -name .fingerprint \) -printf '%P\n' |
+while IFS= read -r rel; do
+  rm -rf -- "$new/$rel"
+  cp -a -- "$warm/$rel" "$new/$rel"
+done
+# Cargo's lock files must be the new dir's own: hardlinked ones make builds in the
+# two dirs block each other.
+find "$new" -maxdepth 2 -type f -name '.cargo-*lock' | while IFS= read -r lock; do
+  rm -f -- "$lock"; : > "$lock"
+done
+# The cl log is per dir: a hardlinked one makes every seeded dir append to the warm dir's log.
+[ -f "$new/cl.log" ] && { rm -f -- "$new/cl.log"; : > "$new/cl.log"; }
+# Incremental caches are per-path anyway; dropping them saves a copy.
+find "$new" -mindepth 2 -maxdepth 3 -type d -name incremental -prune -exec rm -rf {} +
+# Drop the fingerprints of the worktree's own packages so they rebuild.
+members=$(cd "$worktree" && cargo metadata --no-deps --format-version 1 --offline 2>/dev/null |
+  python3 -I -c 'import json,sys; print("\n".join(p["name"] for p in json.load(sys.stdin)["packages"]))')
+[ -n "$members" ] || { echo "seed-target: cargo metadata failed in $worktree" >&2; exit 1; }
+n=0 h="????????????????"
+while IFS= read -r name; do
+  for fp in "$new"/*/.fingerprint/"$name"-$h "$new"/*/*/.fingerprint/"$name"-$h; do
+    [ -d "$fp" ] || continue
+    # Outputs carry the unit's hash: <target>-<hash>[.ext] in deps/ and examples/.
+    prof=$(dirname "$(dirname "$fp")") hash=${fp##*-}
+    find "$prof/deps" "$prof/examples" -maxdepth 1 -type f -name "*-$hash*" -delete 2>/dev/null || true
+    rm -rf -- "$fp"; n=$((n+1))
+  done
+done <<< "$members"
+# .d files (dep-info) are rewritten in place; give the new dir its own copies.
+find "$new" -mindepth 2 -maxdepth 4 -type f -name '*.d' -links +1 | while IFS= read -r f; do
+  cp -- "$f" "$f.seed-tmp" && mv -f -- "$f.seed-tmp" "$f"
+done
+echo "seeded $new from $warm ($n fingerprints of $worktree's packages dropped)"

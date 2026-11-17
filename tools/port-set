@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""port-set: write one writer set from its sheet with few model turns.
+
+Subcommands (SET is a set id such as panels-w1; its sheet is <work.sheets>/SET.md):
+  tree SET                    create the set's code-only worktrees (no target dir): one per repo its files live in
+  bundle SET                  write the one-file context bundle (<work.sets>/SET/bundle.md)
+  apply SET EDITS             apply an edits file (EDIT/NEW/DELETE blocks) to the set's trees
+  check SET                   scripted self-check of the set's trees (check.md)
+  racheck SET                 rust-analyzer errors in the files the set committed (needs `racheck.py serve fw|app`;
+                              racheck.md)
+  plancheck SET [--shared]    one call on the write bundle listing what the sheet leaves open (plancheck.md)
+  run SET [--skip-plancheck]  bundle -> plan check -> one write call -> apply -> check -> repair calls
+  agent SET [--continue]      the set written (or finished) by an autonomous agent with edit tools
+  fix SET FINDINGS.md         one call that fixes review findings on the written set
+  usage [SET]                 print the usage log (every model call's tokens and cost)
+  validate [--sheets DIR]     parse every sheet and report what the writing commands cannot place
+  audit [SET...] [--only C]   token-free plan checks: stubs, stories, decision files, readers (these four gate
+                              writing), line refs, tests, markers, waves, sizes, names (<work.dir>/audit/)
+  remap [--dry-run]           move framework line refs in sheets and contract parts from plan.linebase to the
+                              framework writing base
+  collect                     open DECIDE items by area (<work.decide>/<area>.md) and owners.tsv
+  status [SET...]             each set's stage from its set dir, beside its dashboard task; --post moves the tasks
+
+Files live in two repos: fw (the framework; set trees start at framework.writing_base) and app (the app; trees start at
+app.writing_base). A set's own repo is its sheet's `Repo:`; a Files row tagged `(fw)`/`(app)`, or a path that exists
+only in the other repo, goes to the set's tree in that repo. Every model call is logged in work.usage_log and on the
+set's dashboard task; every command posts one `port-set-<command>` event when it ends. Exit states and the dashboard
+states they set: tools/portkit/portset/write.py. validate and audit exit 1 when they report problems (audit: a
+gating check is not 0). The full spec: tools/port-set.md.
+
+Options before the subcommand: --config PATH (port.toml), --set KEY=VALUE (repeatable).
+"""
+import argparse
+import importlib
+import sys
+import tomllib
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from portkit import config, track  # noqa: E402
+from portkit.portset.context import ctx  # noqa: E402
+
+# Command modules under portkit/portset/, each with register(sub).
+COMMANDS = ("write", "validate", "audit", "remap", "collect", "status")
+
+
+def main(argv=None) -> int:
+    p = argparse.ArgumentParser(prog="port-set", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--config", help="port.toml (default: PORT_KIT_CONFIG, ./port.toml, the nearest one above)")
+    p.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
+    sub = p.add_subparsers(dest="cmd", required=True, metavar="COMMAND")
+    for name in COMMANDS:
+        importlib.import_module(f"portkit.portset.{name}").register(sub)
+    a = p.parse_args(argv)
+
+    overrides = {}
+    for kv in a.overrides:
+        if "=" not in kv:
+            p.error(f"--set needs KEY=VALUE: {kv}")
+        k, v = kv.split("=", 1)
+        overrides[k] = v
+    try:
+        cfg = config.load(a.config, overrides)
+    except (config.ConfigError, tomllib.TOMLDecodeError, ValueError) as e:
+        print(f"port-set: config: {e}", file=sys.stderr)
+        return 2
+    for w in cfg.warnings:
+        print(f"port-set: config: warning: {w}", file=sys.stderr)
+    ctx.load(cfg)
+
+    if not getattr(a, "record", True):
+        a.func(a)
+        return 0
+    task = getattr(a, "set", None)
+    try:
+        with track.recorded(f"port-set-{a.cmd}", task=task) as rec:
+            try:
+                out = a.func(a)
+            except BaseException as e:
+                if a.owns_state and task and not (isinstance(e, SystemExit) and e.code in (None, 0)):
+                    why = str(e.code) if isinstance(e, SystemExit) else f"{type(e).__name__}: {e}"
+                    track.status(task, "failed", f"port-set {a.cmd}: {(why.splitlines() or ['failed'])[0][:200]}")
+                raise
+            if out is not None:
+                rec.result(out.text, log=out.log, data=out.data, ok=out.ok)
+    except config.ConfigError as e:
+        print(f"port-set: {e}", file=sys.stderr)
+        return 2
+    # Check commands (set_defaults(fail_exit=True)) exit 1 when their outcome is not ok, so a script can gate on them.
+    return 1 if getattr(a, "fail_exit", False) and out is not None and not out.ok else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

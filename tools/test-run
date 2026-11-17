@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""test-run: build and run test binaries through cl, and list the failing tests.
+
+usage: test-run LABEL [--fw CRATE[:FILTER] ...] [--app] [--filter F ...] [--no-run] [--round N] [--config PORT.TOML]
+
+  --app            the app's whole pinned selection (`cl test all`, cl's app mode), run in app.integration. Default
+                   when no --fw is given.
+  --fw CRATE[:F]   framework trials: `cl test CRATE` in framework.integration, with the test filter F when given.
+                   Several allowed; each runs on its own.
+  --filter F       a test-name filter for the app run (repeatable): build the whole selection, run only the match.
+  --no-run         build the test binaries and stop.
+  --round N        the red-round number this run counts as. Default: one more than the highest round recorded in
+                   <work.runs>/rounds.tsv (1 for the first). The baseline run of setup is round 0. Only full app runs (no --filter) are recorded as rounds.
+
+App run: build with --no-run first; when build.target_dir is set, delete the test executables that build superseded
+(trash-stale-tests; a framework change gives every test binary a new hash, so old copies would double the target dir);
+then run with --no-fail-fast, and with --test-threads build.test_threads when that is set. Test binaries run under build.runner (CL_RUNNER).
+Every cl call runs under build.launcher (CL_LAUNCHER) and build.memory_cap.
+
+Logs, in <work.runs>/LABEL/: `app.build.log`, `app.log`, `app.failed` (one failing test per line, sorted),
+`fw-<crate>.log`. Prints counts per run. Exit status: 0 when nothing failed or failed to build, 1 otherwise.
+Compare two runs with compare-runs.py; split a failing run into fixer groups with split-failures.py.
+"""
+import argparse
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from portkit import config, gates, track
+
+RESULT = re.compile(r"^test result: \w+\. (\d+) passed; (\d+) failed")
+FAILED = re.compile(r"^test (.*) \.\.\. FAILED$")
+
+
+def counts(log: Path):
+    passed = failed = 0
+    names = set()
+    for l in open(log, errors="replace"):
+        m = RESULT.match(l)
+        if m:
+            passed += int(m.group(1)); failed += int(m.group(2))
+        m = FAILED.match(l)
+        if m:
+            names.add(m.group(1))
+    return passed, failed, sorted(names)
+
+
+def trial(cfg, tree: Path, args: list[str], log: Path, threads: str, filters: list[str]):
+    """One cl test call; (exit status, passed, failed names, compile errors)."""
+    log.write_bytes(b"")
+    cmd = gates.cl(cfg, ["test", *args, "--no-fail-fast", "--", *filters, *(["--test-threads", threads] if threads else [])])
+    rc = gates.run_logged(cmd, tree, log, gates.cl_env(cfg))
+    passed, failed, names = counts(log)
+    return rc, passed, names, len(gates.error_lines(log))
+
+
+def app_run(cfg, rd: Path, filters: list[str], no_run: bool, threads: str):
+    app = cfg.path("app.integration")
+    env = gates.cl_env(cfg)
+    build_log = rd / "app.build.log"
+    build_log.write_bytes(b"")
+    start = time.time()
+    rc = gates.run_logged(gates.cl(cfg, ["test", "all", "--no-run"]), app, build_log, env)
+    errs = len(gates.error_lines(build_log))
+    if rc != 0:
+        print(f"app build failed (exit {rc}): {errs} errors; see {build_log}")
+        return dict(ok=False, passed=0, failed=0, names=[], text=f"app build failed, {errs} errors")
+    target = cfg.get("build.target_dir")
+    if target:
+        subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "trash-stale-tests"), "--dir",
+                        str(Path(target) / "debug" / "deps"), "--since", str(start)], check=False)
+    if no_run:
+        print("app build ok")
+        return dict(ok=True, passed=0, failed=0, names=[], text="app build ok")
+    log = rd / "app.log"
+    t = time.time()
+    rc, passed, names, cerr = trial(cfg, app, ["all"], log, threads, filters)
+    (rd / "app.failed").write_text("".join(n + "\n" for n in names))
+    print(f"app: exit {rc}, {passed} passed, {len(names)} failed, {cerr} compile errors ({time.time() - t:.0f}s)")
+    return dict(ok=rc == 0 and not names, passed=passed, failed=len(names), names=names,
+                text=f"app: {passed} passed, {len(names)} failed")
+
+
+def next_round(cfg) -> int:
+    f = cfg.path("work.runs") / "rounds.tsv"
+    seen = [int(l.split("\t", 1)[0]) for l in open(f) if l.split("\t", 1)[0].isdigit()] if f.is_file() else []
+    return max(seen) + 1 if seen else 1
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("label")
+    ap.add_argument("--fw", action="append", default=[], metavar="CRATE[:FILTER]")
+    ap.add_argument("--app", action="store_true")
+    ap.add_argument("--filter", action="append", default=[])
+    ap.add_argument("--no-run", action="store_true")
+    ap.add_argument("--round", type=int)
+    ap.add_argument("--config")
+    a = ap.parse_args()
+    cfg = config.load(a.config)
+    rd = gates.run_dir(cfg, a.label)
+    value = cfg.get("build.test_threads")
+    threads = "" if value is None else str(value)
+    with track.recorded("test-run") as rec:
+        parts, ok = [], True
+        for spec in a.fw:
+            crate, _, flt = spec.partition(":")
+            fw = cfg.path("framework.integration")
+            t = time.time()
+            if a.no_run:
+                log = rd / f"fw-{crate}.log"
+                log.write_bytes(b"")
+                rc = gates.run_logged(gates.cl(cfg, ["test", crate, "--no-run", "--message-format", "short"]), fw, log, gates.cl_env(cfg))
+                print(f"{crate}: build exit {rc} ({time.time() - t:.0f}s)")
+                ok &= rc == 0
+                parts.append(f"{crate} build exit {rc}")
+                continue
+            rc, passed, names, cerr = trial(cfg, fw, [crate], rd / f"fw-{crate}.log", threads, [flt] if flt else [])
+            print(f"{crate}{' (' + flt + ')' if flt else ''}: exit {rc}, {passed} passed, {len(names)} failed, {cerr} compile errors ({time.time() - t:.0f}s)")
+            ok &= rc == 0 and not names
+            parts.append(f"{crate}: {passed} passed, {len(names)} failed")
+        if a.app or not a.fw:
+            r = app_run(cfg, rd, a.filter, a.no_run, threads)
+            ok &= r["ok"]
+            parts.append(r["text"])
+            if not a.no_run and not a.filter and r["passed"] + r["failed"] > 0:
+                n = a.round if a.round is not None else next_round(cfg)
+                with open(cfg.path("work.runs") / "rounds.tsv", "a") as f:
+                    f.write(f"{n}\t{a.label}\t{r['passed']}\t{r['failed']}\n")
+                track.round(n, r["passed"], r["failed"], log=str(rd / "app.log"))
+        text = f"{a.label}: " + "; ".join(parts)
+        rec.result(text, log=str(rd), data={"label": a.label, "ok": ok})
+    sys.exit(0 if ok else 1)
+
+
+if __name__ == "__main__":
+    main()

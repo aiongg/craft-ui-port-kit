@@ -1,0 +1,113 @@
+{
+  "title": "Inventory chunk",
+  "description": "Phase 1 inventory of one chunk of the app's UI code (process/02-inventory-and-map.md). One entry per user-visible part or piece of UI infrastructure. An entry's id is <chunk>.<index>, the index counting from 0 in the entries array; area maps cite entries by that id. Paths are relative to the app snapshot root. Every line reference is path:line or path:from-to.",
+  "type": "object",
+  "required": ["chunk", "entries", "skipped"],
+  "properties": {
+    "chunk": {
+      "type": "string",
+      "description": "Chunk id, two or more digits (\"05\")."
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "kind", "files", "entry_points", "shows", "state_reads", "state_writes", "commands", "widgets_used", "interactions", "control_reach", "tests", "lines", "notes"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The part as a user names it (\"Layers panel row context menu\"); infrastructure by its job (\"Dock layout persistence\")."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["panel", "dialog", "widget", "canvas_overlay", "options_bar", "menu", "popup", "infra", "other"],
+            "description": "infra: code with no pixels of its own (dispatch, state, persistence, registries, glue)."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["path", "lines"],
+              "properties": {
+                "path": { "type": "string" },
+                "lines": { "type": "integer", "description": "Lines of this file that belong to the entry." },
+                "ranges": { "type": "string", "description": "Line ranges when the entry owns only part of the file (\"40-180, 300-342\")." }
+              }
+            }
+          },
+          "entry_points": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Functions the rest of the app calls to show or run the part: \"path:line fn_name\"."
+          },
+          "shows": {
+            "type": "string",
+            "description": "One or two sentences: what the user sees and when."
+          },
+          "state_reads": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "App state the part reads, each with path:line."
+          },
+          "state_writes": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "App state the part writes, each with path:line."
+          },
+          "commands": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Command ids or actions it sends, each with path:line."
+          },
+          "widgets_used": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Widgets and helpers it builds from (app or framework), each with path:line."
+          },
+          "interactions": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Pointer, key, wheel, drag and focus behaviour, each with path:line."
+          },
+          "control_reach": {
+            "type": "string",
+            "description": "How a script reaches the part's states through the app's control channel (method and params, with path:line), or \"none found\" and where you looked."
+          },
+          "tests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["file", "count", "examples"],
+              "properties": {
+                "file": { "type": "string" },
+                "count": { "type": "integer", "description": "#[test] functions in the file that concern this entry." },
+                "examples": { "type": "array", "items": { "type": "string" }, "description": "Up to five test function names." }
+              }
+            }
+          },
+          "lines": {
+            "type": "integer",
+            "description": "Total lines of the entry: the sum of files[].lines."
+          },
+          "notes": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Facts a mapper needs that fit no other key (limits, platform branches, dead code), each with path:line."
+          }
+        }
+      }
+    },
+    "skipped": {
+      "type": "array",
+      "description": "Files of the chunk that hold no entry (a module root with only mod lines, generated code), each with the reason.",
+      "items": {
+        "type": "object",
+        "required": ["path", "reason"],
+        "properties": {
+          "path": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      }
+    }
+  }
+}

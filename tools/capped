@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Run a heavy job (rust-analyzer server, cargo build or test, a batch of writers) in its own systemd
+# user scope with a memory cap. systemd-oomd kills the biggest cgroup in the user slice under memory
+# pressure; without its own scope the job sits in the Claude session's tmux pane and the kill takes
+# the session with it. At the cap the kernel kills inside this scope only.
+# Usage: capped <GB> <command> [args...]
+set -eu
+gb=$1; shift
+exec systemd-run --user --scope --quiet --collect -p MemoryMax=${gb}G -p MemorySwapMax=2G -- "$@"

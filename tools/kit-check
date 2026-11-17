@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""kit-check: refuse a push of the kit repo that would publish machine paths, personal data or private names.
+
+Usage: tools/kit-check [--rev REV] [--since REV | --all-history | --no-history] [--private FILE]
+                       [--require-private]
+
+Checks, in order:
+  1. Every tracked file (of the working tree, or of --rev) against the generic patterns in tools/portkit/scrub.py.
+  2. The same files against every line of the private patterns file (--private, else $PORT_KIT_PRIVATE_PATTERNS,
+     else ~/.config/craft-ui-port-kit/private-patterns.txt). A missing file is a loud warning, or an error with
+     --require-private (the pre-push hook passes it).
+  3. History of the push: authors, committers, messages and added lines of the commits in --since..REV; without
+     --since, the commits not on any remote-tracking branch (the whole history when there is none, as on a first
+     push). Same pattern set as steps 1 and 2.
+  4. Exceptions from tools/kit-check.allow: exact `path<TAB>string` lines (see the file's header).
+Exit 1 with one `where:line: [pattern] text` line per hit; 0 when clean.
+
+The pre-push hook (.githooks/pre-push; enable with `git config core.hooksPath .githooks`) runs this for every pushed
+ref, before anything reaches the public remote; a check on the remote side would run after the leak. Run it by hand before committing anything copied from a port.
+"""
+import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from portkit import scrub  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[1]
+ALLOW = "tools/kit-check.allow"
+PATTERN_SOURCE = "tools/portkit/scrub.py"   # defines the generic patterns (see source_hits)
+LOUD = "=" * 78
+
+
+def source_hits(found: list) -> list:
+    """Hits that count in the file defining the generic patterns: it names what they catch, so only private hits count."""
+    return [h for h in found if h.pattern.startswith("private:")]
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--rev", help="scan this commit's files instead of the working tree's tracked files")
+    g = ap.add_mutually_exclusive_group()
+    g.add_argument("--since", help="history: commits in SINCE..REV")
+    g.add_argument("--all-history", action="store_true", help="history: every commit reachable from REV")
+    g.add_argument("--no-history", action="store_true", help="skip the history check")
+    ap.add_argument("--private", help="private patterns file")
+    ap.add_argument("--require-private", action="store_true", help="fail when the private patterns file is missing")
+    a = ap.parse_args()
+    repo = str(ROOT)
+    rev = a.rev
+
+    generic = scrub.GENERIC
+    private: list[scrub.Pattern] = []
+    problems = 0
+    ppath = scrub.private_path(a.private)
+    if ppath.is_file():
+        try:
+            private = scrub.load_private(ppath)
+        except ValueError as e:
+            print(f"kit-check: {e}", file=sys.stderr)
+            return 2
+    else:
+        print(f"{LOUD}\nkit-check: NO PRIVATE PATTERNS FILE at {ppath}\n"
+              f"Only the generic patterns run: your names, handles and hostnames are NOT checked.\n"
+              f"Create the file (CONTRIBUTING.md says what goes in it) or point {scrub.PRIVATE_ENV} at it.\n"
+              f"{LOUD}", file=sys.stderr)
+        if a.require_private:
+            return 2
+    try:
+        inside = ppath.resolve().relative_to(ROOT)
+    except ValueError:
+        inside = None
+    if inside is not None:
+        print(f"kit-check: the private patterns file {ppath} is inside the repo; move it out", file=sys.stderr)
+        problems += 1
+
+    try:
+        allow = scrub.Allow(ROOT / ALLOW)
+    except ValueError as e:
+        print(f"kit-check: {e}", file=sys.stderr)
+        return 2
+
+    def allowed(h: scrub.Hit) -> bool:
+        if allow.allows(h):
+            return True
+        # An allow row's own string is not a hit (in the file and in the history that adds it).
+        if h.where.split(" (", 1)[0] == ALLOW and h.line and not h.text.lstrip().startswith("#"):
+            i = h.text.find("\t")
+            return 0 <= i < h.start
+        return False
+
+    hits: list[scrub.Hit] = []
+    files = 0
+    for name, data in scrub.tracked_files(repo, rev):
+        if Path(name).name == "private-patterns.txt":
+            print(f"kit-check: {name}: a private patterns file is tracked; remove it from the repo", file=sys.stderr)
+            problems += 1
+        if scrub.is_binary(data):
+            continue
+        files += 1
+        text = data.decode("utf-8", errors="replace")
+        found = scrub.scan_text(name, text, generic + private)
+        if name == PATTERN_SOURCE:
+            found = source_hits(list(found))
+        hits += [h for h in found if not allowed(h)]
+
+    commits = "skipped"
+    if not a.no_history:
+        head = rev or "HEAD"
+        if a.since:
+            revs = [f"{a.since}..{head}"]
+        elif a.all_history or not scrub.git(repo, "for-each-ref", "refs/remotes").strip():
+            revs = [head]
+        else:
+            revs = [head, "--not", "--remotes"]
+        try:
+            n = scrub.git(repo, "rev-list", "--count", *revs).decode().strip()
+        except RuntimeError as e:
+            if "unknown revision" in str(e) or "bad revision" in str(e) or "ambiguous argument" in str(e):
+                n, revs = "0", None   # an empty repo, or a history the caller has not fetched
+                print(f"kit-check: no history to scan ({e})", file=sys.stderr)
+            else:
+                raise
+        if revs and n != "0":
+            found = list(scrub.scan_history(repo, revs, generic + private))
+            src = [h for h in found if h.where.startswith(PATTERN_SOURCE + " (")]
+            found = [h for h in found if not h.where.startswith(PATTERN_SOURCE + " (")] + source_hits(src)
+            hits += [h for h in found if not allowed(h)]
+        commits = f"{n} commit(s): {' '.join(revs) if revs else '-'}"
+
+    for h in hits:
+        print(h.show())
+    mode = f"generic + {len(private)} private patterns"
+    print(f"kit-check: {files} files{' at ' + rev if rev else ''}, history {commits}; {mode}; "
+          f"{len(hits)} hit(s){', ' + str(problems) + ' problem(s)' if problems else ''}", file=sys.stderr)
+    return 1 if hits or problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

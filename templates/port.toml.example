@@ -1,0 +1,183 @@
+# port.toml: the workspace config of one app port. process/config.md documents every key.
+#
+# Copy this file to the workspace root as port.toml (tools/init-workspace does that), then fill in the values
+# marked REQUIRED. Every key left out takes its default. Relative paths resolve against this file's directory;
+# `~` expands; `{section.key}` names another key and `{kit}` the kit's root.
+# Kit tools find this file through PORT_KIT_CONFIG, else ./port.toml, else the nearest port.toml above the
+# current directory. Any key can be overridden for one command with PORT_KIT_<SECTION>_<KEY>.
+#
+# Comments show PhotoCraft's values where they differ from the default.
+
+[work]
+# dir = "."                                   # default: this file's directory
+# trees = "{work.dir}/trees"                  # per-set worktrees and read-only base checkouts
+
+[framework]
+checkout = "../craft-libs"                    # REQUIRED: local framework clone
+# repo = "https://github.com/storytold/craft-libs"   # must be the remote that has plan.base
+# branch = "next"                            # the framework branch the port targets: `next` on the framework's upstream,
+#                                             # else the branch the framework team names (process/01-setup.md, step 2)
+# integration = "{framework.checkout}"        # framework integration worktree (combines, compile gates)
+# snapshot = "{work.trees}/snap-fw"           # tools/make-snapshots creates it; read-only checkout at plan.base for phase 1-2 agents
+# writing_base = "port/stubs"                 # branch the writers start from (phase 3 output)
+# facade = "craft"
+# facade_manifest = "crates/craft/Cargo.toml"
+# patch_urls = ["{framework.repo}"]           # add your fork's URL when the app's manifests name it
+# lints_file = "{kit}/rules/lints.toml"       # [[lints]] tables below add to it
+
+[app]
+name = "MyApp"                                # REQUIRED: display name (PhotoCraft)
+checkout = "../myapp"                         # REQUIRED: local app clone
+ui_dirs = ["crates/ui-egui/src"]              # REQUIRED: UI source dirs to inventory (PhotoCraft: crates/ui-egui/src)
+# id = "myapp"                                # default: name lowercased
+# upstream = "https://github.com/storytold/myapp"
+# base_branch = "main"                        # the branch the latest release tag is on (process/01-setup.md, step 2)
+# port_branch = "port/framework"
+# writing_base = "port/app-base"
+# integration = "{app.checkout}"              # app integration worktree (combines, compile gates, full runs)
+# snapshot = "{work.trees}/snap-app"          # read-only checkout at plan.app_base for phase 1-2 agents
+# production = "{work.trees}/prod"            # read-only checkout of the production branch at the last merged commit
+# release = "{work.trees}/release"            # optional: latest release
+# facade_dirs = ["crates/ui-egui/", "apps/photocraft/"]   # default: ui_dirs
+
+[plan]
+# base = "<framework commit>"                 # set in phase 0: the framework commit the plan is made against
+# app_base = "<app commit>"                   # set in phase 0: the app commit the plan is made against
+# linebase = "{work.plan}/LINEBASE"           # state file; port-set remap moves it
+# chunk_lines = 3000
+# answer_groups_per_agent = 3
+# max_error_rate = 0.10
+# max_wrong_answers = 0.10
+
+[racheck]
+# fw_base = "{work.trees}/racheck-fw"
+# app_base = "{work.trees}/racheck-app"
+# fw_target = "{work.trees}/racheck-fw-target"
+# app_target = "{work.trees}/racheck-app-target"
+# sockets = "{work.trees}"
+# memory_gb = 16
+# gap_patterns = ["Harness", "kittest", "run_ui", "__register_", "egui_kittest"]
+
+[build]
+# cl = "{framework.checkout}/tools/cl"
+# launcher = ""                               # prefix for every cargo build (CL_LAUNCHER), e.g. a jobserver wrapper
+# runner = ""                                 # prefix for test binaries (CL_RUNNER)
+# memory_cap = "{kit}/tools/capped {gb}"      # Linux with systemd: cap heavy jobs; default "" (no cap)
+# memory_gb = 28
+# test_threads = 4                           # default unset: the app manifest's [workspace.metadata.cl] test_threads applies
+# target_dir = ""                             # default: cl's <worktree>-target
+
+[pipeline]
+# batch_runner = "swarm"                      # swarm (claude CLI only) or workflow
+# parallel = 6
+# agent_files_over = 15
+# run_max_turns = 25
+# repairs = 1
+# agent_max_turns = 200
+# agent_round_turns = 100
+# agent_continue_rounds = 3
+# plancheck_max_turns = 8
+# fix_max_turns = 40
+# lookup_tools = "Read,Grep,Glob,Bash(git grep:*),Bash(git show:*),Bash(git ls-files:*)"
+# quota_command = ""                          # prints the 5-hour window use in percent; empty: never wait
+# quota_cap = 90
+
+# [pipeline.bundle]                           # port-set bundle budgets
+# context = 12
+# snippet_cap = 260
+# big = 800
+# big_context = 30
+# big_cap = 700
+# small = 120
+# small_edit = 30
+# excerpt_budget = 120000
+
+[models]
+# default = "sonnet"
+# inventory = "haiku"
+# area_map = "opus"
+# index = "opus"
+# questions = "opus"
+# answers = "haiku"
+# chunk_plan = "opus"
+# area_merge = "opus"
+# evaluate = "opus"
+# sheet_fix = "sonnet"
+# stubs = "sonnet"
+# plancheck = "sonnet"
+# decide = "opus"
+# consistency = "opus"
+# write = "sonnet"
+# write_shared = "opus"
+# retry = "opus"
+# review = "opus"
+# fix = "sonnet"
+# fix_retry = "opus"
+# compile_fix = "sonnet"
+# triage = "sonnet"
+# red_fixer = "sonnet"
+# red_fixer_framework = "opus"
+# red_integrator = "sonnet"
+
+# Areas are chosen in phase 1 from the inventory. Set ids are <id>-w<n>; contract ids <code>.<Kind><n>.
+# PhotoCraft's areas:
+# [[areas]]
+# id = "top"
+# code = "tp"
+# [[areas]]
+# id = "panels"
+# code = "pn"
+# [[areas]]
+# id = "dialogs"
+# code = "dl"
+# [[areas]]
+# id = "canvas-widgets"
+# code = "cw"
+# [[areas]]
+# id = "tools"
+# code = "tl"
+# [[areas]]
+# id = "framework-01"
+# code = "fx"
+# repos = ["fw"]
+# [[areas]]
+# id = "hub"
+# code = "cx"
+
+# Extra framework lints, added to framework.lints_file:
+# [[lints]]
+# pattern = '\bui\.horizontal\('
+# why = "use the framework's row layout"
+# level = "warn"
+# framework_rev = "<rev>"
+
+[land]
+# The landing tools scrub in scratch clones and print the push commands; they never push.
+# framework_via = "pr"                        # pr (one PR per build batch) or fast-forward
+# push_target = "https://github.com/storytold/myapp.git"
+# push_branch = "next"
+# sibling_framework = "../craft-libs"
+# rewrite_rules = "{kit}/tools/land/rewrite-rules.txt"
+# private_patterns = "~/.config/craft-ui-port-kit/private-patterns.txt"   # never commit this file
+# replace_message = ""                        # private `old==>new` commit-message replacements
+# known_idents = ""                           # commit identities the scan accepts
+
+[track]
+# The progress dashboard (tools/track.md).
+# dir = "{work.dir}/track"
+# out_dir = "{track.dir}/site"              # point your static server or tunnel here
+# stale_min = 20
+# serve_host = "127.0.0.1"                  # track serve (optional fallback)
+# serve_port = 8765
+# how_served = ""                           # recorded at setup: how you open the page
+# heads = ["app={app.integration}:{app.port_branch}", "framework={framework.integration}:HEAD"]
+
+[look]
+# Production against port captures in phase 8 (tools/look.md). Pages go to <track.out_dir>/look/.
+# driver = ""                               # the app's driver file (examples/photocraft/look-driver/driver.py)
+# production_binary = ""                    # production built with the control hooks (process/09, step 1)
+# port_binary = ""                          # the port's binary in the app integration tree's target dir
+# states_dir = "{work.dir}/look/states"
+# run_dir = "{work.dir}/look/run"
+# window = "1440x900"
+# threshold = 16                            # channel difference (of 255) that counts as visible

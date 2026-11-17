@@ -1,0 +1,40 @@
+# Framework lints: patterns `port-set check` matches against the lines a writer added or changed.
+# A hit with level "error" goes to the Errors section of the set's check.md: the writer or a repair call must remove
+# it. A hit with level "warn" goes to Warnings: it asks the writer or the reviewer to look; it is not always wrong.
+# port.toml points here with framework.lints_file; its own [[lints]] tables add to this list (process/config.md).
+#
+# Fields: pattern (a Python regex), why (the message shown with each hit), level ("error" or "warn"; default warn),
+# framework_rev (the framework revision the lint was written for). When the framework changes what a lint describes,
+# update or drop the lint in the same change and move its framework_rev.
+
+[[lints]]
+pattern = '\badd_enabled_ui\b'
+why = "egui `add_enabled_ui`: the framework replaces it; disable through the component's own `enabled` or disabled prop"
+level = "error"
+framework_rev = "next fd73622066"
+
+# The warnings below name patterns that review findings traced real defects to.
+
+[[lints]]
+pattern = 'response:\s*ui\.response\(\)'
+why = "a component output carries the parent Ui's response (`ui.response()`), not its own"
+level = "warn"
+framework_rev = "next fd73622066"
+
+[[lints]]
+pattern = '\brows_stamp\b'
+why = "`rows_stamp`: keyed rows need no stamp; a stamp names only the query and the filters that change the row set"
+level = "warn"
+framework_rev = "next fd73622066"
+
+[[lints]]
+pattern = '\bsub\([^)]*"[\w-]+"\)'
+why = "a `memory::sub` slot: check it is not a second store beside the gesture slot or a carried state"
+level = "warn"
+framework_rev = "next fd73622066"
+
+[[lints]]
+pattern = 'pointer::frame\([^)]*\)\.mods'
+why = "modifiers read from the pointer frame: an inferred fact unless no event carries them"
+level = "warn"
+framework_rev = "next fd73622066"

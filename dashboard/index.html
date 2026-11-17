@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Port progress</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <div class="bar">
+    <h1 id="title">Port progress</h1>
+    <span class="phase" id="phase"></span>
+    <span class="fresh" id="fresh" aria-live="polite">Loading</span>
+  </div>
+  <div class="banner" id="banner" role="alert"></div>
+  <div class="summary" id="summary"></div>
+</header>
+<main>
+  <div class="cols">
+    <div class="primary">
+      <section id="questions" aria-labelledby="questions-h"></section>
+      <section id="attention" aria-labelledby="attention-h"></section>
+      <section id="tasks" aria-labelledby="tasks-h">
+        <h2 id="tasks-h">Tasks <span class="n" id="tasks-n"></span></h2>
+        <label class="filter"><span class="sr">Filter tasks</span>
+          <input id="filter" type="search" placeholder="Filter by id, title, note, group" autocomplete="off">
+        </label>
+        <div id="task-list"></div>
+      </section>
+    </div>
+    <aside class="side">
+      <section id="rounds" aria-labelledby="rounds-h"></section>
+      <section id="eta" aria-labelledby="eta-h"></section>
+      <section id="heads" aria-labelledby="heads-h"></section>
+      <section id="log" aria-labelledby="log-h"></section>
+    </aside>
+  </div>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

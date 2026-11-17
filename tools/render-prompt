@@ -1,0 +1,668 @@
+#!/usr/bin/env python3
+"""render-prompt: fill a kit prompt or template from port.toml, or build a workflow's args JSON.
+
+usage:
+  render-prompt PROMPT [NAME=VALUE]... [--strict] [--keep-header] [--config PORT.TOML] [--set KEY=VALUE]...
+  render-prompt --list
+  render-prompt --workflow-args WORKFLOW [--stage S] [--only ID]... [--out FILE] [--config ...] [--set ...]
+
+Rendering a prompt
+  PROMPT is a name in prompts/ or templates/ (`p7-red-fixer`, `STATE.md`) or a file path. Every `{{NAME}}` is filled
+  from `config.placeholders()` (the keys in process/config.md that have a placeholder, plus {{KIT}} and {{RULES}}),
+  then from the NAME=VALUE arguments, which fill the per-call placeholders (AREA, SET, CHUNK, TRACK, ROUND, OUT,
+  TASK, PART, STAGE, CRATES) and may override any other. AREA_CODE is filled from AREA's `[[areas]]` entry when not
+  given. The result goes to stdout.
+  A placeholder left empty stays in the text as `{{NAME}}` and is named on stderr with the key that would fill it.
+  --strict makes that exit 1. A prompt file opens with a header for the lead (`# <file name>`, then a paragraph
+  ending "Fill the placeholders with `tools/render-prompt`."); it is left out unless --keep-header.
+
+Workflow args
+  --workflow-args prints the args JSON that a script in workflows/ reads, the same under tools/swarm.py and the
+  Workflow tool. With `phase1-inventory-map --stage inventory` it also writes the chunk statistics (count, total
+  lines, largest chunk, split files) to <work.inventory>/chunks.md. Every workflow gets:
+    workflow, stage, kit, the workspace paths (work, inventory, maps, plan, sheets, parts, sets, decide, runs,
+    state, ownership, settled), the snapshots (fw, appSrc), planBase, appPlanBase, models (the whole [models]
+    table), prompts (the workflow's prompts rendered from port.toml, per-call placeholders left in place for the
+    script to fill), areas (the [[areas]] tables with their map paths) and only (from --only).
+  Workflow-specific input (WORKFLOWS below):
+    phase1-inventory-map  stage inventory: chunks (the chunk split of process/02 step 1) and chunkSchema;
+                          stage areas: chunks and inventoryList (from the chunk files on disk);
+                          stages maps and index: areas joined with <inventory>/areas.json (their chunks) and moves.
+    phase2-part           chunks: each area map cut at section boundaries into plan chunks of about
+                          plan.chunk_map_lines lines, with the map's preamble; also written to <plan>/chunks.json,
+                          which the phase 2 prompts read.
+    phase2-*              all four also get answerGroupsPerAgent, maxErrorRate and maxWrongAnswers (the plan.* keys).
+    phase2-final          stage all (default) or evaluate (the evaluations alone, after a fix round).
+    phase2-fix            contract: one job per part of the contract ({id, file, crates, items}); the parts are
+                          <parts>/NN.md when they exist, else <plan>/contract.md is cut at its `### <crate>` headings
+                          into parts of about 120 rows and written there; sheets: the sets of the ownership file in
+                          jobs of four per area ({id, area, sets}); coverage: one job per gap list of
+                          <plan>/eval-coverage.md ({id, scope}); fixDir: <plan>/fix.
+    phase2-reconcile      partList (the NN.md files of <parts>, with their crates), fixDir, round (2, or the next
+                          unused eval round); stage evaluate runs the rebuild and the evaluations only.
+  Exit 1 when an input is missing (the message names it), 2 for a usage or config error.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from portkit import config  # noqa: E402
+
+KIT = config.KIT_ROOT
+PH = re.compile(r"\{\{([A-Z][A-Z0-9_]*)\}\}")
+HEADER_END = "Fill the placeholders with `tools/render-prompt`."
+
+
+class Missing(Exception):
+    pass
+
+
+# ---------------------------------------------------------------- prompts
+
+def find_prompt(name: str) -> Path:
+    p = Path(name).expanduser()
+    if p.is_file():
+        return p
+    for d in ("prompts", "templates"):
+        for cand in (KIT / d / name, KIT / d / f"{name}.md"):
+            if cand.is_file():
+                return cand
+    raise Missing(f"no prompt or template named {name!r} in prompts/, templates/ or as a path")
+
+
+def strip_header(text: str, stem: str) -> str:
+    """Drop the lead-facing header: `# <stem>` and the paragraph after it that ends with HEADER_END."""
+    lines = text.split("\n")
+    if not lines or lines[0].strip() != f"# {stem}":
+        return text
+    i = 1
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    j = i
+    while j < len(lines) and lines[j].strip():
+        j += 1
+    if not " ".join(lines[i:j]).rstrip().endswith(HEADER_END):
+        return text
+    while j < len(lines) and not lines[j].strip():
+        j += 1
+    return "\n".join(lines[j:])
+
+
+def fill(text: str, values: dict[str, str]) -> tuple[str, list[str]]:
+    """Fill every placeholder that has a non-empty value; return the text and the names left in place."""
+    left: list[str] = []
+
+    def one(m):
+        v = values.get(m.group(1))
+        if v:
+            return v
+        if m.group(1) not in left:
+            left.append(m.group(1))
+        return m.group(0)
+    return PH.sub(one, text), left
+
+
+def source_of(name: str) -> str:
+    if name in config.CALL_PLACEHOLDERS:
+        return f"per call, {name}=VALUE: {config.CALL_PLACEHOLDERS[name]}"
+    for k in config.KEYS:
+        if k.placeholder == name:
+            return f"config key {k.path}"
+    return "no config key or per-call placeholder has this name"
+
+
+def values_for(cfg: config.Config, call: dict[str, str]) -> dict[str, str]:
+    v = cfg.placeholders()
+    v.update(call)
+    if call.get("AREA") and "AREA_CODE" not in call:
+        try:
+            v["AREA_CODE"] = cfg.code_of(call["AREA"])
+        except config.ConfigError:
+            pass
+    return v
+
+
+def render(cfg: config.Config, name: str, call: dict[str, str] | None = None, keep_header: bool = False,
+           leave: set[str] = frozenset()) -> tuple[str, list[str]]:
+    p = find_prompt(name)
+    text = p.read_text()
+    if not keep_header:
+        text = strip_header(text, p.stem)
+    vals = {k: v for k, v in values_for(cfg, call or {}).items() if k not in leave}
+    out, left = fill(text, vals)
+    return out, [n for n in left if n not in leave]
+
+
+# ---------------------------------------------------------------- phase 1: the chunk split
+
+TEST_FILE = re.compile(r"(^|/)(tests\.rs|[^/]*_tests\.rs)$|(^|/)tests/")
+ITEM = re.compile(r"^(pub(\([^)]*\))?\s+)?(unsafe\s+)?(async\s+)?(fn|impl|mod|struct|enum|trait|const|static|type|macro_rules!)\b")
+INNER_FN = re.compile(r"^    (pub(\([^)]*\))?\s+)?(unsafe\s+)?(async\s+)?(const\s+)?fn\b")
+
+
+def git_files(tree: Path, dirs: list[str]) -> list[str]:
+    r = subprocess.run(["git", "-C", str(tree), "ls-files", "-z", "--", *dirs], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise Missing(f"git ls-files failed in {tree}: {r.stderr.strip()}")
+    return sorted(f for f in r.stdout.split("\0") if f.endswith(".rs"))
+
+
+def count_lines(p: Path) -> int:
+    with open(p, "rb") as f:
+        return sum(1 for _ in f)
+
+
+def cut_points(path: Path, limit: int) -> list[tuple[int, int]]:
+    """Line ranges (1-based, inclusive) of at most about `limit` lines, cut where an item starts.
+
+    A cut goes before the item's attributes and doc comments. Top-level items are preferred; inside one long block,
+    a method start (`    fn`) is used; with neither, the range is cut at the limit."""
+    lines = path.read_text(errors="replace").split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    n = len(lines)
+
+    def lead_in(i: int) -> int:   # move a cut above the attributes and doc comments of the item at line i (0-based)
+        while i > 0 and (lines[i - 1].lstrip().startswith(("#[", "///", "//!")) or lines[i - 1].strip().startswith("#![")):
+            i -= 1
+        return i
+
+    top = [lead_in(i) for i, l in enumerate(lines) if ITEM.match(l)]
+    inner = [lead_in(i) for i, l in enumerate(lines) if INNER_FN.match(l)]
+    ranges, start = [], 0
+    while n - start > limit:
+        hi = start + limit
+        cut = max((c for c in top if start < c <= hi), default=None)
+        if cut is None or cut - start < limit // 3:
+            cut = max((c for c in inner if start < c <= hi), default=cut)
+        if cut is None or cut <= start:
+            cut = hi
+        ranges.append((start + 1, cut))
+        start = cut
+    ranges.append((start + 1, n))
+    return ranges
+
+
+def tested_target(test: str, code: list[str]) -> str | None:
+    """The code file a test file most likely tests: `x/tests.rs` -> `x.rs` or `x/mod.rs`; `x_tests.rs` -> `x.rs`;
+    a file under `tests/` -> a code file with the same stem under the same crate; else the code file whose path
+    shares the longest prefix."""
+    p = Path(test)
+    cands: list[str] = []
+    if p.name == "tests.rs":
+        cands += [str(p.parent) + ".rs", str(p.parent / "mod.rs"), str(p.parent / "lib.rs")]
+    elif p.name.endswith("_tests.rs"):
+        cands.append(str(p.with_name(p.name[: -len("_tests.rs")] + ".rs")))
+    else:
+        parts = p.parts
+        if "tests" in parts:
+            root = Path(*parts[: parts.index("tests")])
+            stem = p.stem
+            cands += [c for c in code if Path(c).stem == stem and Path(c).is_relative_to(root)]
+    for c in cands:
+        if c in code:
+            return c
+    if not code:
+        return None
+    return max(code, key=lambda c: (len(Path(c).parent.parts) if Path(test).is_relative_to(Path(c).parent) else -1,
+                                    len(_common(c, test))))
+
+
+def _common(a: str, b: str) -> str:
+    i = 0
+    while i < min(len(a), len(b)) and a[i] == b[i]:
+        i += 1
+    return a[:i]
+
+
+def chunk_split(cfg: config.Config) -> list[dict]:
+    tree = cfg.path("app.snapshot")
+    if not tree.is_dir():
+        raise Missing(f"app.snapshot {tree} does not exist: make it in phase 0 (process/01-setup.md, step 5)")
+    dirs = cfg.require("app.ui_dirs")
+    limit = int(cfg.get("plan.chunk_lines"))
+    files = git_files(tree, dirs)
+    if not files:
+        raise Missing(f"no .rs files under {', '.join(dirs)} in {tree}")
+    tests = [f for f in files if TEST_FILE.search(f)]
+    code = [f for f in files if f not in set(tests)]
+    size = {f: count_lines(tree / f) for f in files}
+
+    chunks: list[dict] = []
+    cur: list[dict] = []
+    cur_lines = 0
+
+    def close():
+        nonlocal cur, cur_lines
+        if cur:
+            chunks.append({"files": cur, "lines": cur_lines})
+        cur, cur_lines = [], 0
+
+    by_dir: dict[str, list[str]] = {}
+    for f in code:
+        by_dir.setdefault(str(Path(f).parent), []).append(f)
+    for d in by_dir:   # path order: dicts keep insertion order and `code` is sorted
+        group = by_dir[d]
+        total = sum(size[f] for f in group)
+        if cur and cur_lines + total > limit:
+            close()      # keep a directory's files together when they fit in one chunk
+        for f in group:
+            n = size[f]
+            if n > limit:
+                close()
+                for a, b in cut_points(tree / f, limit):
+                    chunks.append({"files": [{"path": f, "from": a, "to": b, "lines": b - a + 1}], "lines": b - a + 1})
+                continue
+            if cur and cur_lines + n > limit:
+                close()
+            cur.append({"path": f, "lines": n})
+            cur_lines += n
+    close()
+
+    width = max(2, len(str(len(chunks) - 1)))
+    for i, c in enumerate(chunks):
+        c["id"] = str(i).zfill(width)
+        c["tests"] = []
+    holder: dict[str, dict] = {}
+    for c in chunks:
+        for f in c["files"]:
+            holder.setdefault(f["path"], c)   # a ranged file's tests go with its first range
+    for t in tests:
+        target = tested_target(t, code)
+        c = holder.get(target) if target else None
+        (c or chunks[-1])["tests"].append(t)
+    return [{"id": c["id"], "lines": c["lines"], "files": c["files"], "tests": c["tests"]} for c in chunks]
+
+
+def read_chunk_files(cfg: config.Config, ids: list[str]) -> list[dict]:
+    inv = cfg.path("work.inventory")
+    out, missing = [], []
+    for i in ids:
+        p = inv / f"chunk-{i}.json"
+        if not p.is_file():
+            missing.append(i)
+            continue
+        try:
+            d = json.loads(p.read_text())
+        except json.JSONDecodeError as e:
+            raise Missing(f"{p} does not parse: {e}")
+        d.setdefault("chunk", i)
+        out.append(d)
+    if missing:
+        raise Missing(f"chunk files missing in {inv}: {', '.join(missing)}; rerun those chunks with \"only\"")
+    return out
+
+
+def inventory_list(chunks: list[dict]) -> str:
+    rows = []
+    for ch in chunks:
+        for i, e in enumerate(ch.get("entries", [])):
+            files = ", ".join(f.get("path", "") for f in e.get("files", []))
+            rows.append(f"{ch['chunk']}.{i} | {e.get('kind')} | {e.get('name')} | {files} | {e.get('lines')}")
+    return "\n".join(rows)
+
+
+def joined_areas(cfg: config.Config) -> tuple[list[dict], list[dict]]:
+    if not cfg.areas:
+        raise Missing("port.toml has no [[areas]]: review inventory/areas.json and write them first "
+                      "(process/02-inventory-and-map.md, step 3)")
+    p = cfg.path("work.inventory") / "areas.json"
+    if not p.is_file():
+        raise Missing(f"{p} is missing: run stage inventory (or areas) first")
+    prop = json.loads(p.read_text())
+    if isinstance(prop, dict) and isinstance(prop.get("areas"), dict):   # tolerate a wrapped result
+        prop = prop["areas"]
+    chunks_of = {a["id"]: a.get("chunks", []) for a in prop.get("areas", [])}
+    areas, skipped = [], []
+    for a in cfg.areas:
+        if a["repos"] == ["fw"]:
+            skipped.append(a["id"])
+            continue
+        if a["id"] not in chunks_of:
+            print(f"render-prompt: area {a['id']} is in port.toml but not in {p}: it gets no chunks", file=sys.stderr)
+        areas.append({"id": a["id"], "code": a["code"], "description": a["description"],
+                      "chunks": chunks_of.get(a["id"], [])})
+    if skipped:
+        print(f"render-prompt: framework-only areas have no inventory and are not mapped: {', '.join(skipped)}",
+              file=sys.stderr)
+    return areas, prop.get("moves", [])
+
+
+def phase1_args(cfg: config.Config, a, base: dict) -> dict:
+    stage = a.stage or "inventory"
+    if stage not in ("inventory", "areas", "maps", "index"):
+        raise Missing(f"phase1-inventory-map: --stage must be inventory, areas, maps or index, got {stage!r}")
+    base["stage"] = stage
+    if stage in ("inventory", "areas"):
+        chunks = chunk_split(cfg)
+        base["chunks"] = chunks
+        if stage == "inventory":
+            base["chunkSchema"] = json.loads((KIT / "templates" / "inventory-chunk.schema.json").read_text())
+            big = max(chunks, key=lambda c: c["lines"])
+            total = sum(c["lines"] for c in chunks)
+            split = sorted({f["path"] for c in chunks for f in c["files"] if "from" in f})
+            summary = (f"{len(chunks)} chunks, {total} lines; largest {big['id']} ({big['lines']} lines); "
+                       f"{len(split)} files split into line ranges")
+            print(f"render-prompt: {summary}", file=sys.stderr)
+            out = Path(cfg.get("work.inventory")) / "chunks.md"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text("# Inventory chunks\n\n"
+                           f"- Chunks: {len(chunks)}\n- Total lines: {total}\n"
+                           f"- Largest chunk: {big['id']} ({big['lines']} lines)\n"
+                           f"- Files split into line ranges: {len(split)}\n"
+                           + "".join(f"  - {f}\n" for f in split))
+        else:
+            base["inventoryList"] = inventory_list(read_chunk_files(cfg, [c["id"] for c in chunks]))
+    else:
+        base["areas"], moves = joined_areas(cfg)
+        if stage == "maps":
+            base["moves"] = moves
+    return base
+
+
+# ---------------------------------------------------------------- phase 2: plan chunks
+
+SECTION = re.compile(r"^## ([A-Z]{1,3}\d+[a-z]?)\.?\s")
+
+
+def plan_chunks(cfg: config.Config, only: list[str]) -> list[dict]:
+    budget = int(cfg.get("plan.chunk_map_lines"))
+    index = cfg.path("work.maps") / "README.md"
+    index_lines = index.read_text().split("\n") if index.is_file() else []
+    out = []
+    for area in cfg.areas:
+        if only and area["id"] not in only:
+            continue
+        mp = Path(area["map"])
+        if not mp.is_file():
+            if area["repos"] == ["fw"]:
+                out.append({"id": f"{area['id']}-01", "area": area["id"], "map": None, "preamble": None,
+                            "lines": None, "sections": [], "index_rows": [],
+                            "note": "framework work outside the map: its inputs are the lead's list in <plan>/chunks/<id>/inputs.md"})
+                continue
+            raise Missing(f"area map {mp} is missing (area {area['id']})")
+        lines = mp.read_text().split("\n")
+        if lines and lines[-1] == "":
+            lines.pop()
+        first = next((i for i, l in enumerate(lines) if SECTION.match(l)), None)
+        if first is None:
+            raise Missing(f"{mp}: no section heading (`## <ID>. <name>`) found")
+        heads = [i for i in range(first, len(lines)) if lines[i].startswith("## ")]
+        bounds = [(h, (heads[k + 1] if k + 1 < len(heads) else len(lines))) for k, h in enumerate(heads)]
+        groups: list[list[tuple[int, int]]] = [[]]
+        for s, e in bounds:
+            g = groups[-1]
+            if g and (e - g[0][0]) > budget:
+                groups.append([])
+            groups[-1].append((s, e))
+        for n, g in enumerate(groups, 1):
+            ids = [m.group(1) for s, _ in g if (m := SECTION.match(lines[s]))]
+            rows = [k + 1 for k, l in enumerate(index_lines)
+                    if l.startswith("|") and area["id"] in l and any(re.search(rf"\b{re.escape(i)}\b", l) for i in ids)]
+            out.append({"id": f"{area['id']}-{n:02d}", "area": area["id"], "map": str(mp), "preamble": [1, first],
+                        "lines": [g[0][0] + 1, g[-1][1]], "sections": [lines[s][3:].strip() for s, _ in g],
+                        "index_rows": rows})
+    return out
+
+
+def phase2_part_args(cfg: config.Config, a, base: dict) -> dict:
+    chunks = plan_chunks(cfg, a.only)
+    base["chunks"] = chunks
+    if not a.only:
+        p = cfg.path("work.plan") / "chunks.json"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(chunks, indent=1) + "\n")
+        print(f"render-prompt: {len(chunks)} plan chunks written to {p}", file=sys.stderr)
+    return phase2_common(cfg, base)
+
+
+# ---------------------------------------------------------------- phase 2: final, fix, reconcile
+
+ROW = re.compile(r"^\|\s*[a-z]{2}\.[A-Za-z]\d+\s*\|")
+SET_HEAD = re.compile(r"^#{2,6}\s+`?([a-z][a-z0-9-]*-w\d+)`?(?:\s|:|$)")
+PART_FILE = re.compile(r"^\d\d\.md$")
+PART_ROWS = 120
+SETS_PER_JOB = 4
+
+
+def phase2_common(cfg: config.Config, base: dict) -> dict:
+    base["answerGroupsPerAgent"] = int(cfg.get("plan.answer_groups_per_agent"))
+    base["maxErrorRate"] = float(cfg.get("plan.max_error_rate"))
+    base["maxWrongAnswers"] = float(cfg.get("plan.max_wrong_answers"))
+    return base
+
+
+def phase2_final_args(cfg: config.Config, a, base: dict) -> dict:
+    if a.stage not in (None, "all", "evaluate"):
+        raise Missing(f"phase2-final: --stage must be all or evaluate, got {a.stage!r}")
+    base["stage"] = a.stage or "all"
+    return phase2_common(cfg, base)
+
+
+def contract_parts(cfg: config.Config) -> list[dict]:
+    """The contract's parts as fix jobs. Existing <parts>/NN.md files are used as they are; otherwise contract.md is
+    cut at its `### <crate>` headings into parts of about PART_ROWS rows, the text before the first heading going to
+    00-head.md."""
+    parts_dir = cfg.path("work.parts")
+    files = sorted(f for f in parts_dir.glob("*.md") if PART_FILE.match(f.name)) if parts_dir.is_dir() else []
+    if files:
+        return [part_job(f.name, f.read_text().split("\n")) for f in files]
+    contract = cfg.path("work.plan") / "contract.md"
+    if not contract.is_file():
+        raise Missing(f"{contract} is missing: run phase2-final (consolidate) first")
+    lines = contract.read_text().split("\n")
+    heads = [i for i, l in enumerate(lines) if l.startswith("### ")]
+    if not heads:
+        raise Missing(f"{contract}: no `### <crate>` heading to cut the contract at")
+    crates = [lines[h : (heads[k + 1] if k + 1 < len(heads) else len(lines))] for k, h in enumerate(heads)]
+    parts_dir.mkdir(parents=True, exist_ok=True)
+    (parts_dir / "00-head.md").write_text("\n".join(lines[: heads[0]]).rstrip() + "\n")
+    groups: list[list[list[str]]] = [[]]
+    for c in crates:
+        if groups[-1] and sum(len([l for l in x if ROW.match(l)]) for x in groups[-1]) + len([l for l in c if ROW.match(l)]) > PART_ROWS:
+            groups.append([])
+        groups[-1].append(c)
+    out = []
+    for n, g in enumerate(groups, 1):
+        name = f"{n:02d}.md"
+        text = [l for c in g for l in c]
+        (parts_dir / name).write_text("\n".join(text).rstrip() + "\n")
+        out.append(part_job(name, text))
+    print(f"render-prompt: contract cut into {len(out)} parts in {parts_dir}", file=sys.stderr)
+    return out
+
+
+def part_job(name: str, text: list[str]) -> dict:
+    n = name.removesuffix(".md")
+    return {"id": f"contract-{n}", "file": name,
+            "crates": [l[4:].strip().strip("`") for l in text if l.startswith("### ")],
+            "items": len([l for l in text if ROW.match(l)])}
+
+
+def sheet_jobs(cfg: config.Config) -> list[dict]:
+    own = cfg.path("work.ownership")
+    if not own.is_file():
+        raise Missing(f"{own} is missing: run phase2-final (consolidate) first")
+    by_area: dict[str, list[str]] = {}
+    for line in own.read_text().split("\n"):
+        m = SET_HEAD.match(line)
+        if m and m.group(1) not in by_area.setdefault(cfg.area_of(m.group(1)), []):
+            by_area[cfg.area_of(m.group(1))].append(m.group(1))
+    jobs = []
+    for area, sets in by_area.items():
+        for i in range(0, len(sets), SETS_PER_JOB):
+            jobs.append({"id": f"sheets-{area}-{i // SETS_PER_JOB + 1}", "area": area, "sets": sets[i : i + SETS_PER_JOB]})
+    return jobs
+
+
+GAP_HEAD = re.compile(r"^###\s+(.*(?:without a set|no writer set).*?)(?:\s+\((\d+)\))?\s*$", re.I)
+
+
+def coverage_jobs(cfg: config.Config) -> list[dict]:
+    report = cfg.path("work.plan") / "eval-coverage.md"
+    if not report.is_file():
+        return []
+    jobs = []
+    for line in report.read_text().split("\n"):
+        m = GAP_HEAD.match(line)
+        if m and m.group(2) != "0":
+            jobs.append({"id": f"coverage-{len(jobs) + 1:02d}", "scope": m.group(0)[4:].strip()})
+    return jobs
+
+
+def phase2_fix_args(cfg: config.Config, a, base: dict) -> dict:
+    base["fixDir"] = str(cfg.path("work.plan") / "fix")
+    base["contract"] = contract_parts(cfg)
+    base["sheets"] = sheet_jobs(cfg)
+    base["coverage"] = coverage_jobs(cfg)
+    if a.only:
+        for k in ("contract", "sheets", "coverage"):
+            base[k] = [j for j in base[k] if j["id"] in a.only]
+    return phase2_common(cfg, base)
+
+
+def phase2_reconcile_args(cfg: config.Config, a, base: dict) -> dict:
+    if a.stage not in (None, "all", "evaluate"):
+        raise Missing(f"phase2-reconcile: --stage must be all or evaluate, got {a.stage!r}")
+    base["stage"] = a.stage or "all"
+    base["fixDir"] = str(cfg.path("work.plan") / "fix")
+    parts_dir = cfg.path("work.parts")
+    files = sorted(f for f in parts_dir.glob("*.md") if PART_FILE.match(f.name)) if parts_dir.is_dir() else []
+    if not files:
+        raise Missing(f"no contract parts in {parts_dir}: run phase2-fix first")
+    base["partList"] = [part_job(f.name, f.read_text().split("\n")) for f in files]
+    first = cfg.areas[0]["id"] if cfg.areas else None
+    done = len(list(cfg.path("work.plan").glob(f"eval-{first}-r*.md"))) if first else 0
+    base["round"] = done + 2
+    return phase2_common(cfg, base)
+
+
+# ---------------------------------------------------------------- workflow table
+
+WORKFLOWS = {
+    "phase1-inventory-map": {
+        "prompts": {"inventory": "p1-inventory-chunk", "areas": "p1-areas", "area_map": "p1-area-map",
+                    "index": "p1-map-index"},
+        "build": phase1_args},
+    "phase2-part": {
+        "prompts": {"questions": "p2-questions", "answer": "p2-answer", "chunk_plan": "p2-chunk-plan"},
+        "build": phase2_part_args},
+    "phase2-final": {
+        "prompts": {"area_merge": "p2-area-merge", "conflict_check": "p2-conflict-check",
+                    "consolidate": "p2-consolidate", "evaluate_area": "p2-evaluate-area",
+                    "answer_accuracy": "p2-answer-accuracy", "size_audit": "p2-size-audit"},
+        "build": phase2_final_args},
+    "phase2-fix": {"prompts": {"fix_round": "p2-fix-round"}, "build": phase2_fix_args},
+    "phase2-reconcile": {"prompts": {"fix_round": "p2-fix-round", "evaluate_area": "p2-evaluate-area"},
+                         "build": phase2_reconcile_args},
+}
+
+
+def workflow_args(cfg: config.Config, a) -> dict:
+    name = Path(a.workflow_args).name.removesuffix(".js")
+    if name not in WORKFLOWS:
+        raise Missing(f"no args builder for workflow {name!r}; known: {', '.join(WORKFLOWS)}")
+    spec = WORKFLOWS[name]
+    leave = set(config.CALL_PLACEHOLDERS)
+    prompts, unset = {}, set()
+    for role, pname in spec["prompts"].items():
+        text, left = render(cfg, pname, leave=leave)
+        prompts[role] = text
+        unset.update(left)
+    if unset:
+        print("render-prompt: unset in the prompts: " + ", ".join(f"{{{{{n}}}}} ({source_of(n)})" for n in sorted(unset)),
+              file=sys.stderr)
+    g = cfg.get
+    base = {
+        "workflow": name, "stage": a.stage, "kit": str(KIT),
+        "work": g("work.dir"), "inventory": g("work.inventory"), "maps": g("work.maps"), "plan": g("work.plan"),
+        "sheets": g("work.sheets"), "parts": g("work.parts"), "sets": g("work.sets"), "decide": g("work.decide"),
+        "runs": g("work.runs"), "state": g("work.state"), "ownership": g("work.ownership"),
+        "settled": g("work.settled"), "fw": g("framework.snapshot"), "appSrc": g("app.snapshot"),
+        "planBase": g("plan.base"), "appPlanBase": g("plan.app_base"),
+        "models": {k.path.split(".", 1)[1]: cfg.values[k.path] for k in config.KEYS if k.path.startswith("models.")},
+        "prompts": prompts,
+        "areas": [dict(x) for x in cfg.areas],
+        "only": a.only,
+    }
+    build = spec.get("build")
+    return build(cfg, a, base) if build else base
+
+
+# ---------------------------------------------------------------- CLI
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("prompt", nargs="?")
+    ap.add_argument("assign", nargs="*", metavar="NAME=VALUE")
+    ap.add_argument("--workflow-args", metavar="WORKFLOW")
+    ap.add_argument("--stage")
+    ap.add_argument("--only", action="append", default=[])
+    ap.add_argument("--out")
+    ap.add_argument("--list", action="store_true")
+    ap.add_argument("--strict", action="store_true")
+    ap.add_argument("--keep-header", action="store_true")
+    ap.add_argument("--config")
+    ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE")
+    a = ap.parse_args(argv)
+    overrides = {}
+    for kv in a.set:
+        if "=" not in kv:
+            ap.error(f"--set needs KEY=VALUE: {kv}")
+        k, v = kv.split("=", 1)
+        overrides[k] = v
+    try:
+        cfg = config.load(a.config, overrides)
+    except (config.ConfigError, ValueError) as e:
+        print(f"render-prompt: config: {e}", file=sys.stderr)
+        return 2
+    try:
+        if a.list:
+            vals = values_for(cfg, {})
+            for n, v in vals.items():
+                print(f"{{{{{n}}}}}\t{v or '(unset)'}")
+            for n, d in config.CALL_PLACEHOLDERS.items():
+                print(f"{{{{{n}}}}}\t(per call) {d}")
+            return 0
+        if a.workflow_args:
+            if a.prompt:
+                ap.error("--workflow-args takes no PROMPT")
+            text = json.dumps(workflow_args(cfg, a), indent=1, ensure_ascii=False) + "\n"
+        else:
+            if not a.prompt:
+                ap.error("give a PROMPT, --list or --workflow-args")
+            call = {}
+            for kv in a.assign:
+                if "=" not in kv or not PH.fullmatch("{{" + kv.split("=", 1)[0] + "}}"):
+                    ap.error(f"expected NAME=VALUE with an upper-case placeholder name: {kv}")
+                k, v = kv.split("=", 1)
+                call[k] = v
+            text, left = render(cfg, a.prompt, call, keep_header=a.keep_header)
+            if left:
+                print("render-prompt: unset: " + ", ".join(f"{{{{{n}}}}} ({source_of(n)})" for n in left),
+                      file=sys.stderr)
+                if a.strict:
+                    sys.stdout.write(text)
+                    return 1
+    except Missing as e:
+        print(f"render-prompt: {e}", file=sys.stderr)
+        return 1
+    except config.ConfigError as e:
+        print(f"render-prompt: config: {e}", file=sys.stderr)
+        return 2
+    if a.out:
+        Path(a.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(a.out).write_text(text)
+    else:
+        sys.stdout.write(text)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

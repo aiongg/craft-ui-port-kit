@@ -1,0 +1,49 @@
+#!/bin/bash
+# make-snapshots: create the read-only snapshot worktrees of phase 0, step 5 (process/01-setup.md).
+#
+# usage: make-snapshots [--release TAG]
+#
+# Creates detached worktrees from port.toml (PORT_KIT_CONFIG, or ./port.toml):
+#   framework.snapshot  of framework.checkout at plan.base
+#   app.snapshot        of app.checkout at plan.app_base
+#   app.production      of app.checkout at plan.app_base
+#   app.release         of app.checkout at TAG (only with --release TAG; the key is optional)
+# Needs plan.base and plan.app_base (phase 0, step 4). Prints each resolved path and commit. Refuses to
+# overwrite: when a target path already exists, it stops before creating anything.
+# Agents never edit these trees.
+. "$(dirname "$(readlink -f "$0")")/portkit/lib.sh"
+
+tag=
+while [ $# -gt 0 ]; do
+  case $1 in
+    --release) [ $# -ge 2 ] || die "--release needs a tag"; tag=$2; shift 2 ;;
+    *) die "unknown argument: $1 (see --help)" ;;
+  esac
+done
+
+plan_base=$(cfgr plan.base)
+app_base=$(cfgr plan.app_base)
+fw=$(cfgr framework.checkout)
+app=$(cfgr app.checkout)
+fw_snap=$(cfgr framework.snapshot)
+app_snap=$(cfgr app.snapshot)
+prod=$(cfgr app.production)
+rel=
+if [ -n "$tag" ]; then rel=$(cfgr app.release); fi
+
+# repo target commit, one per line
+jobs=("$fw|$fw_snap|$plan_base" "$app|$app_snap|$app_base" "$app|$prod|$app_base")
+[ -z "$tag" ] || jobs+=("$app|$rel|$tag")
+
+for j in "${jobs[@]}"; do
+  IFS='|' read -r repo path rev <<<"$j"
+  [ ! -e "$path" ] || die "$path already exists; remove the worktree first (git worktree remove) or choose another path"
+  git -C "$repo" rev-parse --verify --quiet "$rev^{commit}" >/dev/null || die "$rev is not a commit in $repo"
+done
+
+for j in "${jobs[@]}"; do
+  IFS='|' read -r repo path rev <<<"$j"
+  mkdir -p "$(dirname "$path")"
+  git -C "$repo" worktree add --detach "$path" "$rev" >/dev/null 2>&1 || die "git worktree add failed for $path"
+  echo "$path  ($(git -C "$path" rev-parse --short HEAD))"
+done

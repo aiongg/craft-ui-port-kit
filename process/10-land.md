@@ -1,0 +1,104 @@
+# Phase 9: land
+
+Phase 9 puts the port where others can build it: the framework changes on the framework's port branch (`framework.branch`), and the app on its landing branch, pinned to the framework revision that landed. Before anything leaves the machine, production's newest changes are merged into the port, and every commit to be pushed is scanned and scrubbed of anything that names the developer, their machine or their local tools. The landing tools prepare all of this in scratch clones and print the push commands; they never push.
+
+| | |
+|---|---|
+| Starts when | The lead accepted the look and behaviour ([09-look-and-behaviour.md](09-look-and-behaviour.md)). Framework changes may also land earlier, after any build batch passes its red rounds. |
+| Ends when | The framework changes are on `framework.branch` (merged PR or fast-forward); the app's landing branch is scrubbed, pinned to that framework revision and pushed by the developer; its CI result is recorded. |
+| Agents | Production merge: one agent per merge area (`prompts/p9-production-merge.md`). Landing: the lead. |
+| Builds | One build and full run after the production merge; CI after the push. |
+| Output | `<work.landing>/merge-plan.md` and the merge's area reports; scan reports and landing clones under `work.landing`. |
+
+Record the phase: `tools/track phase 9 "land"`, and put the landing tasks on the board: `tools/track status land-framework todo`, `tools/track status land-app todo`.
+
+## Why the framework lands on its port branch
+
+The framework's changes go to `framework.branch`, never to the framework's main branch, until every app has ported. Apps that have not ported still build against main's old UI code; merging the port's framework into main earlier would break them all at once. `framework.branch` merges to main through a reviewed PR after the last app ports ([rules/framework-decisions.md](../rules/framework-decisions.md)). Each app pins a framework revision by git rev, so an app keeps building while the branch moves.
+
+## Step 1: sync with upstream
+
+Merge upstream's new work into the port before landing, and once a day during the port (`rules/lead-rules.md`, "Sync once a day"), at the heads as they are when the sync starts. Never chase commits that land during a sync.
+
+**Framework.** Merge the new commits of `framework.branch` into the port's framework integration branch, as a merge commit.
+
+- Keep every upstream code change: fixes, new APIs, new crates.
+- The port's framework changes stay. Where an upstream fix lands in code the port rewrote, carry the fix's intent into the port's version. If that needs a design call (the fix collides with a framework mechanism), stop and decide it as a lead question.
+- Tests upstream adds or changes stay as upstream wrote them. Where one tests code the port replaced, carry it to the port's code with the same assertions.
+- `Cargo.toml`: the union of the crate lists, with the port's pins and patch section kept. `Cargo.lock`: take the port's side while resolving, then let one resolve add upstream's new packages. CI workflow files: upstream's version.
+- Check `cl check` for each crate with a conflict and each new crate, then compare `git diff <upstream head> <synced head> --stat` with `git diff <old upstream head> <old port head> --stat`: only the port's changes, and nothing of upstream's code lost.
+
+Once a branch has been pushed, sync it with merges only. Rebasing or force-pushing a branch that others have pulled breaks their history.
+
+**App: the production merge.** Production keeps changing during the port. Merge production's main branch (`app.base_branch`) into the port branch, area by area, with one build at the end:
+
+1. **Measure** without writing: the merge base, upstream's commits since it, and the conflicted files from `git merge-tree --write-tree <port branch> <production head>`. Count the files that conflict, the files production modified that the port deleted (modify/delete), and production's new files that call UI code the port replaced.
+2. **Write the merge plan**, `<work.landing>/merge-plan.md`, which every area agent reads:
+   - "Read this first": the numbers and how they were measured, the merge base;
+   - what production changed, in themes, with its PRs or commits;
+   - the mechanism (below) and the test policy;
+   - every conflicted file in exactly one area, with its conflict hunks and its class: **P** merge both sides by hand, **R** the port replaced this code (carry production's intent to the target the plan names), **C** the framework already covers it (record which file and test), **T** a test;
+   - the modify/delete files and what happens to each (the port's deletion is kept; production's intent goes to the port's replacement);
+   - framework items production's changes need, for one framework agent;
+   - areas with their model, call estimate and dependencies; the combine order; the owed lines (registry files such as module lists and shortcut tables get their lines from the areas' reports, applied by the lead);
+   - risks and questions for the developer (architecture only).
+3. **Skeleton.** In a scratch clone, check out the port branch and run `git merge --no-commit <production head>`. Stage everything with the conflict markers left in, keep the port's deletion for every modify/delete file, and commit this as the skeleton on `merge/main`. It gives the final file list.
+4. **Areas.** Each area branches from `merge/main` in its own code-only tree and resolves only its own files (`prompts/p9-production-merge.md` with `{{AREA}}` and `{{TASK}}`; task `prod-merge-<area>`). No builds. Production's tests: new ones are kept (rewritten against the port's harness when they drive replaced UI code, or listed as framework trials); tests the port cut stay cut.
+5. **Combine** the area branches into `merge/main` in the plan's order, add the owed lines, and check that `git grep -nE '^(<<<<<<<|=======$|>>>>>>>)'` returns nothing.
+6. **Build and test once**: `tools/compile-gate prod-merge` and `tools/test-run prod-merge --app`. Failures go back to the area that owns the file, as a small red round ([08-tests-and-red-rounds.md](08-tests-and-red-rounds.md)).
+7. **Fold into one merge commit** with both parents: `git commit-tree <final tree> -p <port branch head> -p <production head>`, then fast-forward the port branch to it. No rebase.
+8. Move `app.production` to the merged production commit, and record the merge: `tools/track event merge "production <sha> merged into the port"`.
+
+## Step 2: the pre-push scrub
+
+Nothing that names the developer, their machine or their local tools may reach a public repository: absolute home paths, local tree names, host names, private domains, user names, emails, private tracker ids. This holds for files and for history (commit messages, authors, every added line).
+
+- **Patterns.** Generic shapes ship with the kit (`tools/portkit/scrub.py`: home, cache and scratch paths, emails other than noreply, IPv4 addresses other than 127.0.0.1, private host name suffixes). Names that identify you live only in your private patterns file, `land.private_patterns`, never in any repository: a scrub list that names you is itself the leak.
+- **Scan.** `tools/land/scan-range.py <clone> <range>` checks authors, committers, messages and added lines of every commit in the range, with both pattern sets. Commit identities you accept go in `land.known_idents`.
+- **Rewrite.** The landing tools rewrite only the range being landed, with `git filter-repo`: the generic `land.rewrite_rules`, local framework paths replaced by `land.sibling_framework`, and your private message replacements (`land.replace_message`). Then they scan again; the second scan must be clean.
+- **First push of a branch:** the range is its whole history from the upstream commit it started at.
+
+The kit repository itself uses the same idea through `tools/kit-check` and its pre-push hook (CONTRIBUTING.md).
+
+## Step 3: land the framework
+
+```sh
+tools/land/land-framework.sh <framework tree> <ref>
+```
+
+It clones the tree into `work.landing` (never touching your trees), fetches `framework.branch` from `framework.repo`, and checks that `<ref>` is a fast-forward of it. If not, it stops and lists upstream's missing commits: sync first (step 1). Then it scans and scrubs the range `framework.branch..<ref>` (step 2) and prints the landing commands. With `land.framework_via = "pr"` (the default), it prints the commands to push a branch and open one PR per build batch, which a framework maintainer fast-forwards onto `framework.branch`. With `fast-forward`, it prints the push to `framework.branch`.
+
+You read the scan report, then push from the clone yourself (the push uses your accounts). Record it: `tools/track event landing "framework <sha> to <framework.branch>" --task land-framework`. The landing tools post their own run events.
+
+After the push, move the framework integration branch to the landed head before the next combine, so the next landing is again a fast-forward. The scrub changed commit ids, not code: `git diff <local head> <landed head>` shows only scrubbed lines.
+
+## Step 4: land the app
+
+```sh
+tools/land/land-app.sh <app tree> <ref> <landed framework rev>
+```
+
+It clones the tree into `work.landing`, finds the merge base with production's `app.base_branch`, and scans and scrubs that range, replacing local framework paths with `land.sibling_framework`. Its last commit pins every framework dependency to the landed framework revision by git rev (`tools/land/pin-framework.py`, for every URL in `framework.patch_urls`) and drops the local framework patch block. It prints the push command to `land.push_target`, branch `land.push_branch`.
+
+1. Pin only a framework revision that is already on `framework.branch` upstream (step 3 first). An app pinned to an unpushed or scrubbed-away commit does not build for anyone else.
+2. Regenerate `Cargo.lock` in the landing clone against the pinned revision with one resolve, and commit it. The lock must name no local path and no framework URL other than `framework.repo`.
+3. Read the scan report and the pin's changed files, then push from the clone yourself.
+4. Record it: `tools/track event landing "app <sha> to <land.push_branch>" --task land-app`.
+
+**Who lands what (recommended; not yet confirmed by the framework maintainers).** Framework changes reach `framework.branch` as one PR per build batch, which a framework maintainer fast-forwards. The porter pushes the app to the app repository's landing branch directly. The scrub always runs first.
+
+## Step 5: CI
+
+The push starts the repositories' CI. Upstream CI may refuse things a local build accepts, for example a git dependency from outside the project's organisation, or a path dependency: the pin step exists for that.
+
+- Record the result for each repository: `tools/track event landing "CI <passed|failed> at <sha>" --task land-app`.
+- A failure is fixed on the port branch (a small red round when it is a test, a direct fix when it is a pin or a lint), then landed again through steps 2 to 4.
+
+## Exit
+
+- [ ] Production's main, as of the last sync, is merged into the port with one merge commit; the build and full run after it pass; `app.production` is at the merged commit.
+- [ ] Every pushed range was scanned with the generic and private patterns, and the second scan was clean.
+- [ ] The framework changes are on `framework.branch`, and the framework integration branch is at the landed head.
+- [ ] The app's landing branch pins the landed framework revision by git rev, with no local path left, and is pushed.
+- [ ] CI results for both repositories are recorded on the dashboard and in `STATE.md`.
+- [ ] `tools/track md` has written `STATUS.md` for the app's port branch.

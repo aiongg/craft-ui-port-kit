@@ -1,0 +1,218 @@
+# track: the progress dashboard
+
+`tools/track` records the port's progress in one store in the workspace, and `dashboard/` shows it as one local page: the phase, every task with its state, what is blocked and on what, open questions, test counts per round, stale agents, and a log of events.
+
+Agents and the lead record judgement (state, blockers, questions) with `track` commands. Kit tools record what they know (a gate's result, a round's counts) themselves, through `portkit.track`. Nobody keeps the page current by hand.
+
+It needs Python 3.11 or later and nothing else: no external fonts or scripts, no account, no hosted service. It works offline.
+
+## Contents
+
+- [Viewing the page](#viewing-the-page)
+- [Commands](#commands)
+- [States, steps and questions](#states-steps-and-questions)
+- [Keeping the dashboard current](#keeping-the-dashboard-current)
+- [Python API for kit tools](#python-api-for-kit-tools)
+- [Import formats](#import-formats)
+- [Store format](#store-format)
+- [Config keys](#config-keys)
+
+## Viewing the page
+
+Every write folds the events into `state.json` and publishes the page into `track.out_dir` (default `<workspace>/track/site`): `index.html`, `app.js`, `app.css`, `state.json` and `state.js`. The page re-reads its data every 4 seconds. It follows the system's light or dark setting and works at phone width.
+
+The kit never picks a host and never exposes anything itself. In phase 0 (process/01-setup.md) the lead asks the developer which of these they want, and records the answer in port.toml as `track.how_served`:
+
+| Option | How | Answers from the page |
+|---|---|---|
+| Your own static server or tunnel | Point it at `track.out_dir`. Any server that serves files works; the page only reads `state.json`. | No: answer in chat with the lead or with `track answer` |
+| Open the file | Open `<out_dir>/index.html` in a browser. The page loads `state.js`, because a `file://` page cannot fetch `state.json`. | No |
+| `track serve` | Serves `out_dir` on `track.serve_host:track.serve_port` (default `127.0.0.1:8765`). | Yes: option buttons and a text field on each open question |
+| Terminal only | `track show`, `track alerts` | - |
+
+`track serve` is a plain fallback (Python's `http.server`). It binds to localhost by default; to reach it from another device, put your own tunnel in front of it. It accepts answers only as `POST /api/answer` with a JSON body and refuses requests whose `Origin` names another site.
+
+## Commands
+
+Run `tools/track --help` for the summary. `--config PATH` before the command picks a port.toml; otherwise the usual resolution applies (`PORT_KIT_CONFIG`, `./port.toml`, a parent directory). Every command that writes also publishes.
+
+### For agents
+
+| Command | Records |
+|---|---|
+| `track status TASK STATE [NOTE] [--on WHAT] [--link NAME=PATH\|URL] [--model M] [--calls N]` | A state change. Creates the task if it is new. `--title` and `--group` set the task's title and group. |
+| `track step TASK STEP [NOTE]` | The start of a step: `plan`, `write`, `compile`, `test`, `fix`, `merge` (any lowercase word works). Sets the task `running`, unless it is `waiting` or `blocked`. While the port is paused it records nothing and exits 3. |
+| `track ask TASK "QUESTION" [--option A]... [--for developer\|lead]` | A question (default `--for lead`). Prints its id (`q1`, `q2`, ...) and sets the task `waiting` on whom it asks. |
+| `track answer QID "ANSWER" [--by NAME]` | The answer (default `--by lead`). The task stays `waiting` until its agent or the lead moves it. |
+| `track round N --pass P --fail F [--log PATH] [--data KEY=VALUE]...` | A full test run's result. The page draws failing tests per round. |
+| `track event KIND TEXT [--task ID] [--link NAME=URL]... [--data KEY=VALUE]...` | A free event: `merge`, `landing`, `decision`, or any lowercase kind that is not a command name. |
+| `track phase N [NOTE]` | The port's current phase, in the process/ numbering (0 Setup to 9 Land). |
+
+### For the lead and the developer
+
+| Command | Does |
+|---|---|
+| `track show [TASK] [--json]` | Text view: phase, counts, tasks by state with age, open questions. With TASK: its history, links, questions and last tool event. |
+| `track alerts [--stale-min N]` | One line per item that needs action (below). Always exits 0, so a poll loop never stops on it. |
+| `track md [--out PATH]` | Writes STATUS.md (phase, tasks by state, questions, rounds) for the app's port branch. Default path: `<app.integration>/STATUS.md`; `--out -` prints it. |
+| `track publish` | Folds every event again and rewrites `out_dir`. Writes do this already; run it after changing the dashboard files or to rebuild a deleted `state.json`. |
+| `track serve [--port P] [--host H]` | See [Viewing the page](#viewing-the-page). |
+| `track pause [NOTE]` / `track resume [NOTE]` | The pause switch: while paused, `track step` refuses to start a step. |
+| `track import sheets [DIR]` | One task per writer sheet (default `work.sheets`). |
+| `track import tracks FILE [--group G]` | One task per red-round track. |
+
+`track alerts` prints these lines, in this order:
+
+```
+paused: <note>
+stale <task>: running (write), no update for 34 min (limit 20): <note>
+blocked <task> on <what>: <note>
+failed <task>: <note>
+question q3 for developer (<task>, 12 min): <text> [options: A | B]
+answered q3 (<task> still waiting) by developer: <answer>
+```
+
+### For shell tools
+
+`track run KIND [--task ID] [--log PATH] -- CMD...` runs CMD with its output passed through, then posts one event: `<kind> ok|failed (<duration>): <last output line>`, with the exit status, the duration and the command in its data, and `--log` as a link. It exits with CMD's status. Without a configured store it runs CMD and records nothing.
+
+### Exit codes
+
+`0` done; `2` usage or config error (the message names it); `3` `track step` while paused. `track run` exits with the command's status (127 when it cannot start). `track alerts` always exits 0.
+
+## States, steps and questions
+
+| State | Meaning |
+|---|---|
+| `todo` | Created, not started |
+| `running` | An agent works on it |
+| `review` | Handed back; waits for the lead's review or merge |
+| `waiting` | Waits on an answer or another task (`--on`) |
+| `blocked` | Cannot continue until something outside it changes (`--on`) |
+| `failed` | A tool or agent run failed and needs the lead (set by tools such as swarm.py) |
+| `done` | Finished |
+
+Rules the fold applies:
+
+- A note belongs to the state it was written for. A state or step change without a note clears the old note.
+- `--on` is kept only while the task is `waiting` or `blocked`.
+- `todo` and `done` clear the step. Other states keep the current step.
+- `track ask` sets the task `waiting` on `developer` or `lead`, unless it is `done`.
+- `--calls N` adds one agent run to the task; the page shows the sum over all runs.
+- A task is stale when it is `running` or in `review` and no event has named it for `track.stale_min` minutes. Tool events count: a writer whose port-set calls keep posting is not stale.
+
+## Keeping the dashboard current
+
+These are rules, not suggestions. The dashboard is only as good as its last event.
+
+### Agents
+
+`rules/agent-common.md`, "Tracking", holds the agents' rules, and every prompt in `prompts/` repeats them with its own steps: `track step` at each step start (exit 3 means paused: stop and report), `track status` on every state change with `--on` for a blocker, `track ask` for every question, and `track status TASK review "summary" --calls N` on hand-back.
+
+### The lead
+
+`rules/lead-rules.md`, "The dashboard", holds the lead's duties: put each task on the board before its agent starts, `track phase` at each phase change, every developer question on the board and in chat, `track alerts` in the monitor loop, `track event` for merges, landings and decisions, and `track pause` around shared-branch moves.
+
+### Tools
+
+Everything a script knows, the script records. Agents report only judgement.
+
+- Every long-running kit command posts one event when it ends, success or failure, with its duration, log path and key numbers. Python tools wrap their body in `track.recorded()`; shell tools run their main command through `track run`.
+- `test-run` posts `track.round()` itself for every full run (pass, fail, log); `compare-runs.py` posts the round only with `--round N`, else a `compare` event with the new failures by track.
+- `diag-cut.py` links each track's packet to its task.
+- `port-set` sets each set's task from its own exit states (OPEN, BLOCKED, OUT OF TURNS) and records each model call's tokens on the set's task.
+- `swarm.py` creates one task per job and moves it through `todo`, `running`, `done` or `failed`.
+- `track publish` derives the rest: stale tasks, branch heads that moved (`track.heads`), and a projected finish.
+
+## Python API for kit tools
+
+```python
+import sys; from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # tools/
+from portkit import track
+
+track.event(kind, text, task=None, data=None, links=None)
+with track.recorded(kind, task=None) as rec:
+    ...
+    rec.result(text, log=None, data=None, ok=None)
+track.status(task, state, note=None, on=None)
+track.round(n, passed, failed, log=None, data=None)
+```
+
+- None of these raise. A bad argument or a store error prints one warning to stderr per process, and the tool carries on.
+- Without a configured store (no port.toml found and `PORT_KIT_TRACK_DIR` unset) they do nothing, so the tools run the same outside a port workspace.
+- `recorded()` posts `<kind> ok|failed (<duration>): <text>` when the block ends. The outcome is failed when the block raises, exits non-zero, or calls `rec.result(..., ok=False)` (a gate that found errors without raising). On an exception the text ends with its first line. `data` gets `seconds`; `log` becomes a link.
+- Link and log paths that exist from the current directory are stored as absolute paths, except a relative path that exists under `track.out_dir`: it stays relative, and the dashboard opens it as a link relative to the page.
+
+## Import formats
+
+**Sheets.** Every `*.md` file in the sheet directory is one task. The id is the file name without `.md` (`panels-w26`). The title is the first `# ` heading, without a leading `<id> —`. The group is the area (`[[areas]]` id, else the id without `-w<n>`). A `Model: <name>` in the lines before the first `## ` sets the model. The sheet path becomes the task's `sheet` link.
+
+**Tracks.** A plain text file, one track per line: `TRACK_ID [TITLE...]`. Blank lines and lines starting with `#` are skipped. All tracks get the group `tracks`, or `--group G`.
+
+```
+# red round 3
+t1 panels and docking
+t2 dialogs: footer order
+t3
+```
+
+Imports never change a task's state. Running one again adds only new tasks and changed titles, groups or links.
+
+## Store format
+
+The store is `track.dir` (default `<workspace>/track`):
+
+| File | Content |
+|---|---|
+| `events.jsonl` | Every event, append-only, one JSON object per line |
+| `state.json` | The fold of every event. Derived; never edit it. Delete it and any command rebuilds it. |
+| `.lock` | Serialises the fold and the publish (`flock`). Appends never take it. |
+| `.folded` | The byte offset of `events.jsonl` that `state.json` covers |
+
+**Writing at once.** Each event is one `write()` to a file opened with `O_APPEND`, so lines from several writers never mix. After its append a writer takes the lock and folds, unless another writer's fold already covered its line. The last writer to fold sees every line, so `state.json` always ends consistent with the events. The fold skips a last line without a newline (still being written) and counts unreadable lines in `bad_lines`. The store needs a local file system: `O_APPEND` is not atomic over NFS.
+
+**Events.** Every event has `t` (UTC, `YYYY-MM-DDTHH:MM:SSZ`), `id` (random hex) and `kind`. Order is file order. Text fields are capped at 2,000 characters.
+
+| Kind | Fields |
+|---|---|
+| `status` | `task`, `state`, `note`, `on`, `links`, `model`, `calls` |
+| `step` | `task`, `step`, `note` |
+| `task` | `task`, `title`, `group`, `model`, `links` (from imports and `--title`) |
+| `ask` | `task`, `text`, `options`, `for` |
+| `answer` | `qid`, `text`, `by` |
+| `round` | `n`, `pass`, `fail`, `log`, `data` |
+| `phase` | `n`, `note` |
+| `pause`, `resume` | `note` |
+| `head` | `label`, `sha`, `prev`, `ref`, `path` (posted by the fold when a watched head moved) |
+| any other | `text`, `task`, `ok` (tool results), `data`, `links` |
+
+**State.** `state.json` (and `state.js`, the same object assigned to `window.TRACK_STATE`) holds:
+
+| Field | Content |
+|---|---|
+| `version`, `generated`, `events`, `bytes`, `bad_lines` | Format version, fold time, event count, bytes folded, unreadable lines |
+| `app`, `how_served`, `stale_min` | From port.toml |
+| `phase` | `{n, name, note, t}` or null |
+| `paused` | `{on, note, t}` |
+| `counts` | Tasks per state |
+| `tasks` | By id, in creation order: `title`, `group`, `state`, `step`, `note`, `on`, `links`, `model`, `calls`, `runs`, `created`, `updated` (last event naming it), `changed` (last state or step change), `started`, `ended`, `last` (last tool event), `history` (last 40 state changes) |
+| `questions` | `{id, task, text, options, for, t, answer: {text, by, t} or null}` |
+| `rounds` | `{n, pass, fail, log, data, t}` in order |
+| `heads` | By label: `{sha, prev, ref, path, since}` |
+| `stale` | Stale tasks at fold time (the page and `track alerts` recompute this against the clock) |
+| `eta` | Projection: `done`, `left`, `rate_recent` (tasks done per hour over the last 24 h, or since the first start when that is shorter), `rate_all`, `median_task_h` (first `running` to `done`), `finish_low` and `finish_high` (the faster and the slower rate), `groups` (left and total per group), `steps` (median minutes per step, measured from step and state changes), `basis` |
+| `log` | The newest 400 events, newest first: `{t, kind, task, text, ok, links, data, by}` |
+
+## Config keys
+
+The `[track]` section of port.toml; process/config.md has the full table.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `dir` | `{work.dir}/track` | The store |
+| `out_dir` | `{track.dir}/site` | Where the page and its data are published |
+| `stale_min` | `20` | Minutes without an event before a running or review task is stale |
+| `serve_host`, `serve_port` | `127.0.0.1`, `8765` | Where `track serve` listens |
+| `how_served` | unset | How the developer opens the page, as recorded at setup |
+| `heads` | the app port branch and the framework integration tree's HEAD | Heads watched for moves, `LABEL=REPO_PATH:REF` |

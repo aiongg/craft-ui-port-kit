@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""Write the framework path patches into the app's Cargo.toml, so the app builds against a local framework tree.
+
+usage: patch-framework [--dry-run] [APP-CARGO.TOML APP-CARGO.LOCK [FW-CHECKOUT]]
+
+Defaults: app.integration's Cargo.toml and Cargo.lock, and framework.integration.
+
+The generated block (between the BEGIN/END markers) holds the whole
+[patch.crates-io] table plus one [patch."<framework url>"] table per URL in
+framework.patch_urls, so reruns replace it cleanly. Existing [patch.crates-io]
+lines outside the block are absorbed into it, except the egui family (taken
+from the framework) and git patches of the framework itself, which become
+framework path patches. Prints the block; exit status 1 when a package the lock
+file takes from a framework URL is missing in the checkout.
+The patch is for local builds only: commit it on a local branch and never push it.
+"""
+import re, sys, tomllib
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from portkit import config, track
+
+BEGIN, END = "# BEGIN port-kit framework patch", "# END port-kit framework patch"
+
+def inline(d):
+    return "{ " + ", ".join(f'{k} = "{v}"' for k, v in d.items()) + " }"
+
+def table_lines(text, header):
+    m = re.search(rf"^\[{re.escape(header)}\]\s*$", text, re.M)
+    if not m:
+        return None, None, []
+    nxt = re.search(r"^\[", text[m.end():], re.M)
+    end = m.end() + nxt.start() if nxt else len(text)
+    return m.start(), end, text[m.end():end].splitlines()
+
+def main():
+    args = [a for a in sys.argv[1:] if a != "--dry-run"]
+    dry = "--dry-run" in sys.argv
+    if len(args) not in (0, 2, 3):
+        sys.exit(__doc__)
+    cfg = config.load()
+    app = cfg.path("app.integration")
+    toml_p, lock_p = (Path(args[0]), Path(args[1])) if args else (app / "Cargo.toml", app / "Cargo.lock")
+    fw = Path(args[2]).resolve() if len(args) == 3 else cfg.path("framework.integration")
+    URLS = [u.rstrip("/") for u in cfg.require("framework.patch_urls")]
+    text = toml_p.read_text()
+
+    dirs = {}  # package name -> directory in the checkout
+    for f in sorted(fw.glob("**/Cargo.toml")):
+        if "target" in f.relative_to(fw).parts or ".git" in f.relative_to(fw).parts:
+            continue
+        try:
+            name = tomllib.loads(f.read_text()).get("package", {}).get("name")
+        except tomllib.TOMLDecodeError:
+            continue
+        if name:
+            dirs.setdefault(name, f.parent)
+
+    fw_patch = tomllib.loads((fw / "Cargo.toml").read_text()).get("patch", {}).get("crates-io", {})
+    crates_io = {}
+    for k, v in fw_patch.items():
+        crates_io[k] = {"path": str(fw / v["path"])} if "path" in v else v
+
+    # the app's crates-io lines not owned by the framework survive; old block included.
+    old = re.search(rf"^{BEGIN}\n.*?^{END}\n?", text, re.M | re.S)
+    scan = (old.group(0) if old else "") + text
+    extras = []
+    for ln in scan.splitlines():
+        m = re.match(r"^([A-Za-z0-9_-]+)\s*=\s*(\{.*\})\s*$", ln)
+        if not m or m.group(1) in crates_io or m.group(1) in {e[0] for e in extras}:
+            continue
+        in_ci = any(ln in section for section in [table_lines(text, "patch.crates-io")[2],
+                                                   table_lines(old.group(0), "patch.crates-io")[2] if old else []])
+        if not in_ci or re.search(r"/egui(\.git)?\b", ln) or any(u in ln for u in URLS):
+            continue
+        extras.append((m.group(1), m.group(2)))
+
+    lock = tomllib.loads(lock_p.read_text())
+    per_url = {u: {} for u in URLS}
+    for p in lock["package"]:
+        src = p.get("source", "")
+        for u in URLS:
+            if src.startswith("git+" + u):
+                per_url[u][p["name"]] = None
+    needed = sorted({n for d in per_url.values() for n in d})
+    missing = [n for n in needed if n not in dirs]
+
+    out = [BEGIN, "[patch.crates-io]"]
+    out += [f"{k} = {inline(v)}" for k, v in crates_io.items()]
+    out += [f"{k} = {v}" for k, v in extras]
+    for u in URLS:
+        out += ["", f'[patch."{u}"]']
+        out += [f'{n} = {{ path = "{dirs[n]}" }}' for n in sorted(per_url[u]) if n in dirs and n not in crates_io]
+    out.append(END)
+    block = "\n".join(out) + "\n"
+
+    print(block, end="")
+    print(f"\npackages: {len(needed)}; not found: {len(missing)}", file=sys.stderr)
+    for n in missing:
+        print(f"  not found in {fw}: {n}", file=sys.stderr)
+
+    if not dry:
+        if old:
+            text = text.replace(old.group(0), "")
+        s, e, _ = table_lines(text, "patch.crates-io")
+        if s is not None:
+            text = text[:s] + text[e:]
+        toml_p.write_text(text.rstrip("\n") + "\n\n" + block)
+    return 1 if missing else 0
+
+
+if __name__ == "__main__":
+    with track.recorded("patch-framework") as rec:
+        rc = main()
+        rec.result("patched" if rc == 0 else "packages missing in the framework checkout")
+    sys.exit(rc)

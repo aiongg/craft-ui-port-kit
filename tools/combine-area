@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Combine written set trees, each as its net change, onto the writing base in an integration worktree as branch
+# area/NAME, then run combine-lost and print the touched crates.
+#
+# Usage: [REPO=fw|app] [BASE=REF] combine-area NAME SET[@REV]...
+#   A set without @REV lands at its tree's HEAD.
+#   REPO=fw (default): worktree framework.integration, base framework.writing_base.
+#   REPO=app: worktree app.integration, base app.writing_base.
+#   A set's tree for REPO is <work.trees>/<set>-<repo> when that exists (the set's second repo), else <work.trees>/<set>.
+#   A set's base commit is <work.sets>/<set>/base-<repo>. For REPO=fw, <work.sets>/<set>/landed (a set already in the
+#   writing base) takes precedence, so only its later commits land.
+# Where two sets edit the same lines the later set wins (-X theirs); the files that decided are printed so the
+# combine can check that both sets' intent survives.
+set -eu
+. "$(dirname "$(readlink -f "$0")")/portkit/lib.sh"
+track_self combine-area "$0" "$@"
+
+REPO=${REPO:-fw}
+case $REPO in
+  fw)  J=$(cfgr framework.integration); BASE=${BASE:-$(cfgr framework.writing_base)} ;;
+  app) J=$(cfgr app.integration);       BASE=${BASE:-$(cfgr app.writing_base)} ;;
+  *)   die "REPO must be fw or app" ;;
+esac
+sets=$(cfgr work.sets); trees=$(cfgr work.trees)
+export REPO J
+[ $# -ge 2 ] || die "usage: [REPO=fw|app] [BASE=REF] combine-area NAME SET[@REV]..."
+name=$1; shift
+cd "$J"
+# cl rewrites Cargo.lock on every build; a dirty lock would abort the switch and leave the old tree checked.
+git checkout -q -- Cargo.lock 2>/dev/null || true
+git switch -q -C "area/$name" "$BASE"
+for a in "$@"; do
+  s=${a%@*}; r=HEAD; [[ $a == *@* ]] && r=${a#*@}
+  t=$trees/$s; [[ -d $t-$REPO ]] && t=$t-$REPO
+  b=$( { [[ $REPO == fw ]] && cat "$sets/$s/landed" 2>/dev/null; } || cat "$sets/$s/base-$REPO")
+  h=$(git -C "$t" rev-parse "$r^{commit}")
+  n=$(git rev-list --count "$b..$h")
+  [[ $n == 0 ]] && { echo "$s: no commits, skipped"; continue; }
+  # Each set lands as its net change (one commit), so a set whose review drops a line it wrote does not drop the same
+  # line an earlier set wrote.
+  sq=$(git log --reverse --format='- %s' "$b..$h" | git commit-tree "$(git -C "$t" rev-parse "$h^{tree}")" -p "$b" -F <(printf '%s: net change of %s commits\n\n' "$s" "$n"; cat))
+  if git cherry-pick --allow-empty "$sq" >/dev/null 2>&1; then echo "$s: $n commits"; continue; fi
+  # A change the base already holds (a fix that landed earlier) picks as empty: skip it.
+  if [[ -z $(git diff --name-only --diff-filter=U) ]] && git diff --cached --quiet && git diff --quiet; then
+    git cherry-pick --skip >/dev/null 2>&1; echo "$s: $n commits, already in the base"; continue
+  fi
+  u=$(git diff --name-only --diff-filter=U | tr '\n' ' '); git cherry-pick --abort
+  if ! git cherry-pick --allow-empty -X theirs "$sq" >/dev/null 2>&1; then
+    # -X theirs leaves a file the later set deletes and an earlier set edited unmerged; the later set's deletion wins.
+    gone=$(git status --porcelain | sed -n 's/^UD //p' | tr '\n' ' ')
+    [[ -n $gone ]] && git rm -q $gone
+    if [[ -n $(git diff --name-only --diff-filter=U) ]] || ! git -c core.editor=true cherry-pick --continue >/dev/null 2>&1; then
+      echo "$s: CONFLICT (not resolved by -X theirs) in $(git diff --name-only --diff-filter=U | tr '\n' ' ')"; git cherry-pick --abort; exit 1
+    fi
+    u="$u(deleted over an earlier edit: $gone)"
+  fi
+  echo "$s: $n commits; -X theirs decided: $u"
+done
+"$TOOLS/combine-lost" "$@"
+echo "crates: $(git diff --name-only "$BASE" HEAD | python3 -I "$TOOLS/portkit/gates.py" packages "$J" | tr '\n' ' ')"

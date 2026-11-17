@@ -1,0 +1,281 @@
+#!/usr/bin/env python3
+"""init-workspace: create a port workspace, its port.toml and STATE.md, and check the prerequisites.
+
+usage: init-workspace DIR [--app-name NAME] [--framework PATH] [--app PATH] [--ui-dir DIR]...
+                          [--how-served TEXT] [--force]
+
+Phase 0, step 2 (process/01-setup.md). Safe to run again on an existing workspace: it never overwrites port.toml
+or STATE.md (unless --force), creates only what is missing, and repeats the checks.
+
+  1. port.toml: copied from templates/port.toml.example. --app-name, --framework, --app and --ui-dir fill the
+     REQUIRED keys (app.name, framework.checkout, app.checkout, app.ui_dirs) in the copy.
+  2. The workspace layout: every configured workspace directory that lies inside DIR (trees, inventory, port-map,
+     plan with sheets and contract-parts, sets, decide, runs, scip, swarm, landing, the dashboard store).
+  3. STATE.md from templates/STATE.md, filled from port.toml (placeholders without a value stay as `{{NAME}}`).
+     On a rerun it refills the "Pins" rows (plan bases, framework branch, port and writing branches) from the
+     current port.toml and keeps every other line, so run it again after setting plan.base and framework.branch.
+  4. plan.linebase: once plan.base is set (phase 0, step 4), writes it into the LINEBASE file when that file does
+     not exist yet. Run init-workspace again after setting plan.base.
+  5. Prerequisites: Python 3.11+, git (both checkouts must answer `git rev-list -1 HEAD` and
+     `git cat-file -e HEAD^{tree}`; a failure means a damaged or shallow clone), a Rust toolchain (cargo), rust-analyzer, the claude CLI, gh, node (only for
+     workflow scripts), systemd-run (only when build.memory_cap uses tools/capped), the framework's cl
+     (build.cl), and the required config keys.
+  6. The dashboard: how the developer wants to view the page (tools/track.md, "Viewing the page"). --how-served
+     TEXT records the answer in port.toml as track.how_served. Without it, on a terminal, it asks; otherwise it
+     prints the question for the lead to ask the developer, then run again with --how-served. For an unattended
+     start use `--how-served "terminal only (track show, track alerts)"`: it needs no page and can be changed later.
+
+Exit 0 when the workspace exists (missing keys and optional tools are listed); 1 when a hard prerequisite (Python
+3.11+, git) is missing; 2 for a usage error.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from portkit import config  # noqa: E402
+
+KIT = config.KIT_ROOT
+TOOLS = KIT / "tools"
+
+DIR_KEYS = ["work.trees", "work.inventory", "work.maps", "work.plan", "work.sheets", "work.parts", "work.sets",
+            "work.decide", "work.runs", "work.scip", "work.swarm", "work.landing", "track.dir"]
+
+VIEW_OPTIONS = [
+    ("own", "Your own static server or tunnel, pointed at the page directory (track.out_dir). Give its URL."),
+    ("file", "Open the page file directly in a browser (<out_dir>/index.html)."),
+    ("serve", "`tools/track serve`: a plain local server on track.serve_host:track.serve_port, which also takes "
+              "answers to questions from the page."),
+    ("terminal", "No page: `track show` and `track alerts` in a terminal."),
+]
+
+
+def set_key(text: str, section: str, key: str, value) -> str:
+    """Set `key = value` in [section]: replace the first line that sets the key or shows it commented out, else add
+    the line under the section header, else add the section."""
+    line = f"{key} = {json.dumps(value)}"
+    lines = text.split("\n")
+    head = next((i for i, l in enumerate(lines) if l.strip() == f"[{section}]"), None)
+    if head is None:
+        return text.rstrip("\n") + f"\n\n[{section}]\n{line}\n"
+    end = next((i for i in range(head + 1, len(lines)) if lines[i].startswith("[")), len(lines))
+    pat = re.compile(rf"^\s*#?\s*{re.escape(key)}\s*=")
+    for i in range(head + 1, end):
+        if pat.match(lines[i]):
+            lines[i] = line
+            return "\n".join(lines)
+    lines.insert(head + 1, line)
+    return "\n".join(lines)
+
+
+def write_toml(path: Path, text: str) -> None:
+    tomllib.loads(text)   # never leave a port.toml that does not parse
+    path.write_text(text)
+
+
+def prerequisites(cfg: config.Config) -> tuple[list[str], list[str], bool]:
+    ok, missing, hard = [], [], False
+    if sys.version_info >= (3, 11):
+        ok.append(f"python {sys.version.split()[0]}")
+    else:
+        missing.append("Python 3.11 or later"); hard = True
+    tools = [("git", True, "git"), ("cargo", False, "a Rust toolchain (cargo)"),
+             ("rust-analyzer", False, "rust-analyzer (racheck, SCIP indexes)"), ("claude", False, "the claude CLI"),
+             ("gh", False, "gh (landing)"), ("node", False, "node 18+ (only to run workflow scripts)")]
+    if "capped" in (cfg.get("build.memory_cap") or ""):
+        tools.append(("systemd-run", False, "systemd-run (build.memory_cap uses tools/capped)"))
+    for exe, is_hard, what in tools:
+        if shutil.which(exe):
+            ok.append(exe)
+        else:
+            missing.append(what)
+            hard |= is_hard
+    cl = cfg.get("build.cl")
+    if cl and Path(cl).is_file():
+        ok.append("cl")
+    elif cfg.get("framework.checkout"):
+        missing.append(f"the framework's cl at {cl} (build.cl)")
+    return ok, missing, hard
+
+
+PIN_ROWS = {"Framework plan base": "plan.base", "App plan base": "plan.app_base",
+            "Framework branch": "framework.branch", "Contract stubs branch": "framework.writing_base",
+            "App port branch": "app.port_branch", "App writing base": "app.writing_base"}
+
+
+def refill_pins(text: str, cfg: config.Config) -> tuple[str, list[str]]:
+    """Set each Pins-table row of STATE.md that port.toml has a value for; other lines stay as written."""
+    changed, out = [], []
+    for line in text.split("\n"):
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if line.startswith("|") and len(cells) == 2 and cells[0] in PIN_ROWS:
+            val = cfg.get(PIN_ROWS[cells[0]])
+            if val and cells[1] != val:
+                line = f"| {cells[0]} | {val} |"
+                changed.append(cells[0])
+        out.append(line)
+    return "\n".join(out), changed
+
+
+def repo_problems(cfg: config.Config) -> list[str]:
+    """A damaged or shallow clone passes `git --version` and fails when history or the head tree is read."""
+    bad = []
+    for key in ("framework.checkout", "app.checkout"):
+        d = cfg.get(key)
+        if not d or not Path(d).is_dir():
+            continue
+        for args in (["rev-list", "-1", "HEAD"], ["cat-file", "-e", "HEAD^{tree}"]):
+            r = subprocess.run(["git", "-C", d, *args], capture_output=True, text=True)
+            if r.returncode != 0:
+                msg = (r.stderr.strip().splitlines() or ["failed"])[0]
+                bad.append(f"{key} ({d}): `git {' '.join(args)}` failed ({msg}); the clone looks damaged or "
+                           "shallow: fetch it again (git fetch --unshallow, or clone afresh)")
+                break
+    return bad
+
+
+def ask_how_served(cfg: config.Config) -> str | None:
+    out = cfg.get("track.out_dir")
+    print(f"\nHow do you want to view the progress dashboard? The page is written to {out}.")
+    for n, (_, text) in enumerate(VIEW_OPTIONS, 1):
+        print(f"  {n}. {text}")
+    try:
+        ans = input("Choice (number), or describe your setup in your own words: ").strip()
+    except EOFError:
+        return None
+    if ans.isdigit() and 1 <= int(ans) <= len(VIEW_OPTIONS):
+        key, text = VIEW_OPTIONS[int(ans) - 1]
+        if key == "own":
+            url = input("Its URL (empty if none): ").strip()
+            return f"own server or tunnel on {out}" + (f": {url}" if url else "")
+        if key == "serve":
+            return f"track serve on {cfg.get('track.serve_host')}:{cfg.get('track.serve_port')}"
+        if key == "file":
+            return f"file: {out}/index.html"
+        return "terminal only (track show, track alerts)"
+    return ans or None
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("dir")
+    ap.add_argument("--app-name")
+    ap.add_argument("--framework", metavar="PATH")
+    ap.add_argument("--app", metavar="PATH")
+    ap.add_argument("--ui-dir", action="append", default=[])
+    ap.add_argument("--how-served", metavar="TEXT")
+    ap.add_argument("--force", action="store_true", help="overwrite port.toml and STATE.md")
+    a = ap.parse_args(argv)
+
+    ws = Path(a.dir).expanduser().resolve()
+    ws.mkdir(parents=True, exist_ok=True)
+    toml = ws / config.CONFIG_NAME
+    os.environ[config.ENV_CONFIG] = str(toml)   # the dashboard events of this run go to the new workspace
+    notes = []
+
+    fills = [("framework", "checkout", str(Path(a.framework).expanduser().resolve()) if a.framework else None),
+             ("app", "name", a.app_name),
+             ("app", "checkout", str(Path(a.app).expanduser().resolve()) if a.app else None),
+             ("app", "ui_dirs", a.ui_dir or None)]
+    if not toml.exists() or a.force:
+        text = (KIT / "templates" / "port.toml.example").read_text()
+        for sec, key, val in fills:
+            if val is not None:
+                text = set_key(text, sec, key, val)
+        write_toml(toml, text)
+        print(f"wrote {toml}")
+    else:
+        print(f"kept {toml}")
+        if any(v is not None for _, _, v in fills):
+            notes.append("port.toml exists: --app-name, --framework, --app and --ui-dir were not applied; edit it")
+    if a.how_served:
+        write_toml(toml, set_key(toml.read_text(), "track", "how_served", a.how_served))
+        print(f"recorded track.how_served: {a.how_served}")
+
+    from portkit import track   # after PORT_KIT_CONFIG names the workspace
+    with track.recorded("init-workspace") as rec:
+        try:
+            cfg = config.load(str(toml))
+        except (config.ConfigError, ValueError) as e:
+            print(f"init-workspace: {toml}: {e}", file=sys.stderr)
+            return 2
+        for w in cfg.warnings:
+            print(f"init-workspace: warning: {w}", file=sys.stderr)
+
+        made = []
+        for k in DIR_KEYS:
+            p = Path(cfg.get(k))
+            if p.is_relative_to(ws) and not p.exists():
+                p.mkdir(parents=True)
+                made.append(str(p.relative_to(ws)))
+        print("created: " + (", ".join(made) if made else "nothing (layout complete)"))
+
+        state = Path(cfg.get("work.state"))
+        if not state.exists() or a.force:
+            r = subprocess.run([sys.executable, str(TOOLS / "render-prompt"), "STATE.md", "--keep-header",
+                                "--config", str(toml)], capture_output=True, text=True)
+            if r.returncode == 0:
+                state.write_text(r.stdout)
+                print(f"wrote {state}")
+            else:
+                notes.append(f"STATE.md not written: {r.stderr.strip()}")
+        else:
+            new, changed = refill_pins(state.read_text(), cfg)
+            if changed:
+                state.write_text(new)
+                print(f"kept {state}; refilled from port.toml: {', '.join(changed)}")
+            else:
+                print(f"kept {state}")
+
+        lb = Path(cfg.get("plan.linebase"))
+        base = cfg.get("plan.base")
+        if base and not lb.exists():
+            lb.parent.mkdir(parents=True, exist_ok=True)
+            lb.write_text(base + "\n")
+            print(f"wrote {lb}: {base}")
+        elif not base:
+            notes.append("plan.base is not set yet: after phase 0 step 4, run init-workspace again to seed "
+                         f"{lb.name}")
+
+        ok, missing, hard = prerequisites(cfg)
+        for m in repo_problems(cfg):
+            missing.append(m)
+        print("found: " + ", ".join(ok))
+        for m in missing:
+            print(f"missing: {m}")
+        unset = [k.path for k in config.KEYS if k.required and not cfg.get(k.path)]
+        for k in unset:
+            print(f"set in port.toml: {k} ({config.BY_PATH[k].doc})")
+
+        how = cfg.get("track.how_served")
+        if not how:
+            if sys.stdin.isatty() and sys.stdout.isatty():
+                how = ask_how_served(cfg)
+                if how:
+                    write_toml(toml, set_key(toml.read_text(), "track", "how_served", how))
+                    print(f"recorded track.how_served: {how}")
+            if not how:
+                print("\nAsk the developer how they want to view the dashboard (tools/track.md, \"Viewing the page\"):")
+                for n, (_, text) in enumerate(VIEW_OPTIONS, 1):
+                    print(f"  {n}. {text}")
+                print(f"Then record it: init-workspace {ws} --how-served \"<their answer, with the URL>\"")
+        else:
+            print(f"dashboard: {how}")
+
+        for n in notes:
+            print(f"note: {n}")
+        rec.result(f"{ws}: {len(made)} dirs created, {len(missing)} prerequisites missing, {len(unset)} keys to set",
+                   data={"missing": missing, "unset": unset}, ok=not hard)
+    return 1 if hard else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

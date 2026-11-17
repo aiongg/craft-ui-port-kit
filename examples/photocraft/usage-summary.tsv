@@ -1,0 +1,13 @@
+step	model	calls	sets	turns	cost_usd	secs	mean_cost_usd_per_call
+agent	opus	22	22	2288	145.05	17870	6.59
+agent	sonnet	86	86	7978	206.56	38537	2.40
+agent-cont	opus	21	14	1109	52.62	6932	2.51
+agent-cont	sonnet	31	18	1315	22.17	4281	0.72
+fix-racheck-fix	sonnet	1	1	7	0.59	28	0.59
+fix-review	opus	5	5	229	19.74	2198	3.95
+fix-review	sonnet	198	181	859	110.20	6228	0.56
+plancheck	sonnet	303	249	1049	162.56	8316	0.54
+repair	opus	7	7	84	10.90	911	1.56
+repair	sonnet	124	123	1102	49.03	7058	0.40
+write	opus	14	13	264	29.71	3584	2.12
+write	sonnet	148	140	2076	160.37	34975	1.08

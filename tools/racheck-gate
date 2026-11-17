@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""racheck-gate: rust-analyzer errors across everything the combined trees changed, before any compile.
+
+usage: racheck-gate LABEL [--wait SECONDS] [--config PORT.TOML]
+
+Takes the app files (*.rs) changed between app.writing_base and HEAD in app.integration, overlays the framework files
+changed between framework.writing_base and HEAD in framework.integration on the framework daemon's checkout, and asks
+the app daemon (`racheck.py serve app`; the framework daemon must also be running for the overlay's files to resolve)
+for diagnostics. Then lists every `mod x;` line whose module file is missing (rust-analyzer reports neither a missing
+module file nor the errors inside it).
+
+Writes <work.runs>/LABEL/racheck-gate.json (the daemon's reply, input of gate-classify.py) and
+racheck-gate-mods.txt. Prints counts. Exit status: 0 with no errors and no missing module files, 1 otherwise, 2 when the
+daemon is not running. --wait: wait up to this many seconds for the daemon's socket to appear.
+"""
+import argparse
+import json
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import racheck
+from portkit import config, gates, track
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("label")
+    ap.add_argument("--wait", type=int, default=0)
+    ap.add_argument("--config")
+    a = ap.parse_args()
+    cfg = config.load(a.config)
+    rd = gates.run_dir(cfg, a.label)
+    app, fw = cfg.path("app.integration"), cfg.path("framework.integration")
+    sock = Path(racheck.sock_path(cfg, "app"))
+    end = time.time() + a.wait
+    while not sock.exists() and time.time() < end:
+        time.sleep(2)
+    with track.recorded("racheck-gate") as rec:
+        files = gates.changed_files(app, cfg.require("app.writing_base"), ".rs")
+        overlay = gates.changed_files(fw, cfg.require("framework.writing_base"), ".rs")
+        print(f"app files {len(files)}, framework overlay {len(overlay)}")
+        reply = racheck.check(cfg, app, "app", files, fw_tree=fw, fw_changed=overlay)
+        if reply is None:
+            rec.result("app daemon not running")
+            sys.exit("racheck-gate: app daemon not running: start it with `racheck.py serve app`")
+        (rd / "racheck-gate.json").write_text(json.dumps(reply, indent=1))
+        tracked = subprocess.run(["git", "-C", str(app), "ls-files", "*.rs"], capture_output=True, text=True, check=True).stdout
+        mods = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "mod-lines.py")], input=tracked, cwd=app,
+                              capture_output=True, text=True).stdout
+        (rd / "racheck-gate-mods.txt").write_text(mods)
+        errors = [d for d in reply.get("diagnostics", []) if d["severity"] == "error"]
+        nmods = len(mods.splitlines())
+        text = (f"{a.label}: ok={reply.get('ok')} {reply.get('seconds')}s, {len(errors)} errors in "
+                f"{len({d['path'] for d in errors})} files, {nmods} missing module files")
+        print(text)
+        rec.result(text, log=str(rd / "racheck-gate.json"), data={"errors": len(errors), "missing_mods": nmods})
+    sys.exit(1 if errors or nmods or not reply.get("ok") else 0)
+
+
+if __name__ == "__main__":
+    main()

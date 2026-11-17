@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Run `port-set fix` (apply a review's findings to a set, code only) on every line "<set> <findings-file>" of a
+# list, N at a time.
+# Usage: fix-batch LIST [N] [MODEL] [TURNS]
+#   N       default pipeline.parallel
+#   MODEL   default models.fix (a set that failed twice: pass models.fix_retry)
+#   TURNS   default pipeline.fix_max_turns
+# Log (appended): <work.sets>/fix-batch.log; each set's output in <work.sets>/<set>/fix-<findings label>.log.
+set -u
+. "$(dirname "$(readlink -f "$0")")/portkit/lib.sh"
+track_self fix-batch "$0" "$@"
+
+[ $# -ge 1 ] || die "usage: fix-batch LIST [N] [MODEL] [TURNS]"
+list=$1
+sets=$(cfgr work.sets)
+n=${2:-$(cfgr pipeline.parallel)}; model=${3:-$(cfgr models.fix)}; turns=${4:-$(cfgr pipeline.fix_max_turns)}
+log=$sets/fix-batch.log
+export TOOLS sets model turns log
+
+one() {
+  s=$1; f=$2; label=$(basename "$f" .md)
+  mkdir -p "$sets/$s"
+  "$TOOLS/port-set" fix "$s" "$f" --model "$model" --max-turns "$turns" > "$sets/$s/fix-$label.log" 2>&1
+  echo "$(date -u +%H:%M) $s fix $label: $(grep -E '^(apply|check|racheck|OPEN|BLOCKED|OUT OF TURNS|done|fix-)' "$sets/$s/fix-$label.log" | tr '\n' ' ' | cut -c1-300)" | tee -a "$log"
+}
+export -f one
+
+mkdir -p "$sets"
+sed '/^[[:space:]]*$/d' "$list" | xargs -P "$n" -L1 bash -c 'one "$0" "$1"'
+echo "$(date -u +%H:%M) fix batch done" | tee -a "$log"

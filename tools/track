@@ -1,0 +1,491 @@
+#!/usr/bin/env python3
+"""track: the port's progress dashboard. Agents and tools record state here; the page and alerts read it.
+
+Agents (judgement):
+  track status TASK STATE [NOTE] [--on WHAT] [--link NAME=PATH|URL] [--model M] [--calls N]
+        STATE: todo | running | review | waiting | blocked | failed | done
+  track step TASK STEP [NOTE]        plan, write, compile, test, fix, merge; exits 3 without recording while paused
+  track ask TASK "QUESTION" [--option A]... [--for developer|lead]     prints the question id (q1, q2, ...)
+  track answer QID "ANSWER" [--by NAME]
+  track round N --pass P --fail F [--log PATH] [--data KEY=VALUE]...
+  track event KIND TEXT [--task ID] [--link NAME=URL]... [--data KEY=VALUE]...
+  track phase N [NOTE]
+The lead and the developer:
+  track show [TASK] [--json]          text view
+  track alerts [--stale-min N]        stale, blocked and failed tasks, open questions, answers waiting; exit 0 always
+  track md [--out PATH]               STATUS.md for the app's port branch (default: in the app integration tree)
+  track publish                       fold the events and rewrite out_dir (every write does this)
+  track serve [--port P] [--host H]   serve out_dir and accept answers from the page
+  track pause [NOTE] | track resume [NOTE]
+  track import sheets [DIR]           one task per writer sheet (default: work.sheets)
+  track import tracks FILE [--group G]   one task per red-round track line
+Tools:
+  track run KIND [--task ID] [--log PATH] -- CMD...   run CMD, post one event at its end, exit with its status
+
+The store is port.toml's track.dir; tools/track.md is the reference.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from portkit import config as C  # noqa: E402
+from portkit import track as T  # noqa: E402
+
+EXIT_PAUSED = 3
+
+
+def die(msg, code=2):
+    print(f"track: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def pairs(items, what) -> dict:
+    out = {}
+    for it in items or []:
+        k, eq, v = it.partition("=")
+        if not eq or not k.strip():
+            die(f"--{what} takes NAME=VALUE, not {it!r}")
+        out[k.strip()] = v.strip()
+    return out
+
+
+def links_of(items) -> dict | None:
+    return {k: T.linkval(v) for k, v in pairs(items, "link").items()} or None
+
+
+def data_pairs(items) -> dict:
+    """--data values become numbers when they look like numbers."""
+    out = {}
+    for k, v in pairs(items, "data").items():
+        try:
+            out[k] = int(v) if re.fullmatch(r"-?\d+", v) else float(v) if re.fullmatch(r"-?\d+\.\d*", v) else v
+        except ValueError:
+            out[k] = v
+    return out
+
+
+def store(a) -> T.Store:
+    try:
+        return T.open_store(a.config, required=True)
+    except (T.TrackError, C.ConfigError) as e:
+        die(str(e))
+
+
+def line_for(tk: dict) -> str:
+    return (f"{tk['id']} {tk['state']}" + (f" ({tk['step']})" if tk.get("step") else "")
+            + (f" on {tk['on']}" if tk.get("on") else "") + (f": {tk['note']}" if tk.get("note") else ""))
+
+
+def write_and_report(s: T.Store, recs: list[dict], task: str | None = None):
+    st = s.write(recs, need_state=True)
+    if task:
+        print(line_for(st["tasks"][task]))
+    return st
+
+
+# ---------------------------------------------------------------- commands
+
+def cmd_status(a):
+    T.check_task(a.task)
+    s = store(a)
+    recs = []
+    if a.title or a.group:
+        recs.append(T.new_event("task", task=a.task, title=a.title, group=a.group))
+    recs.append(T.new_event("status", task=a.task, state=a.state, note=" ".join(a.note) or None, on=a.on,
+                            links=links_of(a.link), model=a.model, calls=a.calls))
+    write_and_report(s, recs, a.task)
+
+
+def cmd_step(a):
+    T.check_task(a.task)
+    if not re.fullmatch(r"[a-z][a-z0-9-]*", a.step):
+        die("STEP: a lowercase word (plan, write, compile, test, fix, merge)")
+    s = store(a)
+    p = s.state().get("paused") or {}
+    if p.get("on"):
+        print(f"track: PAUSED" + (f" ({p['note']})" if p.get("note") else "")
+              + f": do not start {a.step} for {a.task}; wait until `track resume`, then run this again.", file=sys.stderr)
+        sys.exit(EXIT_PAUSED)
+    write_and_report(s, [T.new_event("step", task=a.task, step=a.step, note=" ".join(a.note) or None)], a.task)
+
+
+def cmd_ask(a):
+    T.check_task(a.task)
+    s = store(a)
+    rec = T.new_event("ask", task=a.task, text=" ".join(a.question), options=a.option or None, **{"for": a.for_})
+    st = s.write([rec], need_state=True)
+    q = next(q for q in reversed(st["questions"]) if q.get("event") == rec["id"])
+    print(f"{q['id']} for {q['for']}: {q['text']}")
+
+
+def cmd_answer(a):
+    s = store(a)
+    qs = {q["id"]: q for q in s.state().get("questions", [])}
+    if a.qid not in qs:
+        die(f"no question {a.qid} (open: {', '.join(q for q, v in qs.items() if not v.get('answer')) or 'none'})")
+    s.write([T.new_event("answer", qid=a.qid, text=" ".join(a.answer), by=a.by)], need_state=True)
+    print(f"{a.qid} answered: {' '.join(a.answer)}")
+
+
+def cmd_round(a):
+    s = store(a)
+    s.write([T.new_event("round", n=a.n, log=T.linkval(a.log), data=data_pairs(a.data) or None,
+                         **{"pass": a.passed, "fail": a.failed})])
+    print(f"round {a.n}: {a.passed} pass, {a.failed} fail")
+
+
+def cmd_event(a):
+    T.check_kind(a.kind)
+    if a.task:
+        T.check_task(a.task)
+    s = store(a)
+    s.write([T.new_event(a.kind, task=a.task, text=" ".join(a.text), links=links_of(a.link),
+                         data=data_pairs(a.data) or None)])
+    print(f"event {a.kind}: {' '.join(a.text)}")
+
+
+def cmd_phase(a):
+    s = store(a)
+    s.write([T.new_event("phase", n=a.n, note=" ".join(a.note) or None)])
+    print(f"phase {a.n} {T.PHASES.get(a.n, '')}".rstrip())
+
+
+def cmd_pause(a, on=True):
+    s = store(a)
+    s.write([T.new_event("pause" if on else "resume", note=" ".join(a.note) or None)])
+    print("paused" if on else "resumed")
+
+
+def cmd_show(a):
+    st = store(a).state()
+    if a.json:
+        print(json.dumps(st["tasks"].get(a.task) if a.task else st, indent=1, ensure_ascii=False))
+        return
+    print(T.show_text(st, a.task))
+
+
+def cmd_alerts(a):
+    try:
+        s = T.open_store(a.config, required=True)
+        lines = T.alert_lines(s.state(), stale_min=a.stale_min if a.stale_min is not None else s.stale_min)
+    except Exception as e:   # a lead's poll loop must keep running
+        lines = [f"track alerts failed: {e}"]
+    for ln in lines:
+        print(ln)
+    sys.exit(0)
+
+
+def cmd_md(a):
+    s = store(a)
+    text = T.md_text(s.state())
+    if a.out == "-":
+        sys.stdout.write(text)
+        return
+    out = Path(a.out) if a.out else Path(s.cfg.get("app.integration") or s.dir) / "STATUS.md"
+    out.write_text(text)
+    print(out)
+
+
+def cmd_publish(a):
+    s = store(a)
+    st = s.refresh()
+    print(f"published {st['events']} events, {len(st['tasks'])} tasks to {s.out_dir}")
+
+
+def cmd_import(a):
+    s = store(a)
+    st = s.state()
+    if a.what == "sheets":
+        items = import_sheets(s, Path(a.source) if a.source else Path(s.cfg.require("work.sheets")))
+    else:
+        if not a.source:
+            die("track import tracks FILE")
+        items = import_tracks(Path(a.source), a.group or "tracks")
+    recs, new = [], 0
+    for it in items:
+        old = st["tasks"].get(it["task"])
+        if old and all(old.get(k) == it.get(k) for k in ("title", "group")) and \
+                all(old["links"].get(n) == v for n, v in (it.get("links") or {}).items()):
+            continue
+        new += old is None
+        recs.append(T.new_event("task", **it))
+    if recs:
+        s.write(recs)
+    print(f"imported {len(items)} tasks: {new} new, {len(recs) - new} updated, {len(items) - len(recs)} unchanged")
+
+
+SHEET_TITLE = re.compile(r"^#\s+(.*)$")
+
+
+def import_sheets(s: T.Store, d: Path) -> list[dict]:
+    """One task per `<area>-w<n>.md` sheet: id from the file name, title from its `# ` heading, group = area."""
+    if not d.is_dir():
+        die(f"no sheet directory {d}")
+    out = []
+
+    def key(p):
+        m = re.match(r"(.*)-w(\d+)([a-z]?)$", p.stem)
+        return (m.group(1), int(m.group(2)), m.group(3)) if m else (p.stem, 0, "")
+    for p in sorted(d.glob("*.md"), key=key):
+        tid = p.stem
+        try:
+            T.check_task(tid)
+        except T.TrackError as e:
+            print(f"track: skipped {p.name}: {e}", file=sys.stderr)
+            continue
+        title, model = "", None
+        with open(p, errors="replace") as f:
+            for line in f:
+                if line.startswith("## "):
+                    break
+                m = SHEET_TITLE.match(line)
+                if m and not title:
+                    title = re.sub(rf"^{re.escape(tid)}\s*[—–:-]+\s*", "", m.group(1).strip())
+                m = re.search(r"\bModel:\s*([A-Za-z0-9.-]+)", line)
+                if m and not model:
+                    model = m.group(1).rstrip(".").lower()
+        try:
+            group = s.cfg.area_of(tid)
+        except C.ConfigError:
+            group = re.sub(r"-w\d+[a-z]?$", "", tid)
+        out.append({"task": tid, "title": title, "group": group, "model": model, "links": {"sheet": str(p)}})
+    return out
+
+
+def import_tracks(f: Path, group: str) -> list[dict]:
+    """One task per line `TRACK_ID [TITLE...]`; blank lines and lines starting with # are skipped."""
+    if not f.is_file():
+        die(f"no track list {f}")
+    out = []
+    for n, line in enumerate(f.read_text().splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        tid, _, title = line.partition(" ")
+        try:
+            T.check_task(tid)
+        except T.TrackError as e:
+            die(f"{f}:{n}: {e}")
+        out.append({"task": tid, "title": title.strip(), "group": group})
+    return out
+
+
+def cmd_run(a):
+    argv = a.run_argv
+    if not argv:
+        die("track run KIND [--task ID] -- CMD...")
+    T.check_kind(a.kind)
+    if a.task:
+        T.check_task(a.task)
+    last = {"seq": 0, "text": ""}
+    lock = threading.Lock()
+
+    def pump(src, dst):
+        for raw in iter(src.readline, b""):
+            dst.write(raw)
+            dst.flush()
+            text = raw.decode(errors="replace").strip()
+            if text:
+                with lock:
+                    last["seq"] += 1
+                    last["text"] = text
+        src.close()
+
+    t0 = time.monotonic()
+    try:
+        p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except OSError as e:
+        rc, last["text"] = 127, f"{argv[0]}: {e.strerror or e}"
+        print(f"track: {last['text']}", file=sys.stderr)
+    else:
+        th = [threading.Thread(target=pump, args=(p.stdout, sys.stdout.buffer), daemon=True),
+              threading.Thread(target=pump, args=(p.stderr, sys.stderr.buffer), daemon=True)]
+        for t in th:
+            t.start()
+        try:
+            rc = p.wait()
+        except KeyboardInterrupt:
+            rc = p.wait()
+            rc = rc if rc else 130
+        for t in th:
+            t.join(5)
+    secs = time.monotonic() - t0
+    ok = rc == 0
+    text = last["text"][:400] or ("done" if ok else "no output")
+    if not ok:
+        text = f"exit {rc}: {text}"
+    try:
+        s = T.open_store(a.config)
+        if s is not None:
+            s.write([T.new_event(a.kind, task=a.task, ok=ok,
+                                 text=f"{a.kind} {'ok' if ok else 'failed'} ({T.duration(secs)}): {text}",
+                                 data={"exit": rc, "seconds": round(secs, 1), "command": " ".join(argv)[:300]},
+                                 links={"log": T.linkval(a.log)} if a.log else None)])
+    except Exception as e:   # the command's own exit status is what the caller needs
+        print(f"track: event not recorded: {e}", file=sys.stderr)
+    sys.exit(rc if 0 <= rc < 256 else 1)
+
+
+# ---------------------------------------------------------------- serve
+
+def cmd_serve(a):
+    import functools
+    import http.server
+
+    s = store(a)
+    s.refresh()
+    host = a.host or s.cfg.get("track.serve_host")
+    port = a.port or s.cfg.get("track.serve_port")
+
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def end_headers(self):
+            self.send_header("Cache-Control", "no-cache")
+            super().end_headers()
+
+        def do_GET(self):
+            if self.path.split("?")[0] == "/api/info":
+                return self.send_json({"answers": True})
+            return super().do_GET()
+
+        def do_POST(self):
+            if self.path.split("?")[0] != "/api/answer":
+                return self.send_json({"ok": False, "error": "not found"}, 404)
+            # A JSON content type forces a CORS preflight for cross-site pages, which this server never approves;
+            # the Origin check covers browsers that send one.
+            origin = self.headers.get("Origin")
+            if not (self.headers.get("Content-Type") or "").startswith("application/json") or \
+                    (origin and origin.split("://", 1)[-1] != self.headers.get("Host")):
+                return self.send_json({"ok": False, "error": "refused"}, 403)
+            try:
+                body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 20000)) or b"{}")
+                qid, text = str(body.get("qid") or ""), str(body.get("text") or "").strip()[:T.TEXT_CAP]
+                qs = {q["id"]: q for q in s.state().get("questions", [])}
+                if qid not in qs:
+                    raise ValueError(f"no question {qid}")
+                if not text:
+                    raise ValueError("pick an option or write an answer")
+                s.write([T.new_event("answer", qid=qid, text=text, by="developer")], need_state=True)
+            except (ValueError, TypeError, AttributeError) as e:
+                return self.send_json({"ok": False, "error": str(e)}, 400)
+            self.send_json({"ok": True})
+
+        def send_json(self, obj, code=200):
+            data = json.dumps(obj).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args):
+            pass
+
+    srv = http.server.ThreadingHTTPServer((host, port), functools.partial(Handler, directory=str(s.out_dir)))
+    print(f"serving {s.out_dir} at http://{host}:{srv.server_address[1]}/ (answers from the page are recorded)",
+          flush=True)
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
+
+
+# ---------------------------------------------------------------- CLI
+
+def main(argv=None):
+    p = argparse.ArgumentParser(prog="track", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--config", help="port.toml to use (default: PORT_KIT_CONFIG, ./port.toml or a parent's)")
+    sub = p.add_subparsers(dest="cmd", required=True, metavar="COMMAND")
+
+    c = sub.add_parser("status", help="set a task's state")
+    c.add_argument("task"); c.add_argument("state", choices=T.STATES); c.add_argument("note", nargs="*")
+    c.add_argument("--on", help="what it is blocked on or waits for")
+    c.add_argument("--link", action="append", metavar="NAME=PATH|URL")
+    c.add_argument("--model"); c.add_argument("--calls", type=int, help="tool calls of the agent run that ends here")
+    c.add_argument("--title"); c.add_argument("--group")
+    c.set_defaults(fn=cmd_status)
+
+    c = sub.add_parser("step", help="start a step of a task")
+    c.add_argument("task"); c.add_argument("step"); c.add_argument("note", nargs="*")
+    c.set_defaults(fn=cmd_step)
+
+    c = sub.add_parser("ask", help="ask a question")
+    c.add_argument("task"); c.add_argument("question", nargs="+")
+    c.add_argument("--option", action="append"); c.add_argument("--for", dest="for_", choices=T.ASK_FOR, default="lead")
+    c.set_defaults(fn=cmd_ask)
+
+    c = sub.add_parser("answer", help="record an answer")
+    c.add_argument("qid"); c.add_argument("answer", nargs="+"); c.add_argument("--by", default="lead")
+    c.set_defaults(fn=cmd_answer)
+
+    c = sub.add_parser("round", help="record a full test run")
+    c.add_argument("n"); c.add_argument("--pass", dest="passed", type=int, required=True)
+    c.add_argument("--fail", dest="failed", type=int, required=True)
+    c.add_argument("--log"); c.add_argument("--data", action="append", metavar="KEY=VALUE")
+    c.set_defaults(fn=cmd_round)
+
+    c = sub.add_parser("event", help="record a free event")
+    c.add_argument("kind"); c.add_argument("text", nargs="+"); c.add_argument("--task")
+    c.add_argument("--link", action="append", metavar="NAME=URL"); c.add_argument("--data", action="append", metavar="KEY=VALUE")
+    c.set_defaults(fn=cmd_event)
+
+    c = sub.add_parser("phase", help="set the port's phase")
+    c.add_argument("n", type=int); c.add_argument("note", nargs="*")
+    c.set_defaults(fn=cmd_phase)
+
+    c = sub.add_parser("show", help="text view")
+    c.add_argument("task", nargs="?"); c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_show)
+
+    c = sub.add_parser("alerts", help="lines for a poll loop")
+    c.add_argument("--stale-min", type=int)
+    c.set_defaults(fn=cmd_alerts)
+
+    c = sub.add_parser("md", help="write STATUS.md")
+    c.add_argument("--out", help="output path, or - for stdout")
+    c.set_defaults(fn=cmd_md)
+
+    sub.add_parser("publish", help="rewrite out_dir").set_defaults(fn=cmd_publish)
+
+    c = sub.add_parser("serve", help="serve out_dir and accept answers")
+    c.add_argument("--port", type=int); c.add_argument("--host")
+    c.set_defaults(fn=cmd_serve)
+
+    for name, on in (("pause", True), ("resume", False)):
+        c = sub.add_parser(name, help=f"{name} new steps")
+        c.add_argument("note", nargs="*")
+        c.set_defaults(fn=lambda a, on=on: cmd_pause(a, on))
+
+    c = sub.add_parser("import", help="create tasks from sheets or a track list")
+    c.add_argument("what", choices=("sheets", "tracks")); c.add_argument("source", nargs="?")
+    c.add_argument("--group", help="group for imported tracks (default: tracks)")
+    c.set_defaults(fn=cmd_import)
+
+    c = sub.add_parser("run", help="run a command and record its end")
+    c.add_argument("kind"); c.add_argument("--task"); c.add_argument("--log")
+    c.set_defaults(fn=cmd_run)
+
+    argv = sys.argv[1:] if argv is None else argv
+    run_argv = []
+    if "--" in argv and "run" in argv[:argv.index("--")]:
+        # argparse cannot keep options after a positional out of a REMAINDER, so CMD is split off here.
+        i = argv.index("--")
+        argv, run_argv = argv[:i], argv[i + 1:]
+    a = p.parse_args(argv)
+    a.run_argv = run_argv
+    try:
+        a.fn(a)
+    except (T.TrackError, C.ConfigError) as e:
+        die(str(e))
+
+
+if __name__ == "__main__":
+    main()

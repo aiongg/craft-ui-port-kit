@@ -1,0 +1,398 @@
+#!/usr/bin/env python3
+"""look: capture every state of a panel in production and in the port, and compare them on one page (phase 8).
+
+usage:
+  look [--config PORT.TOML] pair PANEL... | --all  [--side up|port|both] [--only ID[,ID...]]
+  look [--config PORT.TOML] crops PAGE... [--threshold N] [--gap N] [--pad N] [--max N]
+  look [--config PORT.TOML] states AREA SECTION [--panel NAME] [--theme NAME] [--force]
+
+pair    For each panel, reads <look.states_dir>/<PANEL>.json, starts production (side `up`, look.production_binary)
+        and the port (side `port`, look.port_binary) at the same time through the app's driver (look.driver),
+        drives and shoots every state on both, and writes <track.out_dir>/look/<PANEL>/: index.html (production,
+        port, blink and difference views per state), the crops of the regions that differ, crops.txt and
+        manifest.json. It also rewrites <track.out_dir>/look/index.html, the list of every panel. It builds
+        nothing: build the port first. With --side, the other side keeps its images from the last run. States
+        with a `needs` field are listed on the page but not captured. --all takes every states file.
+crops   Recomputes the difference images and region crops of existing pages (a panel name or a page directory),
+        for example with another --threshold, and redraws them. Captures nothing.
+states  Writes the states of one area map section into <look.states_dir>/<PANEL>.json. The panel name is the
+        framework panel or dialog type the section names (or --panel). States already in the file are kept
+        unless --force; new ones are added, so sections on one panel share a file.
+
+Dashboard: each `pair` run posts one `look` event on the task look-<PANEL>, with the page as its `page` link
+(relative to track.out_dir). `states` posts a `look-states` event on the same task, which creates it.
+
+pair and crops need Pillow and numpy; without them, look runs itself again under
+`uv run --with pillow --with numpy` when uv is installed.
+Exit: 0 done; 1 a capture failed (the page shows the error); 2 usage, config or states-file error.
+Reference: tools/look.md.
+"""
+from __future__ import annotations
+
+import argparse
+import concurrent.futures as cf
+import importlib.util
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import traceback
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from portkit import config, track  # noqa: E402
+from portkit.look import page, states  # noqa: E402
+
+SIDES = ("up", "port")
+SIDE_KEY = {"up": "look.production_binary", "port": "look.port_binary"}
+REEXEC = "PORT_KIT_LOOK_REEXEC"
+
+
+class Fail(Exception):
+    pass
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def need_pixels():
+    """Import the pixel module, or re-run this command under uv with Pillow and numpy."""
+    try:
+        from portkit.look import pixels
+        return pixels
+    except ImportError as e:
+        if os.environ.get(REEXEC) or not shutil.which("uv"):
+            raise Fail(f"pair and crops need Pillow and numpy ({e}): `pip install pillow numpy`, or install uv")
+        os.environ[REEXEC] = "1"
+        sys.stdout.flush()
+        os.execvp("uv", ["uv", "run", "--quiet", "--no-project", "--with", "pillow", "--with", "numpy",
+                         "python3", str(Path(__file__).resolve()), *sys.argv[1:]])
+
+
+def load_driver(path: Path):
+    if not path.is_file():
+        raise Fail(f"look.driver: no such file {path}")
+    sys.path.insert(0, str(path.parent))
+    spec = importlib.util.spec_from_file_location("look_driver", path)
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+    except Exception as e:
+        raise Fail(f"look.driver {path}: {type(e).__name__}: {e}")
+    missing = [f for f in ("start", "shoot", "stop") if not callable(getattr(mod, f, None))]
+    if missing:
+        raise Fail(f"look.driver {path}: missing {', '.join(missing)} (tools/look.md, \"Driver interface\")")
+    return mod
+
+
+def version(cfg, side: str, binary: Path) -> str:
+    """What the side ran: the binary's build time, and for the port the integration tree's commit."""
+    built = datetime.fromtimestamp(binary.stat().st_mtime, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    text = f"{binary.name} built {built}"
+    tree = cfg.get("app.integration") if side == "port" else None
+    if tree:
+        try:
+            sha = subprocess.run(["git", "-C", tree, "rev-parse", "--short=10", "HEAD"], capture_output=True,
+                                 text=True, check=True).stdout.strip()
+            dirty = subprocess.run(["git", "-C", tree, "status", "--porcelain", "--untracked-files=no"],
+                                   capture_output=True, text=True).stdout.strip()
+            text = f"{sha}{' + local changes' if dirty else ''}, {text}"
+        except (OSError, subprocess.CalledProcessError):
+            pass
+    return text
+
+
+def run_side(driver, side: str, binary: Path, workdir: Path, shots: Path, todo: list[dict]) -> dict:
+    """Start one app, shoot every state, stop it. Returns {state id: full-window PNG path, or an error string}."""
+    out, app = {}, None
+    workdir.mkdir(parents=True, exist_ok=True)
+    try:
+        app = driver.start(side, str(binary), workdir, todo[0]["window"])
+        for st in todo:
+            dst = shots / f"full-{side}-{st['id']}.png"
+            try:
+                driver.shoot(app, side, st, st["window"], dst)
+                if not dst.is_file():
+                    raise RuntimeError(f"the driver wrote no {dst.name}")
+                out[st["id"]] = dst
+                print(f"[{side}] {st['id']}: ok", flush=True)
+            except Exception as e:
+                out[st["id"]] = f"{type(e).__name__}: {e}"
+                print(f"[{side}] {st['id']}: {out[st['id']]}", flush=True)
+    except Exception as e:
+        msg = f"the app did not start: {type(e).__name__}: {e}"
+        for st in todo:
+            out.setdefault(st["id"], msg)
+        print(f"[{side}] {msg}\n{traceback.format_exc()}", flush=True)
+    finally:
+        if app is not None:
+            try:
+                driver.stop(app)
+            except Exception as e:
+                print(f"[{side}] stop: {type(e).__name__}: {e}", flush=True)
+    return out
+
+
+def diff_all(pixels, page_dir: Path, man: dict, gap: int, pad: int, most: int) -> None:
+    """Difference image, region count and crops of every state that has both shots."""
+    for old in list(page_dir.glob("crop-*.png")) + list(page_dir.glob("diff-*.png")):
+        old.unlink()
+    for st in man["states"]:
+        st.pop("diff", None)
+        st.pop("crops", None)
+        st.pop("regions", None)
+        up, port = st.get("up") or {}, st.get("port") or {}
+        if not up.get("shot") or not port.get("shot"):
+            continue
+        a, b = page_dir / up["shot"], page_dir / port["shot"]
+        if not a.is_file() or not b.is_file():
+            continue
+        d = pixels.compare(a, b, page_dir / f"diff-{st['id']}.png", man["threshold"])
+        d["file"] = f"diff-{st['id']}.png"
+        st["diff"] = d
+        st["regions"], st["crops"] = pixels.region_crops(a, b, page_dir, st["id"], man["threshold"], gap, pad, most)
+    man["zoom"] = pixels.ZOOM
+
+
+def write_pages(page_dir: Path, look_dir: Path, man: dict) -> None:
+    (page_dir / "manifest.json").write_text(json.dumps(man, indent=1, ensure_ascii=False) + "\n")
+    page.write_page(page_dir, man)
+    page.write_crops_txt(page_dir, man)
+    page.write_index(look_dir)
+    page.ensure_css(look_dir.parent, track.DASHBOARD)
+
+
+def drop_unreferenced(page_dir: Path, man: dict) -> None:
+    keep = {"index.html", "manifest.json", "crops.txt"}
+    for st in man["states"]:
+        for side in SIDES:
+            s = st.get(side) or {}
+            keep.update(v for k, v in s.items() if k in ("shot", "full"))
+        if st.get("diff"):
+            keep.add(st["diff"]["file"])
+        keep.update(c["file"] for c in st.get("crops", []))
+    for p in page_dir.glob("*.png"):
+        if p.name not in keep:
+            p.unlink()
+
+
+def pair_one(cfg, driver, pixels, panel: str, sides: list[str], binaries: dict, only: set[str]) -> int:
+    with track.recorded("look", task=f"look-{panel}") as rec:
+        return _pair_one(cfg, driver, pixels, panel, sides, binaries, only, rec)
+
+
+def _pair_one(cfg, driver, pixels, panel, sides, binaries, only, rec) -> int:
+    t0 = time.monotonic()
+    look_dir = cfg.path("track.out_dir") / "look"
+    page_dir = look_dir / panel
+    ok, text, data = False, "", {}
+    try:
+        doc = states.load(cfg.path("look.states_dir") / f"{panel}.json")
+        window = states.parse_window(cfg.get("look.window"), "look.window")
+        unknown = only - {s["id"] for s in doc["states"]}
+        if unknown:
+            raise Fail(f"{panel}: no state {', '.join(sorted(unknown))}")
+        run = [s for s in doc["states"] if not s.get("needs") and (not only or s["id"] in only)]
+        if not run:
+            raise Fail(f"{panel}: no state to capture (every state has a `needs` field, or --only matched none)")
+        work = cfg.path("look.run_dir") / panel
+        shots = work / "shots"
+        shots.mkdir(parents=True, exist_ok=True)
+        for side in sides:
+            for old in shots.glob(f"full-{side}-*.png"):
+                old.unlink()
+        todo = {side: [states.for_side(doc, s, side, window) for s in run] for side in sides}
+        with cf.ThreadPoolExecutor(len(sides)) as ex:
+            futs = {side: ex.submit(run_side, driver, side, binaries[side], work / side, shots, todo[side])
+                    for side in sides}
+            got = {side: f.result() for side, f in futs.items()}
+        t1 = time.monotonic()
+
+        page_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            old = json.loads((page_dir / "manifest.json").read_text())
+        except (OSError, json.JSONDecodeError):
+            old = {}
+        old_states = {s["id"]: s for s in old.get("states", [])}
+        stamp = now_iso()
+        man = {"panel": panel, "title": doc.get("title", panel), "generated": stamp, "window": list(window),
+               "threshold": cfg.get("look.threshold"), "states_file": str(cfg.path("look.states_dir") / f"{panel}.json"),
+               "sides": {}, "states": [], "times": {}}
+        for side in SIDES:
+            if side in sides:
+                man["sides"][side] = {"label": "production" if side == "up" else "port", "t": stamp,
+                                      "version": version(cfg, side, binaries[side])}
+            else:
+                man["sides"][side] = (old.get("sides") or {}).get(side) or {"label": "production" if side == "up" else "port"}
+        failed = 0
+        for st in doc["states"]:
+            sid = st["id"]
+            entry = {"id": sid, "title": st.get("title", sid)}
+            if st.get("needs"):
+                entry.update(needs=st["needs"], note=st.get("note", ""))
+                man["states"].append(entry)
+                continue
+            prev = old_states.get(sid, {})
+            box = states.for_side(doc, st, "port", window)["crop"]
+            for side in SIDES:
+                res = got.get(side, {}).get(sid)
+                if res is None:     # not captured in this run: keep the last run's images, marked as older
+                    p = prev.get(side)
+                    if p and (p.get("error") or p.get("shot") and (page_dir / p["shot"]).is_file()):
+                        entry[side] = {**p, "stale": True}
+                    continue
+                for name in (f"{side}-{sid}.png", f"full-{side}-{sid}.png"):
+                    (page_dir / name).unlink(missing_ok=True)
+                if isinstance(res, Path):
+                    shutil.copyfile(res, page_dir / f"full-{side}-{sid}.png")
+                    pixels.crop_to(res, box, page_dir / f"{side}-{sid}.png")
+                    entry[side] = {"shot": f"{side}-{sid}.png", "full": f"full-{side}-{sid}.png", "t": stamp}
+                else:
+                    entry[side] = {"error": res, "t": stamp}
+                    failed += 1
+            man["states"].append(entry)
+        man["times"]["shots"] = round(t1 - t0, 1)
+        diff_all(pixels, page_dir, man, 12, 6, 20)
+        man["times"]["page"] = round(time.monotonic() - t1, 1)
+        drop_unreferenced(page_dir, man)
+        write_pages(page_dir, look_dir, man)
+        c = page.counts(man)
+        ok = failed == 0
+        text = (f"{panel}: {len(man['states'])} states, {c['differs']} differ, {c['match']} match, "
+                f"{c['failed']} failed, {c['waiting']} not captured" + ("" if len(sides) == 2 else f" (side {sides[0]})"))
+        data = {"states": len(man["states"]), "differ": c["differs"], "match": c["match"], "failed": c["failed"],
+                "not_captured": c["waiting"], "side": "both" if len(sides) == 2 else sides[0]}
+        print(text)
+        print(f"page: {page_dir / 'index.html'}")
+        return 0 if ok else 1
+    except (Fail, states.StatesError, config.ConfigError) as e:
+        text = str(e) if str(e).startswith(panel) else f"{panel}: {e}"
+        print(f"look: {e}", file=sys.stderr)
+        return 2
+    except BaseException as e:
+        text = f"{panel}: {type(e).__name__}: {e}".splitlines()[0]
+        raise
+    finally:
+        links = {"page": f"look/{panel}/index.html"} if (page_dir / "index.html").is_file() else None
+        rec.result(text, data=data, ok=ok, links=links)
+
+
+def cmd_pair(cfg, a) -> int:
+    if not a.panels and not a.all:
+        raise Fail("pair: name one or more panels, or --all")
+    sdir = cfg.path("look.states_dir")
+    panels = sorted(p.stem for p in sdir.glob("*.json")) if a.all else a.panels
+    if not panels:
+        raise Fail(f"pair: no states files in {sdir} (write them with `look states`)")
+    pixels = need_pixels()
+    driver = load_driver(cfg.path("look.driver"))
+    sides = list(SIDES) if a.side == "both" else [a.side]
+    binaries = {}
+    for side in sides:
+        b = cfg.path(SIDE_KEY[side])
+        if not b.is_file() or not os.access(b, os.X_OK):
+            raise Fail(f"{SIDE_KEY[side]}: not an executable file: {b}")
+        binaries[side] = b
+    only = {x.strip() for x in (a.only or "").split(",") if x.strip()}
+    rc = 0
+    for panel in panels:
+        rc = max(rc, pair_one(cfg, driver, pixels, panel, sides, binaries, only))
+    return rc
+
+
+def cmd_crops(cfg, a) -> int:
+    pixels = need_pixels()
+    look_dir = cfg.path("track.out_dir") / "look"
+    for name in a.pages:
+        p = Path(name)
+        page_dir = p if p.is_dir() else look_dir / name
+        try:
+            man = json.loads((page_dir / "manifest.json").read_text())
+        except (OSError, json.JSONDecodeError) as e:
+            raise Fail(f"crops: no readable manifest.json in {page_dir} ({e})")
+        man["threshold"] = a.threshold if a.threshold is not None else cfg.get("look.threshold")
+        diff_all(pixels, page_dir, man, a.gap, a.pad, a.max)
+        write_pages(page_dir, page_dir.parent, man)
+        c = page.counts(man)
+        print(f"{man['panel']}: {c['differs']} differ, {c['match']} match at threshold {man['threshold']}; "
+              f"{sum(len(s.get('crops', [])) for s in man['states'])} crop(s); list: {page_dir / 'crops.txt'}")
+    return 0
+
+
+def cmd_states(cfg, a) -> int:
+    areas = {ar["id"]: ar for ar in cfg.areas}
+    map_file = Path(areas[a.area]["map"]) if a.area in areas else cfg.path("work.maps") / f"{a.area}.md"
+    try:
+        text = map_file.read_text()
+    except OSError as e:
+        raise Fail(f"states: cannot read the map of area {a.area}: {map_file} ({e.strerror})")
+    sid, part, fields = states.find_section(text, a.section)
+    if "states" not in fields or not fields["states"].strip():
+        raise Fail(f"states: section {sid} ({part}) of {map_file} has no **States** field")
+    found = states.from_map_field(fields["states"])
+    for st in found:
+        st["title"] = f"{sid}: {st['title']}"
+        st["map"] = f"{a.area} {sid}"
+    panel = a.panel or states.panel_name(part, fields.get("framework", ""))
+    out = cfg.path("look.states_dir") / f"{panel}.json"
+    old = states.load(out, strict=False) if out.exists() else None
+    w, h = states.parse_window(cfg.get("look.window"), "look.window")
+    head = {"title": part, "size": {"width": w, "height": h}, "crop": None, "states": []}
+    if a.theme:
+        head["theme"] = a.theme
+    doc, added, replaced, kept = states.merge(old, head, found, a.force)
+    if a.theme and old:
+        doc = states.ordered({**doc, "theme": a.theme})
+    states.check(doc, str(out), strict=False)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(doc, indent=1, ensure_ascii=False) + "\n")
+    waiting = [s for s in found if s.get("needs")]
+    print(f"{out}: {added} added, {replaced} replaced, {kept} kept (already in the file); "
+          f"{len(doc['states'])} states in all")
+    for s in waiting:
+        print(f"  waits: {s['id']} needs {s['needs']}")
+    for name, steps in doc.get("setups", {}).items():
+        if not steps:
+            print(f"  setup {name} has no steps yet: write them in setups.{name} before `look pair`")
+    track.event("look-states", f"{panel}: {len(doc['states'])} states ({added} added from {a.area} {sid}), "
+                f"{sum(1 for s in doc['states'] if s.get('needs'))} waiting on hooks or steps",
+                task=f"look-{panel}", links={"states": str(out)})
+    return 0
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(prog="look", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--config")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("pair", help="capture panels in production and the port, write their pages")
+    p.add_argument("panels", nargs="*")
+    p.add_argument("--all", action="store_true", help="every states file")
+    p.add_argument("--side", choices=("up", "port", "both"), default="both")
+    p.add_argument("--only", help="comma-separated state ids")
+    p = sub.add_parser("crops", help="recompute differences and crops of existing pages")
+    p.add_argument("pages", nargs="+")
+    p.add_argument("--threshold", type=int)
+    p.add_argument("--gap", type=int, default=12, help="differing pixels closer than this join one region (12)")
+    p.add_argument("--pad", type=int, default=6, help="pixels added around each region (6)")
+    p.add_argument("--max", type=int, default=20, help="most crops per state (20)")
+    p = sub.add_parser("states", help="write a states file from an area map section")
+    p.add_argument("area")
+    p.add_argument("section")
+    p.add_argument("--panel")
+    p.add_argument("--theme")
+    p.add_argument("--force", action="store_true", help="replace states whose id is already in the file")
+    a = ap.parse_args(argv)
+    try:
+        cfg = config.load(a.config)
+        return {"pair": cmd_pair, "crops": cmd_crops, "states": cmd_states}[a.cmd](cfg, a)
+    except (Fail, states.StatesError, config.ConfigError) as e:
+        print(f"look: {e}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

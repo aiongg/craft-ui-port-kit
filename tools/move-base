@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Move the framework writing base (branch framework.writing_base) to a new commit: drop set trees that still sit
+# unchanged on the old base, remap sheet line references (`port-set remap`), move the read-only reference checkout
+# and restart the framework racheck daemon. It never pushes; it prints the push command for the branch.
+# Usage: move-base COMMIT
+# COMMIT must contain the current writing base. A framework set tree with commits or uncommitted changes is kept and
+# reported: its owner rebases it.
+set -eu
+. "$(dirname "$(readlink -f "$0")")/portkit/lib.sh"
+track_self move-base "$0" "$@"
+
+[ $# -eq 1 ] || die "usage: move-base COMMIT"
+R=$(cfgr framework.checkout); wb=$(cfgr framework.writing_base)
+sets=$(cfgr work.sets); trees=$(cfgr work.trees); ref=$(cfgr racheck.fw_base); sockets=$(cfgr racheck.sockets)
+new=$(git -C "$R" rev-parse "$1")
+old=$(git -C "$R" rev-parse "$wb")
+git -C "$R" merge-base --is-ancestor "$old" "$new" || { echo "new base does not contain $wb ($old)"; exit 1; }
+git -C "$R" branch -f "$wb" "$new"
+echo "$wb: $old -> $new"
+
+for t in "$trees"/*/; do
+  t=${t%/}; d=$(basename "$t"); [[ $d == _* ]] && continue
+  s=${d%-fw}; f=$sets/$s/base-fw
+  [[ -f $f ]] || continue
+  b=$(cat "$f")
+  [[ $(git -C "$t" rev-parse HEAD) == "$b" && -z $(git -C "$t" status --porcelain) ]] || { echo "keep $d (has work)"; continue; }
+  br=$(git -C "$t" branch --show-current)
+  if git -C "$R" worktree remove "$t"; then
+    [[ -n $br ]] && git -C "$R" branch -q -D "$br"
+    if command -v trash >/dev/null; then trash "$f"; else rm -f "$f"; fi
+    echo "dropped $d"
+  fi
+done
+
+"$TOOLS/port-set" remap
+python3 "$TOOLS/racheck.py" stop fw || true
+git -C "$ref" checkout -q --detach "$new"
+(setsid nohup python3 "$TOOLS/racheck.py" serve fw > "$sockets/racheck-fw-serve.log" 2>&1 < /dev/null &)
+echo "done: base $new, racheck fw restarting"
+echo "to back the branch up on your fork: git -C $R push <remote> -f $new:refs/heads/$wb"

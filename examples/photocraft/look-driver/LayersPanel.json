@@ -1,0 +1,388 @@
+{
+ "title": "Layers panel",
+ "size": {
+  "width": 1440,
+  "height": 900
+ },
+ "theme": "pro",
+ "crop": [
+  1150,
+  374,
+  1440,
+  880
+ ],
+ "setups": {
+  "sample": [
+   {
+    "method": "engine.execute",
+    "params": {
+     "command": "file.new",
+     "params": {
+      "width": 1200,
+      "height": 800,
+      "name": "Sample",
+      "background": "#f4efe6"
+     }
+    }
+   },
+   {
+    "method": "engine.execute",
+    "params": {
+     "command": "paint.gradient",
+     "params": {
+      "from": [
+       0,
+       0
+      ],
+      "to": [
+       1200,
+       800
+      ],
+      "colors": [
+       "#2b5876",
+       "#4e4376",
+       "#e8a87c"
+      ],
+      "style": "linear"
+     }
+    }
+   },
+   {
+    "method": "engine.execute",
+    "params": {
+     "command": "layer.new.layer",
+     "params": {
+      "name": "Sun"
+     }
+    }
+   },
+   {
+    "method": "engine.execute",
+    "params": {
+     "command": "shape.create",
+     "params": {
+      "kind": "ellipse",
+      "rect": [
+       760,
+       120,
+       260,
+       260
+      ],
+      "fill": "#ffd166"
+     }
+    }
+   },
+   {
+    "method": "engine.execute",
+    "params": {
+     "command": "shape.create",
+     "params": {
+      "kind": "roundedRect",
+      "rect": [
+       140,
+       460,
+       420,
+       220
+      ],
+      "radii": 24,
+      "fill": "#06d6a0"
+     }
+    }
+   },
+   {
+    "method": "engine.execute",
+    "params": {
+     "command": "type.create",
+     "params": {
+      "x": 160,
+      "y": 340,
+      "text": "PhotoCraft",
+      "size": 96,
+      "color": "#ffffff"
+     }
+    }
+   },
+   {
+    "method": "engine.execute",
+    "params": {
+     "command": "layer.newAdjustmentLayer.hueSaturation",
+     "params": {}
+    }
+   },
+   {
+    "method": "engine.execute",
+    "params": {
+     "command": "layer.new.layer",
+     "params": {
+      "name": "Paint"
+     }
+    }
+   },
+   {
+    "method": "ui.set",
+    "params": {
+     "fit": true
+    }
+   },
+   {
+    "method": "engine.execute",
+    "params": {
+     "command": "layer.selectBottom",
+     "params": {}
+    }
+   }
+  ]
+ },
+ "reset": [
+  {
+   "method": "ui.key",
+   "params": {
+    "key": "Escape"
+   }
+  },
+  {
+   "method": "ui.set",
+   "params": {
+    "theme": "pro",
+    "tool": "move",
+    "panels": {
+     "layers": true,
+     "properties": true,
+     "color": true,
+     "dock": true,
+     "options_bar": true,
+     "toolbar": true,
+     "status_bar": true,
+     "history": false,
+     "brushes": false,
+     "navigator": false
+    },
+    "dockTabs": {
+     "color": 0,
+     "properties": 0,
+     "layers": 0,
+     "history": 0,
+     "brushes": 0,
+     "navigator": 0
+    }
+   }
+  }
+ ],
+ "states": [
+  {
+   "id": "sample",
+   "title": "Sample document, as the panel opens",
+   "setup": "sample",
+   "steps": []
+  },
+  {
+   "id": "structure",
+   "title": "Open group of two, layer with effects shown, smart object, locked Background",
+   "steps": [
+    {
+     "method": "engine.execute",
+     "params": {
+      "command": "file.new",
+      "params": {
+       "width": 1200,
+       "height": 800,
+       "name": "Structure",
+       "background": "#f4efe6"
+      }
+     }
+    },
+    {
+     "method": "engine.execute",
+     "params": {
+      "command": "layer.new.layer",
+      "params": {
+       "name": "Logo"
+      }
+     }
+    },
+    {
+     "method": "engine.execute",
+     "params": {
+      "command": "paint.stroke",
+      "params": {
+       "points": [
+        [
+         100,
+         700,
+         1
+        ],
+        [
+         400,
+         650,
+         1
+        ]
+       ],
+       "size": 60,
+       "color": "#06d6a0"
+      }
+     }
+    },
+    {
+     "method": "engine.execute",
+     "params": {
+      "command": "layer.smartObjects.convertToSmartObject",
+      "params": {}
+     }
+    },
+    {
+     "method": "engine.execute",
+     "params": {
+      "command": "shape.create",
+      "params": {
+       "kind": "ellipse",
+       "rect": [
+        760,
+        120,
+        260,
+        260
+       ],
+       "fill": "#ffd166"
+      }
+     }
+    },
+    {
+     "method": "engine.execute",
+     "params": {
+      "command": "layer.renameLayer",
+      "params": {
+       "name": "Badge"
+      }
+     }
+    },
+    {
+     "method": "engine.execute",
+     "params": {
+      "command": "layer.layerStyle.dropShadow",
+      "params": {}
+     }
+    },
+    {
+     "method": "engine.execute",
+     "params": {
+      "command": "layer.layerStyle.stroke",
+      "params": {}
+     }
+    },
+    {
+     "method": "engine.execute",
+     "params": {
+      "command": "layer.setEffectsExpanded",
+      "params": {
+       "expanded": true
+      }
+     }
+    },
+    {
+     "method": "engine.execute",
+     "params": {
+      "command": "layer.new.layer",
+      "params": {
+       "name": "Ink"
+      }
+     }
+    },
+    {
+     "method": "engine.execute",
+     "params": {
+      "command": "paint.stroke",
+      "params": {
+       "points": [
+        [
+         200,
+         200,
+         1
+        ],
+        [
+         500,
+         300,
+         1
+        ]
+       ],
+       "size": 40,
+       "color": "#2b5876"
+      }
+     }
+    },
+    {
+     "method": "engine.execute",
+     "params": {
+      "command": "layer.new.layer",
+      "params": {
+       "name": "Wash"
+      }
+     }
+    },
+    {
+     "method": "engine.execute",
+     "params": {
+      "command": "paint.stroke",
+      "params": {
+       "points": [
+        [
+         300,
+         500,
+         1
+        ],
+        [
+         900,
+         450,
+         1
+        ]
+       ],
+       "size": 80,
+       "color": "#e8a87c"
+      }
+     }
+    },
+    {
+     "method": "engine.execute",
+     "params": {
+      "command": "layer.select",
+      "params": {
+       "name": "Ink",
+       "mode": "add"
+      }
+     }
+    },
+    {
+     "method": "engine.execute",
+     "params": {
+      "command": "layer.groupLayers",
+      "params": {
+       "name": "Group 1"
+      }
+     }
+    },
+    {
+     "method": "engine.execute",
+     "params": {
+      "command": "layer.setExpanded",
+      "params": {
+       "expanded": true
+      }
+     }
+    },
+    {
+     "method": "engine.execute",
+     "params": {
+      "command": "layer.select",
+      "params": {
+       "name": "Badge"
+      }
+     }
+    },
+    {
+     "method": "ui.set",
+     "params": {
+      "fit": true
+     }
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+"""Trash test executables a build has superseded.
+Usage: trash-stale-tests <cargo JSON message log>    the executables that build reported are the fresh ones
+       trash-stale-tests --dir <target>/debug/deps --since <epoch>  executables written since the run began are fresh
+
+For every test executable the build reported, any other executable in the same deps dir with the same name stem
+(the part before the last '-<hash>') and an older mtime is from an earlier build of that target: a framework change
+gives every dependent test binary a new hash, and cargo keeps the old copies (tens of GB in a large app's target).
+The old copies go to the trash with the `trash` command when it exists, and are deleted otherwise."""
+import sys as _sys
+if _sys.argv[1:2] in (["-h"], ["--help"]):
+    print(__doc__)
+    _sys.exit(0)
+import json, os, shutil, subprocess, sys
+fresh = set()
+if sys.argv[1] == '--dir':
+    # Several packages share a stem ("it"), so the fresh ones are those this run wrote (mtime >= --since).
+    d, since = sys.argv[2], float(sys.argv[4])
+    for other in os.listdir(d):
+        p = os.path.join(d, other)
+        if '.' not in other and '-' in other and os.path.isfile(p) and os.access(p, os.X_OK) and os.path.getmtime(p) >= since:
+            fresh.add(p)
+for line in ([] if sys.argv[1] == '--dir' else open(sys.argv[1], errors='replace')):
+    try:
+        m = json.loads(line)
+    except ValueError:
+        continue
+    if m.get('reason') == 'compiler-artifact' and m.get('profile', {}).get('test') and m.get('executable'):
+        fresh.add(m['executable'])
+stale = []
+for exe in fresh:
+    d, name = os.path.split(exe)
+    stem = name.rsplit('-', 1)[0]
+    t = os.path.getmtime(exe)
+    for other in os.listdir(d):
+        p = os.path.join(d, other)
+        if p in fresh or other.rsplit('-', 1)[0] != stem or '.' in other or not os.access(p, os.X_OK):
+            continue
+        if os.path.isfile(p) and os.path.getmtime(p) < t:
+            stale.append(p)
+stale = sorted(set(stale))
+if stale:
+    if shutil.which('trash'):
+        subprocess.run(['trash', *stale], check=False)
+        how = 'trashed'
+    else:
+        for p in stale:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+        how = 'deleted'
+    print(f"{how} {len(stale)} superseded test executables", file=sys.stderr)

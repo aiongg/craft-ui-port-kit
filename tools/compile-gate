@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""compile-gate: compile what a combine touched, framework first, then the app. One cl call per step, no workspace build.
+
+usage: compile-gate LABEL [--fw-only | --app-only] [CRATE ...] [--config PORT.TOML]
+
+Framework half (runs in framework.integration): `cl check <crate>` for each framework crate in dependency order,
+stopping at the first crate that fails. The crates are the ones named, or by default the packages that own the files
+changed between framework.writing_base and HEAD. The order comes from crate-order.py (the order given when that
+tool cannot run).
+
+App half (runs in app.integration): `cl check all --keep-going --message-format short`, which compiles the app's
+whole pinned package selection in cl's app mode (the selection comes from [workspace.metadata.cl] in the app's root
+Cargo.toml; feature-selection.py derives it for a new app). All errors of one run come back together.
+
+Every cargo build goes through cl, under build.launcher (CL_LAUNCHER) and build.memory_cap. Logs: <work.runs>/LABEL/
+(`fw-<crate>.log`, `app.log`, `app.errors` with one `file:line:col: error ...` line per error). Exit status: 0 when
+everything compiles, 1 otherwise.
+"""
+import argparse
+import subprocess
+import sys
+import time
+from collections import Counter
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from portkit import config, gates, track
+
+
+def order(cfg, tree: Path, crates: list[str]) -> list[str]:
+    """Dependency order of the crates (dependencies first) from crate-order.py; the given order on failure."""
+    r = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "crate-order.py"), str(tree), *crates],
+                       capture_output=True, text=True)
+    out = r.stdout.split()
+    return out if r.returncode == 0 and set(out) == set(crates) else crates
+
+
+def framework_half(cfg, rd: Path, crates: list[str]) -> tuple[bool, str]:
+    fw = cfg.path("framework.integration")
+    if not crates:
+        files = gates.changed_files(fw, cfg.require("framework.writing_base"))
+        crates = sorted({p for f in files if (p := gates.package_of(fw, f))})
+    if not crates:
+        return True, "framework: no changed crates"
+    crates = order(cfg, fw, crates)
+    env = gates.cl_env(cfg)
+    for c in crates:
+        log = rd / f"fw-{c}.log"
+        t = time.time()
+        rc = gates.run_logged(gates.cl(cfg, ["check", c, "--message-format", "short"]), fw, log, env)
+        errs = gates.error_lines(log)
+        print(f"{c}: {'ok' if rc == 0 else f'{len(errs)} errors, exit {rc}'} ({time.time() - t:.0f}s)", flush=True)
+        if rc != 0:
+            for l in errs[:40]:
+                print("  " + l)
+            return False, f"framework: {c} failed ({len(errs)} errors); {crates.index(c)} of {len(crates)} crates ok before it"
+    return True, f"framework: {len(crates)} crate(s) ok"
+
+
+def app_half(cfg, rd: Path) -> tuple[bool, str]:
+    app = cfg.path("app.integration")
+    log = rd / "app.log"
+    log.write_bytes(b"")
+    t = time.time()
+    rc = gates.run_logged(gates.cl(cfg, ["check", "all", "--keep-going", "--message-format", "short"]), app, log, gates.cl_env(cfg))
+    errs = gates.error_lines(log)
+    (rd / "app.errors").write_text("".join(e + "\n" for e in errs))
+    text = log.read_text(errors="replace")
+    failed = text.count("error: could not compile")
+    print(f"app check exit {rc} ({time.time() - t:.0f}s): {len(errs)} errors, {failed} crates failed")
+    # Errors without a file position (resolution, manifest) show the cause when the list is empty.
+    plain = Counter(l for l in text.splitlines() if l.startswith("error") and not l.startswith("error[") and "could not compile" not in l)
+    for line, n in plain.most_common(8):
+        print(f"  {n:>3} {line}")
+    return rc == 0, f"app: exit {rc}, {len(errs)} errors, {failed} crates failed"
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("label")
+    ap.add_argument("crates", nargs="*")
+    g = ap.add_mutually_exclusive_group()
+    g.add_argument("--fw-only", action="store_true")
+    g.add_argument("--app-only", action="store_true")
+    ap.add_argument("--config")
+    a = ap.parse_args()
+    cfg = config.load(a.config)
+    rd = gates.run_dir(cfg, a.label)
+    with track.recorded("compile-gate") as rec:
+        results = []
+        ok = True
+        if not a.app_only:
+            ok, msg = framework_half(cfg, rd, a.crates)
+            results.append(msg)
+        if ok and not a.fw_only:
+            ok, msg = app_half(cfg, rd)
+            results.append(msg)
+        text = f"{a.label}: " + "; ".join(results)
+        print(text)
+        rec.result(text, log=str(rd), data={"label": a.label, "ok": ok})
+    sys.exit(0 if ok else 1)
+
+
+if __name__ == "__main__":
+    main()

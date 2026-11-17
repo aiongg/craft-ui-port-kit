@@ -1,0 +1,38 @@
+# p6-compile-fix
+
+Fix the compile errors of one crate group: all causes in the crate, in dependency order, code only. Fill the placeholders with `tools/render-prompt`.
+
+Do not start subagents or workflows. Do not run cargo or any build.
+
+Read first, in full: {{RULES}}/agent-common.md and {{RULES}}/porting-rules.md ("Code"), then {{KIT}}/process/07-review-combine-compile.md ("Compile errors").
+
+## Why one agent per crate
+
+Compile errors come in groups. One wrong signature or one missing import produces many errors in many files. One agent per error repeats the same fix and makes edits that conflict. You own one crate group named in your prompt: the errors of that crate, from the lead's error grouping (the file named in your prompt: crate, cause, the error lines, the files). Fix by cause, not by line.
+
+## Job
+
+1. Read the group file. List the causes (a changed signature, a moved item, a missing re-export, a missing trait import, a type that changed).
+2. For each cause, find where it belongs. A wrong or missing contract item goes to its owner, not to a workaround at the call sites. Check the sheet ({{SHEETS}}) and the contract row ({{PARTS}}) for the intended signature. Fix at the cause, once, then at every caller the cause breaks (`git grep` the whole tree).
+3. Fix the causes in dependency order: an error in a lower crate can produce the errors above it. Do not touch crates outside your group; list what they need in your report.
+4. Write code that compiles. Check imports, signatures and types by reading the definitions. Do not remove a trait import as unused unless you read that nothing calls a method through it.
+5. Never weaken an assertion, add a back door, or add a second path beside the one the port builds. A cause that needs a design choice goes to the report with options and a recommendation.
+
+Work in the worktree named in your prompt (cut from the integration branch). Commit per cause, with a message that says what behaviour changed. No attribution lines. Never push.
+
+The lead merges the groups and runs the one compile.
+
+## Report
+
+Per cause: what it was, the fix (file:line), and the errors it should clear. Then: errors you could not fix and why, errors that belong to other groups, the commit hashes. Add `track event fix "<cause>: <fix>" --task {{TASK}}` for each cause.
+
+## Tracking
+
+You report under the board task `{{TASK}}`. These calls are rules, not suggestions:
+
+- `track step {{TASK}} <step>` when each step starts. If it exits 3, the port is paused: stop and report. Your steps: `read`, `group`, `fix`, `report`.
+- `track status {{TASK}} <state> [--on WHAT]` on every state change: `running`, `review`, `waiting`, `blocked` (name the blocker with `--on`), `done`.
+- `track ask {{TASK}} "question" --option A --option B` for every question you cannot settle from the rules and the code. Then go on with the work that does not depend on the answer.
+- `track status {{TASK}} review "<one-line summary>" --calls N` as your last action, where N is the number of tool calls you used.
+
+Kit tools record their own runs. Do not report those.

@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Run one step for every set in a list, N at a time.
+#   run-batch LIST [N] [MODEL]               write each set with `port-set run --skip-plancheck` (plan check and
+#                                            decisions done); MODEL default models.write
+#   run-batch --plancheck LIST [N] [MODEL]   plan-check each set with `port-set plancheck --shared`; MODEL default
+#                                            models.plancheck; a set whose plancheck.md exists is skipped
+# LIST holds one set id per line. N defaults to pipeline.parallel.
+# When pipeline.quota_command is set, a job waits while the command reports a percent of the plan's 5-hour window at
+# or above pipeline.quota_cap (the lead's own session shares the window). The check repeats every 5 minutes.
+# Log (appended): <work.sets>/run-batch.log; each set's output in <work.sets>/<set>/run.log or plancheck.log.
+set -u
+. "$(dirname "$(readlink -f "$0")")/portkit/lib.sh"
+track_self run-batch "$0" "$@"
+
+mode=run
+if [ "${1:-}" = --plancheck ]; then mode=plancheck; shift; fi
+[ $# -ge 1 ] || die "usage: run-batch [--plancheck] LIST [N] [MODEL]"
+list=$1
+sets=$(cfgr work.sets)
+n=${2:-$(cfgr pipeline.parallel)}
+if [ $mode = plancheck ]; then model=${3:-$(cfgr models.plancheck)}; else model=${3:-$(cfgr models.write)}; fi
+quota_cmd=$(cfg pipeline.quota_command); cap=$(cfgr pipeline.quota_cap)
+log=$sets/run-batch.log
+export TOOLS sets model quota_cmd cap log mode
+
+wait_for_quota() {
+  [ -n "$quota_cmd" ] || return 0
+  while :; do
+    pct=$(bash -c "$quota_cmd" 2>/dev/null | tr -dc '0-9' | head -c 3)
+    [ -n "$pct" ] && [ "$pct" -lt "$cap" ] && return 0
+    echo "$(date -u +%H:%M) $1 waits: 5h window at ${pct:-?}%" | tee -a "$log"
+    sleep 300
+  done
+}
+
+one() {
+  s=$1
+  mkdir -p "$sets/$s"
+  if [ "$mode" = plancheck ]; then
+    [ -f "$sets/$s/plancheck.md" ] && return 0
+    wait_for_quota "$s"
+    "$TOOLS/port-set" plancheck "$s" --shared --model "$model" > "$sets/$s/plancheck.log" 2>&1
+    echo "$(date -u +%H:%M) $(tail -1 "$sets/$s/plancheck.log")" | tee -a "$log"
+  else
+    wait_for_quota "$s"
+    "$TOOLS/port-set" run "$s" --skip-plancheck --model "$model" > "$sets/$s/run.log" 2>&1
+    echo "$(date -u +%H:%M) $s: $(grep -E '^(apply|check|racheck|OPEN|BLOCKED|OUT OF TURNS|done)' "$sets/$s/run.log" | tr '\n' ' ' | cut -c1-300)" | tee -a "$log"
+  fi
+}
+export -f one wait_for_quota
+
+mkdir -p "$sets"
+sed '/^[[:space:]]*$/d' "$list" | xargs -P "$n" -I{} bash -c 'one {}'
+echo "$(date -u +%H:%M) batch done" | tee -a "$log"

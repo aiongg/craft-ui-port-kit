@@ -45,7 +45,7 @@ a.chip{text-decoration:none;color:inherit}
 /* ---- layout ---- */
 main{max-width:1440px;margin:0 auto;padding:4px 16px 80px}
 .cols{display:grid;grid-template-columns:minmax(0,1fr);gap:0 32px}
-@media (min-width:1050px){.cols{grid-template-columns:minmax(0,1fr) 400px}.side{border-left:1px solid var(--rule);padding-left:28px}}
+@media (min-width:1050px){.cols{grid-template-columns:minmax(0,1fr) minmax(0,2fr)}.side{border-left:1px solid var(--rule);padding-left:28px}}
 section{padding:16px 0 4px}
 section:empty{display:none}
 section>h2{font-size:1.08rem;display:flex;align-items:baseline;gap:10px;margin-bottom:8px}

@@ -223,3 +223,19 @@ def case_out_of_turns_write_skips_repairs(s):
         os.environ.update(saved)
     check(not out.ok and "OUT OF TURNS" in out.text, f"ends OUT OF TURNS: {out}")
     check(not (s.work / "sets" / "set-e" / "repair-1.json").exists(), "no repair call ran")
+
+
+def case_untouched_row_is_not_written(s):
+    portset(s)
+    from portkit.portset.write import end_state
+    sh = FakeSheet("set-f", s.root, [])
+    (s.work / "sets" / "set-f").mkdir(parents=True)
+    out = end_state(sh, "written", errs=["untouched: src/a.rs (edit)"])
+    check(not out.ok and "not written" in out.text, f"an untouched row leaves the set blocked: {out}")
+    out = end_state(sh, "written", errs=["test not deleted: src/a.rs t"])
+    check("not written" not in out.text, f"other check errors stay review: {out}")
+    (s.work / "sets" / "set-f" / "check.md").write_text("## Errors\n\nuntouched: src/a.rs (edit)\n")
+    (s.work / "f.md").write_text("finding\n")
+    (s.work / "list").write_text("set-f f.md\n")
+    p = s.run("fix-batch", "list")
+    check("SKIPPED: not written" in p.stdout, "fix-batch skips an unwritten set", p)

@@ -61,6 +61,9 @@ def stage_of(set_id: str) -> tuple[str, str]:
     if newer(d / "blocked.md", d / "check.md"):
         return "blocked", (re.sub(r"^# .*\n+", "", (d / "blocked.md").read_text()).strip().splitlines() or [""])[0][:120]
     if (d / "check.md").exists():
+        text = (d / "check.md").read_text()
+        if re.search(r"^(untouched|test missing):", text, re.M):
+            return "blocked", "not written: untouched rows or missing tests (check.md)"
         e, ra = check_counts(d)
         return "written", f"{e} check errors, {ra} rust-analyzer errors"
     if newer(d / "open.md", dec):

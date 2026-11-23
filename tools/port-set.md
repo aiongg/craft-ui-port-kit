@@ -210,7 +210,7 @@ Errors:
 
 Warnings: lints of level `warn`; every `// PLAN:` note; PLAN notes naming items the framework index defines; names `decisions.md` gives that are in none of the set's trees; a `delete` test in another set's file; removed names still in the set's files.
 
-Batch runners read `check.md`: an item starting `untouched:` or `test not deleted:` gets an agent round; items starting `compile error (rust-analyzer)` wait for the batch recheck.
+Batch runners read `check.md`: an item starting `untouched:`, `test missing:` or `test not deleted:` gets an agent round; a set whose last check still has `untouched:` or `test missing:` items has state `blocked` ("not written") and `fix-batch` skips it; items starting `compile error (rust-analyzer)` wait for the batch recheck.
 
 ### racheck SET
 

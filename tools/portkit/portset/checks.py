@@ -335,6 +335,14 @@ def checks(sheet: Sheet) -> list[str]:
     return write_check(sheet, errs, warns, racheck_set(sheet))
 
 
+UNWRITTEN_PREFIXES = ("untouched:", "test missing:")
+
+
+def unwritten(errs) -> list[str]:
+    """Check errors that mean the set was not written: a planned row left untouched, or a new test that is not there."""
+    return [e for e in errs if e.startswith(UNWRITTEN_PREFIXES)]
+
+
 def scripted(errs: list[str]) -> list[str]:
     """The errors the writer itself must fix: everything except rust-analyzer's, which may name another set's items."""
     return [e for e in errs if not e.startswith(RA_PREFIX)]

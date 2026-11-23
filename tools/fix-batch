@@ -19,6 +19,11 @@ export TOOLS sets model turns log
 
 one() {
   s=$1; f=$2; label=$(basename "$f" .md)
+  # A set that was never written (rows untouched, new tests missing) has nothing to fix yet: write it first.
+  if grep -qE '^(untouched|test missing):' "$sets/$s/check.md" 2>/dev/null; then
+    echo "$(date -u +%H:%M) $s fix $label: SKIPPED: not written (check.md lists untouched rows or missing tests)" | tee -a "$log"
+    return
+  fi
   mkdir -p "$sets/$s"
   "$TOOLS/port-set" fix "$s" "$f" --model "$model" --max-turns "$turns" > "$sets/$s/fix-$label.log" 2>&1
   echo "$(date -u +%H:%M) $s fix $label: $(grep -E '^(apply|check|racheck|OPEN|BLOCKED|OUT OF TURNS|done|fix-)' "$sets/$s/fix-$label.log" | tr '\n' ' ' | cut -c1-300)" | tee -a "$log"

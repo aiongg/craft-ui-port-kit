@@ -27,7 +27,7 @@ from pathlib import Path
 from portkit import track
 
 from .bundle import build_bundle, instructions, numbered
-from .checks import checks, racheck_set, scripted
+from .checks import checks, racheck_set, scripted, unwritten
 from .context import ctx, git
 from .edits import apply_edits, blocked_reason, remove, write_apply
 from .model import (AGENT_ALLOWED, EDIT_TOOLS, READ_TOOLS, WRITE_NOW, agent_prompt, claude, commit, continue_text,
@@ -161,6 +161,10 @@ def end_state(sheet: Sheet, what: str, *, reason=None, out_of_turns=False, conti
         cont = continue_cmd or f"port-set agent {sheet.id} --continue"
         track.status(sheet.id, "blocked", f"{what}: out of turns; finish with `{cont}`", on="lead")
         return Outcome(f"OUT OF TURNS; finish with `{cont}`", ok=False, log=od / "check.md")
+    if (nw := unwritten(errs)):
+        note = f"{what}: not written ({len(nw)} untouched rows or missing tests left; check.md)"
+        track.status(sheet.id, "blocked", note, on="lead")
+        return Outcome(note, ok=False, log=od / "check.md", data={"unwritten": len(nw)})
     own = scripted(list(errs))
     ra = len(errs) - len(own)
     counts = {"errors": len(own), "rust_analyzer_errors": ra, "apply_failures": len(fails)}

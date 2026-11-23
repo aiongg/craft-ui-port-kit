@@ -71,7 +71,7 @@ one() {
     fi
     # A one-shot that left planned rows untouched or tests undeleted gets agent rounds until the scripted check is clean.
     for r in $(seq 1 "$rounds"); do
-      grep -qE '^(untouched|test not deleted):' "$d/check.md" 2>/dev/null || break
+      grep -qE '^(untouched|test missing|test not deleted):' "$d/check.md" 2>/dev/null || break
       "$TOOLS/port-set" agent "$s" --continue --model "$model" --max-turns "$round_turns" > "$d/agent-cont-$r.log" 2>&1
       out="$out; untouched rows, agent round $r: $(grep -E '^(agent|check|OUT)' "$d/agent-cont-$r.log" | tr '\n' ' ')"
     done

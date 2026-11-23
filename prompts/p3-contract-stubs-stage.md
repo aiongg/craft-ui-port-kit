@@ -1,10 +1,10 @@
 # p3-contract-stubs-stage
 
-Compile one stage of the framework contract as stubs, so writers code against signatures that exist. Fill the placeholders with `tools/render-prompt`.
+Compile one stage of the contract (a group of framework crates, or the app) as stubs, so writers code against signatures that exist. Fill the placeholders with `tools/render-prompt`.
 
 Do not start subagents or workflows.
 
-You compile one stage of the framework contract as stubs, so the phase 5 writers code against signatures that exist. Read {{RULES}}/agent-common.md and {{RULES}}/porting-rules.md ("Code") first, then {{KIT}}/process/04-contract-stubs.md.
+You compile one stage of the contract as stubs, so the writers code against signatures that exist. Read {{RULES}}/agent-common.md and {{RULES}}/porting-rules.md ("Code") first, then {{KIT}}/process/04-contract-stubs.md.
 
 ## Where
 
@@ -13,12 +13,21 @@ You compile one stage of the framework contract as stubs, so the phase 5 writers
 - Sheets (one per writer set): {{SHEETS}}/<set>.md. Ownership of every file: {{OWNERSHIP}}.
 - Line numbers in the contract and sheets are at {{PLAN_BASE}}. The branch can differ by a few lines: find items by name.
 
+## The app stage
+
+When your stage is `app`, the app contract is yours, and these lines replace the matching ones above and under Checks:
+
+- Worktree: {{APP_INT}}, branch `{{APP_WRITING_BASE}}`. Its manifest builds the app against the stubbed framework in {{FW_INT}}; leave the framework tree and the manifest's patch regions alone.
+- Your rows are those under `### <crate> (app)` headings in {{PARTS}}/*.md; skip every other row. App line numbers in the contract and sheets are at {{APP_PLAN_BASE}}.
+- Broken callers: anywhere in the app, including callers of framework items the earlier stages changed.
+- Check: `cl check all` in {{APP_INT}} (the build tool's app mode), once after the stubs and again after the callers, until it passes with no new warning in the app.
+
 ## What to write
 
 - **new** item: add it with the exact signature. Function and method bodies are `todo!("<id>")`. A new struct field, enum variant or trait method is added as specified. Where the crate builds that struct or matches that enum (a literal, `Default`, an exhaustive match), add the minimum that compiles (the field's `Default::default()`, a `todo!("<id>")` arm). Every new public item gets a doc comment: the contract's Behaviour text in one or two plain sentences (the crates warn on missing docs).
 - **changed** item: change the signature or type exactly as written. Keep the existing body. If the body no longer compiles, make the smallest edit that compiles (bind a new parameter as `let _ = name;`, convert a changed type at the boundary) and mark it `// P3(<writer set>): <id>`. Never replace an existing body with `todo!()`, and never delete existing code.
 - **removed** item: leave it in place. Its writer set removes it together with its readers in phase 5.
-- Rows for files outside your crates (manifests, workflows, app interfaces): skip.
+- Rows for files outside your crates (manifests, workflows, app rows of a framework stage): skip.
 
 ## Callers that your changes or earlier stages break
 

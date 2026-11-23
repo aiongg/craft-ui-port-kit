@@ -1,5 +1,6 @@
 """port-set and friends: check.md states racheck's count, apply rejects unmatched blocks, an empty BLOCKED fails,
-fix-batch refuses bad lines, track md stays in the workspace, combine-lost exits 1 on a lost line."""
+fix-batch refuses bad lines, track md stays in the workspace, combine-lost exits 1 on a lost line, app contract rows
+reach the bundle and the stub audit, and contract ids the pattern misses fail the audit."""
 import os
 import sys
 
@@ -122,3 +123,56 @@ def case_review_diff_writes_patch(s):
     write.cmd_review_diff(type("A", (), {"sets": ["set-a"]})())
     patch = s.work / "sets" / "set-a" / "review-diff.patch"
     check(patch.is_file() and "+fn added_by_set() {}" in patch.read_text(), "review-diff.patch holds the set's change")
+
+
+CONTRACT_HEAD = ("| Id | Kind | Signature | Behaviour | Replaces | Writer | Also | Used by | Source | Resolution |\n"
+                 "|---|---|---|---|---|---|---|---|---|---|\n")
+
+
+def contract_plan(s, fw_ids=("CV-C8",), app_ids=("ap.A1", "ap.A2")):
+    """A framework and an app tree on their writing bases, a framework part, an app part and two app sheets."""
+    ctx = portset(s)
+    from portkit.portset import plan, sheet
+    for f in (plan.contract_table, plan.writers, plan.crate_dirs, sheet.base_files):
+        f.cache_clear()
+    if not (s.root / "fw").exists():
+        s.tree("fw", {"Cargo.toml": "[workspace]\n", "crates/core/Cargo.toml": '[package]\nname = "fw-core"\n',
+                      "crates/core/src/lib.rs": "pub fn shared() {}\n"}, branch="port/stubs")
+        s.tree("app", {"Cargo.toml": '[package]\nname = "sapp"\n',
+                       "src/view.rs": 'pub fn with_host() {\n    todo!("ap.A1")\n}\n'}, branch="port/app-base")
+    ctx.parts.mkdir(parents=True, exist_ok=True)
+    ctx.sheets.mkdir(parents=True, exist_ok=True)
+    row = "| {} | new | `pub fn {}()` | Does it. | none | ui-w1 | none | ui-w2 | m 1 | none |\n"
+    (ctx.parts / "01.md").write_text("### fw-core\n\n#### `src/lib.rs`\n\n" + CONTRACT_HEAD +
+                                     row.format(fw_ids[0], "shared").replace("| new |", "| changed |"))
+    (ctx.parts / "02.md").write_text("### sapp (app)\n\n#### `src/view.rs`\n\n" + CONTRACT_HEAD +
+                                     row.format(app_ids[0], "with_host") + row.format(app_ids[1], "install_runtime"))
+    head = "# {}\n\n- Repo: app\n- Contract items it writes: {}\n- Contract items and app interfaces it calls: {}\n"
+    (ctx.sheets / "ui-w1.md").write_text(head.format("ui-w1", f"{app_ids[0]}, {app_ids[1]}", fw_ids[0]))
+    (ctx.sheets / "ui-w2.md").write_text(head.format("ui-w2", "none", f"{app_ids[0]}, {app_ids[1]}"))
+    return plan
+
+
+def case_app_contract_rows(s):
+    plan = contract_plan(s)
+    from portkit.portset.audit import audit_stubs
+    from portkit.portset.bundle import contract_section
+    rows = plan.contract_table()
+    check(rows.get("CV-C8", {}).get("repo") == "fw" and rows.get("ap.A1", {}).get("repo") == "app"
+          and rows["ap.A1"]["file"] == ["src/view.rs"], f"`CV-C8` and an app row under `(app)` are read: {rows}")
+    _, text = contract_section(["ap.A1", "CV-C8"])
+    check(text.index("### sapp (app)") < text.index("| ap.A1 |") and "### fw-core" in text,
+          f"the bundle carries the app row under its app heading: {text}")
+    every = plan.all_sheets()
+    missing, _, checked = audit_stubs(every, every, plan.Trees())
+    check(checked == 3 and [m[1] for m in missing] == ["ap.A2"],
+          f"the stub audit passes the stubbed app id and reports the missing one: {checked} {missing}")
+
+
+def case_audit_fails_on_unmatched_ids(s):
+    plan = contract_plan(s, fw_ids=("CV.C8",), app_ids=("ap-A1", "ap-A2"))
+    from portkit.portset.audit import audit_stubs
+    every = plan.all_sheets()
+    missing, _, _ = audit_stubs(every, every, plan.Trees())
+    check(len(missing) == 1 and "no row whose id matches" in missing[0][4],
+          f"ids the pattern misses are a finding, not a clean audit: {missing}")

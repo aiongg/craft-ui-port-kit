@@ -36,7 +36,8 @@ Workflow args
                           (templates/eval-result.schema.json).
     phase2-fix            contract: one job per part of the contract ({id, file, crates, items}); the parts are
                           <parts>/NN.md when they exist, else <plan>/contract.md is cut at its `### <crate>` headings
-                          into parts of about 120 rows and written there; sheets: the sets of the ownership file in
+                          into parts of about 120 rows (app crates, `### <crate> (app)`, in parts of their own) and
+                          written there; sheets: the sets of the ownership file in
                           jobs of four per area ({id, area, sets}); coverage: one job per gap list of
                           <plan>/eval-coverage.md ({id, scope}); fixDir: <plan>/fix.
     phase2-reconcile      --stage contract, sheets or evaluate (required). Every stage: partList (the NN.md files of
@@ -428,7 +429,7 @@ def phase2_part_args(cfg: config.Config, a, base: dict) -> dict:
 
 # ---------------------------------------------------------------- phase 2: final, fix, reconcile
 
-ROW = re.compile(r"^\|\s*[a-z]{2}\.[A-Za-z]\d+\s*\|")
+ROW = planfix.ROW_ID
 SET_HEAD = re.compile(r"^#{2,6}\s+`?([a-z][a-z0-9-]*-w\d+)`?(?:\s|:|$)")
 PART_FILE = re.compile(r"^\d\d\.md$")
 PART_ROWS = 120
@@ -453,7 +454,7 @@ def phase2_final_args(cfg: config.Config, a, base: dict) -> dict:
 def contract_parts(cfg: config.Config) -> list[dict]:
     """The contract's parts as fix jobs. Existing <parts>/NN.md files are used as they are; otherwise contract.md is
     cut at its `### <crate>` headings into parts of about PART_ROWS rows, the text before the first heading going to
-    00-head.md."""
+    00-head.md. App crates (`### <crate> (app)`) start a part of their own, so the app rows are their own part."""
     parts_dir = cfg.path("work.parts")
     files = sorted(f for f in parts_dir.glob("*.md") if PART_FILE.match(f.name)) if parts_dir.is_dir() else []
     if files:
@@ -469,8 +470,10 @@ def contract_parts(cfg: config.Config) -> list[dict]:
     parts_dir.mkdir(parents=True, exist_ok=True)
     (parts_dir / "00-head.md").write_text("\n".join(lines[: heads[0]]).rstrip() + "\n")
     groups: list[list[list[str]]] = [[]]
+    app = lambda c: c[0].rstrip().endswith("(app)")
     for c in crates:
-        if groups[-1] and sum(len([l for l in x if ROW.match(l)]) for x in groups[-1]) + len([l for l in c if ROW.match(l)]) > PART_ROWS:
+        if groups[-1] and (app(c) != app(groups[-1][-1]) or
+                           sum(len([l for l in x if ROW.match(l)]) for x in groups[-1]) + len([l for l in c if ROW.match(l)]) > PART_ROWS):
             groups.append([])
         groups[-1].append(c)
     out = []

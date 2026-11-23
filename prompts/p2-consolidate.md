@@ -15,7 +15,7 @@ Read-only on code: edit no code, run no cargo or build, no git command that writ
 
 Write the final plan files.
 
-- {{PLAN}}/contract.md: the one framework API contract, by crate and file. Per item: full signature, one line of behaviour, what it replaces, the writer set. Phase 3 compiles these items as stubs.
+- {{PLAN}}/contract.md: the one contract, by crate and file, one table row per item in the columns and id format of {{KIT}}/templates/contract-part.md (no bullets: the tools read only table rows whose first cell is an id). It holds every framework item, then, under `### <crate> (app)` headings after the framework crates, every app item that more than one app set uses: constructors, shared view structs, a services or context parameter, the runtime install, the test harness. App ids take the Kind letter `A`. Phase 3 compiles all of these as stubs, so every set codes against its siblings' real signatures.
 - {{OWNERSHIP}}: every file to write, in exactly one writer set. Per set: id, repo, files with action, model, estimated lines to write and to delete, the contract items and map sections it implements, the sets it waits on through the contract, and the base it starts from ({{PLAN_BASE}} for the framework, {{APP_PLAN_BASE}} for the app).
   Write it in the format `{{KIT}}/tools/coverage.py --from plan` parses, one block per set; other lines (prose, model, lines, waits on) may follow the `- Repo` line freely:
 

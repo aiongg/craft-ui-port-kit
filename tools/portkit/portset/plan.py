@@ -35,36 +35,41 @@ def area_of(set_id: str) -> str:
 def expand_ids(text: str) -> set[str]:
     """Contract ids in a text, with ranges such as `cw.C16-C24` (or an en dash) expanded."""
     ids = set(re.findall(ID, text))
-    for m in re.finditer(r"\b([a-z]{2})\.([A-Z]+)(\d+)\s*[–-]\s*(?:[A-Z]+)?(\d+)\b", text):
+    for m in re.finditer(r"\b([a-z]{2}\.|[A-Z]{2}-)([A-Z]+)(\d+)\s*[–-]\s*(?:[A-Z]+)?(\d+)\b", text):
         a, b = int(m.group(3)), int(m.group(4))
         if a < b <= a + 200:
-            ids |= {f"{m.group(1)}.{m.group(2)}{i}" for i in range(a, b + 1)}
+            ids |= {f"{m.group(1)}{m.group(2)}{i}" for i in range(a, b + 1)}
     return ids
 
 
 # ---------------------------------------------------------------- contract
 
+# Manifests that name a crate: the framework's under crates/; the app's anywhere up to three levels, its root included.
+MANIFEST = {"fw": re.compile(r"crates/[^/]+(?:/[^/]+)?/Cargo\.toml"), "app": re.compile(r"(?:[^/]+/){0,3}Cargo\.toml")}
+APP_HEADING = re.compile(r"\s*\(app\)\s*$")
+
+
 @lru_cache(maxsize=None)
-def crate_dirs() -> dict[str, str]:
-    """Framework package name -> crate directory, from the Cargo manifests under crates/ at the writing base."""
+def crate_dirs(repo: str = "fw") -> dict[str, str]:
+    """Package name -> crate directory (`""` for a root package), from a repo's Cargo manifests at its writing base."""
     out = {}
-    for f in base_files("fw"):
-        if re.fullmatch(r"crates/[^/]+(?:/[^/]+)?/Cargo\.toml", f):
-            name = (toml_at(ctx.repo_dir("fw"), ctx.base("fw"), f).get("package") or {}).get("name")
+    for f in base_files(repo):
+        if MANIFEST[repo].fullmatch(f):
+            name = (toml_at(ctx.repo_dir(repo), ctx.base(repo), f).get("package") or {}).get("name")
             if name:
-                out[name] = f.rsplit("/", 1)[0]
+                out[name] = f.rsplit("/", 1)[0] if "/" in f else ""
     return out
 
 
-def crate_dir(name: str) -> str | None:
+def crate_dir(name: str, repo: str = "fw") -> str | None:
     name = name.strip().strip("`").split()[0] if name.strip() else ""
     if not name:
         return None
-    dirs = crate_dirs()
+    dirs = crate_dirs(repo)
     if name in dirs:
         return dirs[name]
     for cand in (name, name.split("-", 1)[-1]):   # a heading may name the directory instead of the package
-        if f"crates/{cand}/Cargo.toml" in base_files("fw"):
+        if f"crates/{cand}/Cargo.toml" in base_files(repo):
             return f"crates/{cand}"
     return None
 
@@ -81,21 +86,24 @@ def heading_files(d: str, heading: str) -> list[str]:
             t = base + "/" + t
         if base is None:
             base = t.rsplit("/", 1)[0] if "/" in t else ""
-        out.append(t if t.startswith(d + "/") else f"{d}/{t}")
+        out.append(t if not d or t.startswith(d + "/") else f"{d}/{t}")
     return out
 
 
 @lru_cache(maxsize=None)
 def contract_table() -> dict[str, dict]:
-    """id -> row. A framework row (10 cells, templates/contract-part.md) gives kind, sig, beh, repl, writer, the files
-    of its `####` heading, its crate dir and repo `fw`. A shorter row is an app interface row (Id | File | Signature |
-    Behaviour | Writer ...): kind `app`, repo `app`. The first part that has an id wins."""
+    """id -> row. A row (10 cells, templates/contract-part.md) gives kind, sig, beh, repl, writer, the files of its
+    `####` heading, its crate dir and its repo: `app` under a `### <crate> (app)` heading, else `fw`. The first part
+    that has an id wins."""
     rows = {}
     for part in sorted(ctx.parts.glob("*.md")):
         crate = fil = None
+        repo = "fw"
         for line in part.read_text().splitlines():
             if line.startswith("### "):
-                crate, fil = line[4:].strip().strip("`"), None
+                head = line[4:].strip()
+                repo = "app" if APP_HEADING.search(head) else "fw"
+                crate, fil = APP_HEADING.sub("", head).strip("`"), None
             elif line.startswith("#### "):
                 fil = line[5:].strip()
             m = re.match(rf"^\| ({ID}) \|", line)
@@ -103,11 +111,14 @@ def contract_table() -> dict[str, dict]:
                 continue
             cells = [c.strip() for c in line.strip().strip("|").split(" | ")]
             if len(cells) >= 10:
-                d = crate_dir(crate or "")
+                d = crate_dir(crate or "", repo)
                 rows.setdefault(cells[0], dict(kind=cells[1], sig=cells[2], beh=cells[3], repl=cells[4],
-                                               writer=cells[5], used_by=cells[7], file=heading_files(d, fil) if d and fil else [],
-                                               crate_dir=d, repo="fw", part=part.name))
+                                               writer=cells[5], used_by=cells[7],
+                                               file=heading_files(d, fil) if d is not None and fil else [],
+                                               crate_dir=d, repo=repo, part=part.name))
             elif len(cells) >= 5:
+                # The 5-cell app interface row (Id | File | Signature | Behaviour | Writer) predates the app part;
+                # parts of ports planned before it still carry such rows.
                 rows.setdefault(cells[0], dict(kind="app", sig=cells[2], beh=cells[3], repl="", writer=cells[4],
                                                used_by="", file=[cells[1].strip("`")], crate_dir=None, repo="app",
                                                part=part.name))
@@ -287,11 +298,11 @@ def def_regex(kind: str, name: str) -> re.Pattern:
 
 
 def row_files(row: dict, trees: Trees) -> list[str]:
-    """The framework files a contract row's heading names, directories expanded."""
+    """The files of its repo a contract row's heading names, directories expanded."""
     out = []
     for f in row["file"]:
         if f.endswith("/") or not f.endswith(".rs"):
-            out += [x for x in trees.files["fw"] if x.startswith(f.rstrip("/") + "/")]
+            out += [x for x in trees.files[row["repo"]] if x.startswith(f.rstrip("/") + "/")]
         else:
             out.append(f)
     return out

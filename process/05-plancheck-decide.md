@@ -93,7 +93,7 @@ Rule on its list for the lead and on the rebuild-key class yourself, write the r
 Every new or changed item that a decision names gets a stub with its full signature now, so no writer codes against an item that is missing from its base.
 
 1. List the items from the consistency report's contract changes and from `decisions.md` lines that add a framework item.
-2. Run one stage agent on them (`prompts/p3-contract-stubs-stage.md`, task `stub-refresh`), on the stub branch in the framework integration tree, exactly as a phase 3 stage: `cl check` per crate, one commit.
+2. Run one stage agent on them (`prompts/p3-contract-stubs-stage.md`, task `stub-refresh`), on the stub branch in the framework integration tree, exactly as a phase 3 stage: `cl check` per crate, one commit. When decisions add or change app rows, run the app stage on them after it (task `stub-refresh-app`, stage `app`).
 3. Move the line references to the new stub head: `tools/port-set remap`.
 4. Move `racheck.fw_base` to the new head, restart the framework daemon, and rebuild `<work.scip>/fw.sqlite` ([04-contract-stubs.md](04-contract-stubs.md), steps 5 and 6).
 5. Rerun the plan check of every set whose sheet a decision changed beyond a line or two (`tools/port-set plancheck <set>`), and decide what it lists.

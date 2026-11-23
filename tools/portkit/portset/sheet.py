@@ -16,7 +16,8 @@ from pathlib import Path
 
 from .context import OTHER, ctx, git
 
-ID = r"[a-z]{2}\.[A-Z]+\d+[a-z]?"
+# A contract id: `<code>.<Kind><n>` as the template writes it, or `<CODE>-<Kind><n>` as some plans write it.
+ID = r"(?:[a-z]{2}\.|[A-Z]{2}-)[A-Z]+\d+[a-z]?"
 ACTIONS = ("new", "edit", "rewrite", "delete", "keep")
 # Workspace paths a sheet names, with optional line suffixes (`:12`, `:12-40`, `:12, :80`).
 PATH_RE = re.compile(r"((?:crates|apps|tools|docs|migration)/[\w./-]+\.(?:rs|toml|md|svg|json))"

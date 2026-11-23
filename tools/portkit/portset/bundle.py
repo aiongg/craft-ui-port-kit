@@ -15,7 +15,7 @@ from pathlib import Path
 from . import scip
 from .context import REPOS, ctx
 from .edits import moves
-from .sheet import PATH_RE, SUFFIX_RE, Sheet, base_files, contract_rows, idents_of, spans_of, writer_sheet
+from .sheet import ID, PATH_RE, SUFFIX_RE, Sheet, base_files, idents_of, spans_of, writer_sheet
 
 OUTLINE_RE = re.compile(r"^\s*(?:#\[cfg\(test\)\]|(?:pub(?:\([^)]*\))?\s+)?(?:(?:const|async|unsafe|extern \"C\")\s+)*"
                         r"(?:fn|struct|enum|trait|impl|mod|type|union|macro_rules!)\b)")
@@ -441,11 +441,33 @@ def settled(sheet: Sheet) -> str:
     return f"## Settled before writing ({sheet.id})\n\n" + "\n\n".join(out) if out else ""
 
 
+def contract_section(ids: list[str]) -> tuple[list[str], str]:
+    """(rows, text) for the given contract ids: each row (from work.parts, the first part wins) under its `### <crate>`
+    and `#### <file>` headings, so the writer sees where every item lives and which rows are app rows (`(app)`)."""
+    want, seen, rows, groups = set(ids), set(), [], {}
+    for part in sorted(ctx.parts.glob("*.md")):
+        crate = fil = ""
+        for line in part.read_text().splitlines():
+            if line.startswith("### "):
+                crate, fil = line, ""
+            elif line.startswith("#### "):
+                fil = line
+            m = re.match(rf"^\| ({ID}) \|", line)
+            if m and m.group(1) in want and m.group(1) not in seen:
+                seen.add(m.group(1))
+                rows.append(line)
+                groups.setdefault((crate, fil), []).append(line)
+    out = []
+    for (crate, fil), lines in groups.items():
+        out += [h + "\n" for h in (crate, fil) if h] + [CONTRACT_HEAD, *lines, ""]
+    return rows, "\n".join(out).rstrip()
+
+
 def build_bundle(sheet: Sheet) -> str:
     parts = [instructions(sheet), f"## Your sheet ({sheet.id})\n\n{writer_sheet(sheet.text)}"]
     if s := settled(sheet):
         parts.append(s)
-    rows = contract_rows(sheet.writes + sheet.calls)
+    rows, contract = contract_section(sheet.writes + sheet.calls)
     if fw_note(sheet) and scip.con("fw"):
         d = fw_defs(sheet.text + "\n" + "\n".join(rows))
         if d:
@@ -453,7 +475,8 @@ def build_bundle(sheet: Sheet) -> str:
                          "definition and public methods of each framework item your sheet and contract rows name.\n\n"
                          + "\n\n".join(d))
     if rows:
-        parts.append(f"## Contract rows you write or call\n\n{CONTRACT_HEAD}\n" + "\n".join(rows))
+        parts.append(f"## Contract rows you write or call\n\nUnder their crate and file; a crate marked `(app)` is in "
+                     f"the app.\n\n{contract}")
     full = [p for p in sheet.in_bundle() if sheet.fp(p).exists()]
     missing = [p for p, a in sheet.files if a in ("edit", "rewrite", "keep") and not sheet.fp(p).exists()]
     refs = references(sheet)

@@ -25,7 +25,7 @@ from .context import OTHER, REPOS, ctx
 from .plan import (SET_ID, TOK, Owners, Trees, all_sheets, calls_of, contract_table, def_regex, row_files,
                    set_dir_text, sig_items, writers)
 from .scip import con as scip_con
-from .sheet import RUST_KW, Sheet, base_files, idents_of, spans_of
+from .sheet import ID, RUST_KW, Sheet, base_files, idents_of, spans_of
 from .write import Outcome
 
 GATING = ("stubs", "stories", "decision-files", "readers")
@@ -50,17 +50,18 @@ STORIES_KEY = "Stories"
 # ---------------------------------------------------------------- stubs
 
 def trace_index(T: Trees) -> tuple[set[str], dict[str, list[str]]]:
-    """Contract ids the framework tree carries as `todo!("<id>")` and as `P3(` marker lines naming them."""
+    """Contract ids either tree carries as `todo!("<id>")` and as `P3(` marker lines naming them."""
     todo_ids, p3 = set(), {}
-    for p in T.files["fw"]:
-        t = T.text("fw", p)
-        if not t or ("todo!(" not in t and "P3(" not in t):
-            continue
-        for n, line in enumerate(T.lines("fw", p), 1):
-            todo_ids |= set(re.findall(r'todo!\("([^"]+)"\)', line))
-            if "P3(" in line:
-                for i in re.findall(r"[a-z]{2}\.[A-Z]+\d+[a-z]?", line):
-                    p3.setdefault(i, []).append(f"{p}:{n}")
+    for repo in REPOS:
+        for p in T.files[repo]:
+            t = T.text(repo, p)
+            if not t or ("todo!(" not in t and "P3(" not in t):
+                continue
+            for n, line in enumerate(T.lines(repo, p), 1):
+                todo_ids |= set(re.findall(r'todo!\("([^"]+)"\)', line))
+                if "P3(" in line:
+                    for i in re.findall(ID, line):
+                        p3.setdefault(i, []).append(f"{p}:{n}")
     return todo_ids, p3
 
 
@@ -128,9 +129,15 @@ def audit_stubs(sheets: list[Sheet], every: list[Sheet], T: Trees) -> tuple[list
     ids = sorted({cid for cid, ws in W.items() if ws & chosen} |
                  {cid for cid, cs in callers.items() if cs & chosen})
     missing, checked = [], 0
+    # Ids in a form the id pattern misses leave every lookup below empty, which would read as a clean audit.
+    used = set(W) | set(callers)
+    if not rows or not used & set(rows):
+        why = ("the contract parts hold no row whose id matches the id pattern" if not rows else
+               "no sheet writes or calls an id the contract parts define")
+        missing.append(("-", "-", "-", str(ctx.parts), why + " (ids are `<code>.<Kind><n>` or `<CODE>-<Kind><n>`)", []))
     for cid in ids:
         row = rows.get(cid)
-        if not row or row["repo"] != "fw" or not re.match(r"(new|changed)", row["kind"]):
+        if not row or not re.match(r"(new|changed)", row["kind"]):
             continue
         items = sig_items(row["sig"])
         if not items:
@@ -139,7 +146,7 @@ def audit_stubs(sheets: list[Sheet], every: list[Sheet], T: Trees) -> tuple[list
         ws = sorted(W.get(cid, ())) or ["-"]
         cs = sorted(callers.get(cid, set()) - set(ws))
         files = row_files(row, T)
-        texts = {f: T.text("fw", f) for f in files}
+        texts = {f: T.text(row["repo"], f) for f in files}
         texts = {f: t for f, t in texts.items() if t}
         defined = [(k, n) for k, n in items if any(def_regex(k, n).search(t) for t in texts.values())]
         if not defined:
@@ -208,13 +215,15 @@ def decision_names(sheets: list[Sheet], every: list[Sheet], T: Trees) -> list[tu
 def fmt_stubs(missing, names, checked) -> str:
     out = ["# stubs: pinned signatures the stubs lack", "",
            "How it decides. Every contract id a set writes or another set calls (head keys `Contract items it writes` "
-           "and `Contract items and ...`, ranges expanded; plus the row's Writer cell) whose framework row has kind "
+           "and `Contract items and ...`, ranges expanded; plus the row's Writer cell) whose row has kind "
            "new or changed and whose signature names a Rust item (`fn`, `struct`, `enum`, `trait`, `type`, `const`, "
-           "`mod` or a `pub name:` field) is looked up in the framework tree at its writing base. It is present when "
+           "`mod` or a `pub name:` field) is looked up in its repo's tree at the writing base (the framework, or the app "
+           "for a row under an `(app)` heading). It is present when "
            "one of the items is defined in the file the row's heading names, or the tree holds `todo!(\"<id>\")` or a "
            "`P3(` marker line naming the id. For each `fn` of the signature that is defined, the parameter count (self "
            "forms left out) must match one definition. Items defined only inside macros or re-exported from another "
-           "file show as false positives.", "",
+           "file show as false positives. When the parts hold no id the id pattern matches, or no sheet writes or "
+           "calls an id they define, that is one finding: every other lookup would come back empty.", "",
            "The second table lists backticked names in `decisions.md` bullets that neither tree has, that another set's "
            "sheet or decisions also names, where one of those sets writes framework code. Sets already written "
            "(their check.md exists) are not checked.", "",

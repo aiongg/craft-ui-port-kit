@@ -16,7 +16,7 @@ Every run below is started as in phase 1: `tools/render-prompt --workflow-args <
 
 | Artifact | Holds | Read by |
 |---|---|---|
-| Contract parts (`work.parts/NN.md`) | Every new, changed or removed framework item, grouped by crate and file: Id, Kind, Signature, Behaviour, Replaces, Writer, Also, Used by, Source, Resolution (`templates/contract-part.md`). Ids are `<area code>.<Kind><n>`. | Phase 3 stubs them; writers get their rows |
+| Contract parts (`work.parts/NN.md`) | Every new, changed or removed framework item, and every app item more than one app set uses, grouped by crate and file: Id, Kind, Signature, Behaviour, Replaces, Writer, Also, Used by, Source, Resolution (`templates/contract-part.md`). Ids are `<area code>.<Kind><n>`; app crates are headed `### <crate> (app)` and their ids take the Kind letter `A`. | Phase 3 stubs them; writers get their rows |
 | Sheets (`work.sheets/<area>-w<n>.md`) | One per writer set: header (repo, model, lines, contract items, waits on), Files table (path, action `new`/`edit`/`rewrite`/`delete`, lines to write and delete, what changes), Replaced mechanisms and their readers, Tests table (each test: `new`, `rewrite`, `keep` or `delete`, with the reason), writer notes with `path:line` evidence (`templates/sheet.md`, the format `port-set` parses) | Writers, reviewers, port-set |
 | `ownership.md` | One row per set and the files it owns. Every file the port writes is in exactly one set. | Coverage, gates, the lead |
 | `settled.md` | Every design question decided during planning, with the reason (`templates/settled.md`) | Writers, reviewers |
@@ -59,7 +59,7 @@ One Opus agent per area (`prompts/p2-area-merge.md`) merges the area's chunk pla
 
 **Conflict check** (one Opus pass, `prompts/p2-conflict-check.md`). It finds and settles: two areas changing one item differently; a call to an API no contract defines; an item used but never written; a file with two owners (the app's host glue files usually are: give them one hub set that applies every area's requests); a removed mechanism still used; a test verdict that contradicts another area's behaviour; a plan that breaks a rule. Output: `conflicts.md`, `settled.md` (questions it decided, with the reason) and `developer-questions.md` (only goals, principles and architecture).
 
-**Consolidation** (`prompts/p2-consolidate.md`): the contract, `ownership.md` and `sizing.md`, with the conflict resolutions applied.
+**Consolidation** (`prompts/p2-consolidate.md`): the contract, `ownership.md` and `sizing.md`, with the conflict resolutions applied. The contract also takes the app items that more than one app set uses (constructors, shared view structs, a services or context parameter, the runtime install, the test harness), so phase 3 stubs them and no set guesses a sibling's signature.
 
 **Evaluation**, by agents that wrote none of the plan:
 

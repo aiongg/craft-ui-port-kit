@@ -1,6 +1,6 @@
 # Contract part {{PART}}
 
-Part file of the framework API contract. Items sit under `### <crate>`, then `#### <file>` (path relative to the crate; a repo-root file says so). Phase 3 compiles `new` and `changed` items as stubs; `removed` items stay until phase 5 removes them with their readers.
+Part file of the contract. Items sit under `### <crate>`, then `#### <file>` (path relative to the crate; a repo-root file says so). A framework crate's heading is its name; an app crate's heading is `### <crate> (app)`, and the app's rows sit in parts of their own. Phase 3 compiles `new` and `changed` items as stubs, the app rows in its last stage; `removed` items stay until phase 5 removes them with their readers.
 
 ### <crate>
 
@@ -17,7 +17,8 @@ Part file of the framework API contract. Items sit under `### <crate>`, then `##
 
 Notes:
 
-- `Id` is `<area code>.<Kind letter><number>`, unique in the whole contract. The code is the area's `code` in port.toml.
+- `Id` is `<area code>.<Kind letter><number>`, unique in the whole contract. The code is the area's `code` in port.toml. App rows take the Kind letter `A` (`pn.A3`), so app and framework items never share a number.
+- The app part holds every app item that more than one app set uses: constructors, shared view structs, a services or context parameter, the runtime install, the test harness. An item one set writes and uses alone stays in its sheet. Without these rows, each set guesses its siblings' signatures and the guesses meet at the first compile.
 - A new item takes the next free number of its area.
 - `Writer`, `Also` and `Used by` name real sets from the ownership file.
 - A signature names only types that exist at the plan base or are themselves contract items.

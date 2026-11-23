@@ -306,6 +306,10 @@ KEYS: list[Key] = [
     # ---- land: scrub and landing (the tools print push commands and never push)
     K("land.framework_via", "pr", "str", "land/land-framework.sh",
       "How framework changes reach framework.branch: `pr` (one PR per build batch) or `fast-forward`."),
+    K("land.early_ci_approved", False, "bool", "land/*",
+      "The developer's standing approval for the lead to push scrubbed port branches to the developer's fork and open "
+      "draft PRs there, so CI runs early on small diffs. False: kit tools never push and nothing is opened. Set it "
+      "only after the developer says yes in phase 0."),
     K("land.push_target", None, "str", "land/land-app.sh",
       "App repository URL the landed branch goes to; land-app.sh prints the push command."),
     K("land.push_branch", "next", "str", "land/land-app.sh", "App branch the landed port goes to."),

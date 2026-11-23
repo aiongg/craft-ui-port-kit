@@ -17,7 +17,7 @@ or STATE.md (unless --force), creates only what is missing, and repeats the chec
   4. plan.linebase: once plan.base is set (phase 0, step 4), writes it into the LINEBASE file when that file does
      not exist yet. Run init-workspace again after setting plan.base.
   5. Prerequisites: Python 3.11+, git (both checkouts must answer `git rev-list -1 HEAD` and
-     `git cat-file -e HEAD^{tree}`; a failure means a damaged or shallow clone), a Rust toolchain (cargo), rust-analyzer, the claude CLI, gh, node (only for
+     `git cat-file -e HEAD^{tree}`; a failure means a damaged or shallow clone), a Rust toolchain (cargo), rust-analyzer, the claude CLI, gh, git-filter-repo (landing), a git commit identity in the app checkout, node (only for
      workflow scripts), systemd-run (only when build.memory_cap uses tools/capped), the framework's cl
      (build.cl), and the required config keys.
   6. The dashboard: how the developer wants to view the page (tools/track.md, "Viewing the page"). --how-served
@@ -89,7 +89,8 @@ def prerequisites(cfg: config.Config) -> tuple[list[str], list[str], bool]:
         missing.append("Python 3.11 or later"); hard = True
     tools = [("git", True, "git"), ("cargo", False, "a Rust toolchain (cargo)"),
              ("rust-analyzer", False, "rust-analyzer (racheck, SCIP indexes)"), ("claude", False, "the claude CLI"),
-             ("gh", False, "gh (landing)"), ("node", False, "node 18+ (only to run workflow scripts)")]
+             ("gh", False, "gh (landing)"),
+             ("git-filter-repo", False, "git-filter-repo (landing scrub; pip install git-filter-repo)"), ("node", False, "node 18+ (only to run workflow scripts)")]
     if "capped" in (cfg.get("build.memory_cap") or ""):
         tools.append(("systemd-run", False, "systemd-run (build.memory_cap uses tools/capped)"))
     for exe, is_hard, what in tools:
@@ -98,6 +99,11 @@ def prerequisites(cfg: config.Config) -> tuple[list[str], list[str], bool]:
         else:
             missing.append(what)
             hard |= is_hard
+    app = cfg.get("app.checkout")
+    if app and Path(app).is_dir():
+        ident = subprocess.run(["git", "-C", app, "config", "user.email"], capture_output=True, text=True).stdout.strip()
+        if not ident:
+            missing.append(f"a git commit identity (user.email) in {app} (commits made on the build machine need one)")
     cl = cfg.get("build.cl")
     if cl and Path(cl).is_file():
         ok.append("cl")

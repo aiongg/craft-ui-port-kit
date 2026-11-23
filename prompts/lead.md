@@ -15,6 +15,10 @@ The dashboard is a static page that `track publish` writes into one output direc
 
 Record the answer: set `track.out_dir` and `track.how_served` in port.toml, write the choice in {{STATE}} under "Now", and tell the developer the address or path to open. Then run `track phase 0` and `track import sheets` (once sheets exist) so the board is full from the start.
 
+## Setup: landing questions
+
+In phase 0, with the dashboard question, ask the developer the landing questions of `{{KIT}}/process/01-setup.md`, step 3a (targets, PR or fast-forward, commit identity on the build machine, early CI approval, `git-filter-repo`). Write each answer in {{STATE}} under "Now", set the matching port.toml keys, and set `land.early_ci_approved = true` only when the developer said yes.
+
 ## Duties on the board
 
 {{RULES}}/lead-rules.md, "The dashboard", lists them; they are rules, not suggestions. Two points the rules leave to this prompt:

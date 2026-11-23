@@ -63,7 +63,7 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 
 ## Landing
 
-`land.framework_via = "pr"` sends framework changes to `framework.branch` as one PR per build batch, which a framework maintainer fast-forwards. `framework.branch` holds the framework until every app has ported; it merges to the framework's main branch only after that, because an earlier merge would strand the apps that still build against main. The app's landed branch goes straight to `land.push_target` / `land.push_branch`. The scrub always runs first. The landing tools work in scratch clones under `work.landing` and print the push commands; they never push.
+`land.framework_via = "pr"` sends framework changes to `framework.branch` as one PR per build batch, which a framework maintainer fast-forwards. `framework.branch` holds the framework until every app has ported; it merges to the framework's main branch only after that, because an earlier merge would strand the apps that still build against main. The app's landed branch goes straight to `land.push_target` / `land.push_branch`. The scrub always runs first. `land.early_ci_approved` records the developer's standing approval, asked in phase 0, for pushing scrubbed branches to their fork and opening draft PRs; it is false until they say yes. The landing tools work in scratch clones under `work.landing` and print the push commands; they never push.
 
 `land.private_patterns` names a file outside every repo with the scrub patterns that identify you and your machine: names, handles, emails, hostnames, local tree names. Its format: one Python regular expression per line, matched case-insensitively; blank lines and lines starting with `#` are ignored. CONTRIBUTING.md describes how the kit repo itself uses the same file.
 
@@ -263,6 +263,7 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | Key | Type | Default | Read by | Meaning |
 |---|---|---|---|---|
 | `framework_via` | str | `pr` | land/land-framework.sh | How framework changes reach framework.branch: `pr` (one PR per build batch) or `fast-forward`. Env: `PORT_KIT_LAND_FRAMEWORK_VIA`. |
+| `early_ci_approved` | bool | `False` | land/* | The developer's standing approval for the lead to push scrubbed port branches to the developer's fork and open draft PRs there, so CI runs early on small diffs. False: kit tools never push and nothing is opened. Set it only after the developer says yes in phase 0. Env: `PORT_KIT_LAND_EARLY_CI_APPROVED`. |
 | `push_target` | str | unset | land/land-app.sh | App repository URL the landed branch goes to; land-app.sh prints the push command. Env: `PORT_KIT_LAND_PUSH_TARGET`. |
 | `push_branch` | str | `next` | land/land-app.sh | App branch the landed port goes to. Env: `PORT_KIT_LAND_PUSH_BRANCH`. |
 | `sibling_framework` | str | `../craft-libs` | land/land-app.sh | Replacement for local framework paths in the scrubbed app history. Env: `PORT_KIT_LAND_SIBLING_FRAMEWORK`. |

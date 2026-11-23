@@ -7,7 +7,7 @@ Every tool here reads the port's config, `port.toml`, and writes its logs into t
 - Python 3.11 or later, git, bash.
 - `rust-analyzer` for the racheck tools.
 - The `claude` CLI for `port-set` and `swarm.py`.
-- `gh` for landing.
+- `gh` and `git-filter-repo` for landing.
 - Node 18 or later: `swarm.py` runs the workflow scripts of phases 1 and 2 under it. A plain job list needs no Node.
 - The framework's `cl` build tool (`build.cl`). Every cargo command the kit runs goes through it, in the framework's tree and in the app's tree (cl's app mode).
 - For `look` (phase 8): Pillow and numpy, or `uv` to fetch them; on Linux, `Xvfb` for headless app instances.

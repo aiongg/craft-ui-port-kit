@@ -154,6 +154,7 @@ ui_dirs = ["crates/ui-egui/src"]              # REQUIRED: UI source dirs to inve
 [land]
 # The landing tools scrub in scratch clones and print the push commands; they never push.
 # framework_via = "pr"                        # pr (one PR per build batch) or fast-forward
+# early_ci_approved = false                   # true only after the developer approved fork pushes and draft PRs (phase 0)
 # push_target = "https://github.com/storytold/myapp.git"
 # push_branch = "next"
 # sibling_framework = "../craft-libs"

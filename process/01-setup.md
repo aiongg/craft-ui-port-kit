@@ -13,7 +13,7 @@ Steps 7, 8 and 9 take minutes to tens of minutes each. Start each as a backgroun
 
 ## 1. Check the prerequisites
 
-`tools/README.md` lists them: Python 3.11 or newer, git, a Rust toolchain, rust-analyzer, the claude CLI, Node 18 or newer (`swarm.py` runs the phase 1 and 2 workflow scripts under it), and gh for landing. The framework checkout must contain `tools/cl` (configured as `build.cl`). Both clones must be whole: `init-workspace` checks that `git rev-list -1 HEAD` and `git cat-file -e HEAD^{tree}` work in each and reports a damaged or shallow clone.
+`tools/README.md` lists them: Python 3.11 or newer, git, a Rust toolchain, rust-analyzer, the claude CLI, Node 18 or newer (`swarm.py` runs the phase 1 and 2 workflow scripts under it), and gh and git-filter-repo for landing. The framework checkout must contain `tools/cl` (configured as `build.cl`). Both clones must be whole: `init-workspace` checks that `git rev-list -1 HEAD` and `git cat-file -e HEAD^{tree}` work in each and reports a damaged or shallow clone.
 
 ## 2. Create the workspace
 
@@ -76,6 +76,16 @@ The dashboard is the developer's view of the port ([00-overview.md](00-overview.
    ```
 
    Move each one with `track status <task> running` when you start it and `done` when its check passes. A failure is `blocked` with `--on` naming what it waits for.
+
+## 3a. Ask the landing questions
+
+Ask the developer now, in chat, so landing never stops on a question at the end of the port ([10-land.md](10-land.md)). Record each answer in `STATE.md` under "Now" and in port.toml where a key exists:
+
+1. **Targets.** The app repository URL and branch the port lands on (`land.push_target`, `land.push_branch`), and the framework branch (`framework.branch`, already set in step 2).
+2. **How the framework changes arrive.** One PR per build batch, or a fast-forward push (`land.framework_via`).
+3. **Commit identity on the build machine.** The name and email the port's commits carry: `git config user.name` and `git config user.email` in the app checkout (`init-workspace` reports a missing email).
+4. **Early CI.** May the lead push scrubbed port branches to the developer's fork and open draft PRs there, so the wasm, macOS and Windows legs run early on small diffs? Set `land.early_ci_approved = true` only on a yes; the default is no, and kit tools never push or open anything without it. Fork pushes and draft PRs only: never the upstream repository.
+5. **Tools.** `git-filter-repo` must be installed (`init-workspace` reports it missing; the landing tools stop without it).
 
 ## 4. Pin the framework and make the port branch
 
@@ -157,6 +167,7 @@ Check each with one query, for example `tools/scip/scipdb.py refs <work.scip>/fw
 Check each item, then record `tools/track phase 1 "inventory"` and go to [02-inventory-and-map.md](02-inventory-and-map.md).
 
 - [ ] `port.toml` has every required key, `plan.base` and `plan.app_base`.
+- [ ] The landing questions are answered and recorded ([step 3a](#3a-ask-the-landing-questions)).
 - [ ] The dashboard is published, `track.how_served` is recorded, and the developer has the address.
 - [ ] The port branch pins the framework at `plan.base` by rev; the local patch points at `framework.integration`.
 - [ ] The snapshots and the production reference exist at their commits.

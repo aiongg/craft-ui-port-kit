@@ -55,7 +55,7 @@ Nothing that names the developer, their machine or their local tools may reach a
 
 - **Patterns.** Generic shapes ship with the kit (`tools/portkit/scrub.py`: home, cache and scratch paths, emails other than noreply, IPv4 addresses other than 127.0.0.1, private host name suffixes). Names that identify you live only in your private patterns file, `land.private_patterns`, never in any repository: a scrub list that names you is itself the leak.
 - **Scan.** `tools/land/scan-range.py <clone> <range>` checks authors, committers, messages and added lines of every commit in the range, with both pattern sets. Commit identities you accept go in `land.known_idents`.
-- **Rewrite.** The landing tools rewrite only the range being landed, with `git filter-repo`: the generic `land.rewrite_rules`, local framework paths replaced by `land.sibling_framework`, and your private message replacements (`land.replace_message`). Then they scan again; the second scan must be clean.
+- **Rewrite.** The landing tools rewrite only the range being landed, with `git filter-repo`. The generic `land.rewrite_rules` change only the local home prefix, never ordinary text (emails, host names, cache directories stay and the scan reports them), and no rule touches a trailer line (`Co-authored-by:`, `Signed-off-by:`): identities are reported, never rewritten. The rules are local framework paths replaced by `land.sibling_framework`, and your private message replacements (`land.replace_message`). Then they scan again; the second scan must be clean.
 - **First push of a branch:** the range is its whole history from the upstream commit it started at.
 
 The kit repository itself uses the same idea through `tools/kit-check` and its pre-push hook (CONTRIBUTING.md).
@@ -66,11 +66,15 @@ The kit repository itself uses the same idea through `tools/kit-check` and its p
 tools/land/land-framework.sh <framework tree> <ref>
 ```
 
-It clones the tree into `work.landing` (never touching your trees), fetches `framework.branch` from `framework.repo`, and checks that `<ref>` is a fast-forward of it. If not, it stops and lists upstream's missing commits: sync first (step 1). Then it scans and scrubs the range `framework.branch..<ref>` (step 2) and prints the landing commands. With `land.framework_via = "pr"` (the default), it prints the commands to push a branch and open one PR per build batch, which a framework maintainer fast-forwards onto `framework.branch`. With `fast-forward`, it prints the push to `framework.branch`.
+It fetches only `<ref>` and its history into a fresh repository under `work.landing` (never touching your trees; no other branch or tag comes along), fetches `framework.branch` from `framework.repo`, and checks that `<ref>` is a fast-forward of it. If not, it stops and lists upstream's missing commits: sync first (step 1). Then it scans and scrubs the range `framework.branch..<ref>` (step 2), runs `cl check all` in the landed clone ([step 3a](#build-the-landed-clone-before-any-push)), and prints the landing commands. With `land.framework_via = "pr"` (the default), it prints the commands to push a branch and open one PR per build batch, which a framework maintainer fast-forwards onto `framework.branch`. With `fast-forward`, it prints the push to `framework.branch`.
 
 You read the scan report, then push from the clone yourself (the push uses your accounts). Record it: `tools/track event landing "framework <sha> to <framework.branch>" --task land-framework`. The landing tools post their own run events.
 
 After the push, move the framework integration branch to the landed head before the next combine, so the next landing is again a fast-forward. The scrub changed commit ids, not code: `git diff <local head> <landed head>` shows only scrubbed lines.
+
+### Build the landed clone before any push
+
+Both landing tools run the framework's `cl check all` (`build.cl`) in the scrubbed clone after the second scan and before they print a push command. The scrub and the pin change files the port never built, so only this build shows that what leaves the machine compiles. A failure, or a missing `build.cl` or `framework.checkout`, stops the tool with "Do not push" and exit 1. The only way past is `--skip-check "reason"` (for example, no network for the pinned git dependency): the tool prints the reason and records it on the dashboard as a landing event. The check log is `<clone>.check.log`. The check may update `Cargo.lock` in the clone; commit that change as step 4 says.
 
 ## Step 4: land the app
 
@@ -78,7 +82,7 @@ After the push, move the framework integration branch to the landed head before 
 tools/land/land-app.sh <app tree> <ref> <landed framework rev>
 ```
 
-It clones the tree into `work.landing`, finds the merge base with production's `app.base_branch`, and scans and scrubs that range, replacing local framework paths with `land.sibling_framework`. Its last commit pins every framework dependency to the landed framework revision by git rev (`tools/land/pin-framework.py`, for every URL in `framework.patch_urls`) and drops the local framework patch block. It prints the push command to `land.push_target`, branch `land.push_branch`.
+It fetches only `<ref>` into a fresh repository under `work.landing`, finds the merge base with production's `app.base_branch`, and scans and scrubs that range, replacing local framework paths with `land.sibling_framework`. Its last commit pins every framework dependency to the landed framework revision by git rev (`tools/land/pin-framework.py`, for every URL in `framework.patch_urls`) and drops the local framework patch block. It then runs `cl check all` in the landed clone and prints the push command to `land.push_target`, branch `land.push_branch`.
 
 1. Pin only a framework revision that is already on `framework.branch` upstream (step 3 first). An app pinned to an unpushed or scrubbed-away commit does not build for anyone else.
 2. Regenerate `Cargo.lock` in the landing clone against the pinned revision with one resolve, and commit it. The lock must name no local path and no framework URL other than `framework.repo`.
@@ -94,11 +98,17 @@ The push starts the repositories' CI. Upstream CI may refuse things a local buil
 - Record the result for each repository: `tools/track event landing "CI <passed|failed> at <sha>" --task land-app`.
 - A failure is fixed on the port branch (a small red round when it is a test, a direct fix when it is a pin or a lint), then landed again through steps 2 to 4.
 
+## Before the merge: run the app on each platform
+
+The developer runs the landed app once on each platform it ships on (a window opens, the main surface draws, one edit works) before the PRs merge. CI builds the legs; only a run shows a window that opens blank. Record each platform and the result in `STATE.md`.
+
 ## Exit
 
 - [ ] Production's main, as of the last sync, is merged into the port with one merge commit; the build and full run after it pass; `app.production` is at the merged commit.
 - [ ] Every pushed range was scanned with the generic and private patterns, and the second scan was clean.
 - [ ] The framework changes are on `framework.branch`, and the framework integration branch is at the landed head.
 - [ ] The app's landing branch pins the landed framework revision by git rev, with no local path left, and is pushed.
+- [ ] `cl check all` passed in both landed clones, or each `--skip-check` reason is in `STATE.md`.
+- [ ] The developer ran the app once on each platform it ships on, and the results are in `STATE.md`.
 - [ ] CI results for both repositories are recorded on the dashboard and in `STATE.md`.
 - [ ] `tools/track md` has written `STATUS.md` for the app's port branch.

@@ -11,14 +11,53 @@ land_need_filter_repo() {
 # land_slug REF: REF as a file name.
 land_slug() { printf '%s' "$1" | tr '/:' '__'; }
 
-# land_clone SRC DEST: a fresh clone of SRC (never touching SRC) without a checkout. DEST must be under work.landing.
+# land_clone SRC DEST REF: a fresh repository at DEST (never touching SRC) that holds only REF and its history, as
+# branch `landing-src`. REF is a branch, tag or commit of SRC; a remote-tracking `origin/REF` wins over a local branch.
+# Prints the commit REF names. DEST must be under work.landing.
 land_clone() {
-  local src=$1 dest=$2 root
+  local src=$1 dest=$2 ref=$3 root sha
   root=$(cfgr work.landing)
   case $dest in "$root"/*) ;; *) die "refusing to replace $dest: it is not under work.landing ($root)";; esac
+  sha=$(git -C "$src" rev-parse -q --verify "refs/remotes/origin/$ref^{commit}" ||
+        git -C "$src" rev-parse -q --verify "$ref^{commit}") || die "$ref is not a commit of $src"
   mkdir -p "$root"
   rm -rf "$dest"
-  git clone -q --no-local --no-checkout "$src" "$dest"
+  git init -q "$dest"
+  git -C "$dest" fetch -q --no-tags "$src" "$sha" || die "fetching $ref from $src failed"
+  git -C "$dest" update-ref refs/heads/landing-src "$sha"
+  printf '%s\n' "$sha"
+}
+
+# land_skip_check ARGS...: sets LAND_ARGS to the arguments without `--skip-check REASON`, and LAND_SKIP to the reason
+# (empty when the check is not skipped). An empty reason is refused.
+land_skip_check() {
+  LAND_ARGS=(); LAND_SKIP=
+  while [ $# -gt 0 ]; do
+    if [ "$1" = --skip-check ]; then
+      [ -n "${2:-}" ] || die "--skip-check needs a reason: --skip-check \"why the check cannot run\""
+      LAND_SKIP=$2; shift 2
+    else
+      LAND_ARGS+=("$1"); shift
+    fi
+  done
+}
+
+# land_check CLONE TASK: `cl check all` in the landed clone (tools/land/check-landed.py), before any push command
+# prints. A failure, or a missing build.cl or framework.checkout, stops the tool (exit 1) unless LAND_SKIP holds a
+# reason, which is printed and recorded on the dashboard as a landing event.
+land_check() {
+  local clone=$1 task=$2 rc=0
+  if [ -n "$LAND_SKIP" ]; then
+    echo "CHECK SKIPPED by --skip-check: $LAND_SKIP"
+    "$TOOLS/track" event landing "cl check all skipped: $LAND_SKIP" --task "$task" >/dev/null 2>&1 || true
+    return 0
+  fi
+  python3 -I "$LAND/check-landed.py" "$clone" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "Do not push: the landed clone does not build clean (exit $rc). Fix it in the port and land again, or pass --skip-check \"reason\" to go on without it." >&2
+    exit 1
+  fi
+  echo "cl check all: passed"
 }
 
 # land_rules OUT [LOCAL_PATH...]: the rewrite rules, in the order filter-repo applies them: literal replacements of
@@ -59,5 +98,7 @@ land_scan() {
 # land_rewrite CLONE REFS RULES: rewrite only the commits REFS selects, applying RULES to contents and messages.
 land_rewrite() {
   local clone=$1 refs=$2 rules=$3
-  git -C "$clone" filter-repo --force --refs "$refs" --replace-text "$rules" --replace-message "$rules"
+  # Contents take every rule; messages take them too except in trailer lines (rewrite_message.py).
+  git -C "$clone" filter-repo --force --refs "$refs" --replace-text "$rules" --message-callback \
+    "import sys; sys.path.insert(0, '$LAND'); import rewrite_message; return rewrite_message.apply(message, '$rules')"
 }

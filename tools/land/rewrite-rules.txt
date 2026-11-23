@@ -1,11 +1,11 @@
-# Generic rules for `git filter-repo --replace-text` and `--replace-message` (the landing tools apply this file to
-# file contents and to commit messages, then your private rules and the local-path rules they generate).
-# Host names and IPv4 addresses are not rewritten: a match can be code (a field named `local`), so the second scan reports
-# what is left and you decide each one.
+# Generic rules for `git filter-repo --replace-text` (file contents) and for commit messages (the landing tools apply this
+# file, then your private rules and the local-path rules they generate). Message rules skip trailer lines such as
+# `Co-authored-by:` (tools/land/rewrite_message.py): identities are never rewritten, only reported by the scan.
+# Only the local home prefix is rewritten, and nothing that is ordinary text: emails, host names, IPv4 addresses and
+# cache directories are not rewritten, because a match can be code, a licence or a trailer. The scan reports them and
+# you decide each one.
 # Each line is `regex:PATTERN==>REPLACEMENT` or a literal `OLD==>NEW`. Names that identify you belong in your private
 # rules file (`land.replace_message`), never here.
-regex:/home/[A-Za-z][A-Za-z0-9._-]*/[^\s"'`)\]>,;]*==>/path/to/local
-regex:/Users/[^\s"'`)\]>,;]*==>/path/to/local
+regex:/home/[A-Za-z][A-Za-z0-9._-]*/==>/path/to/local/
+regex:/Users/[A-Za-z][A-Za-z0-9._-]*/==>/path/to/local/
 regex:/tmp/claude-[^\s"'`)\]>,;]*==>/tmp/scratch
-regex:\.cache/==>cache/
-regex:(?![A-Za-z0-9._%+-]*noreply)[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}==>user@example.invalid

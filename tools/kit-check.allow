@@ -7,9 +7,7 @@ README.md	aiongg/craft-ui-port-kit
 .claude-plugin/marketplace.json	aiongg/craft-ui-port-kit
 skills/craft-ui-port/SKILL.md	aiongg/craft-ui-port-kit
 tools/scip/scip_pb2.py	from google.protobuf.internal import builder as _builder
-tools/land/rewrite-rules.txt	regex:/Users/[^\s"'`)\]>,;]*==>/path/to/local
+tools/land/rewrite-rules.txt	regex:/Users/[A-Za-z][A-Za-z0-9._-]*/==>/path/to/local/
 tools/land/rewrite-rules.txt	regex:/tmp/claude-[^\s"'`)\]>,;]*==>/tmp/scratch
-tools/land/rewrite-rules.txt	regex:\.cache/==>cache/
-tools/land/rewrite-rules.txt	regex:(?![A-Za-z0-9._%+-]*noreply)[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}==>user@example.invalid
 # The one commit is authored by the repository owner's GitHub noreply address.
 @ident	aiongg <67543387+aiongg@users.noreply.github.com>

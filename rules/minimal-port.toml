@@ -1,0 +1,235 @@
+# The rewrites and report patterns of a minimal port (process/minimal-port.md), read by tools/minimal-port.
+# They map the old UI framework (craft-libs main before `next` merged) onto `next` at the revision in written_for.
+# When `next` moves an item again, update the rule and written_for in the same change. port.toml points here with
+# minimal.rules.
+#
+# Sections:
+#   [combo]       the ComboBox rewrite: `old` becomes `new`, except in a builder chain that calls a `keep_if_calls`
+#                 method (a menu with a header, which has no egui equivalent).
+#   [[module]]    an old module whose names moved: `moved` maps each name to its full new path; `variants` maps
+#                 `Type::Variant` to the new variant name; `class` names the rewrite class (--only, --skip, counts).
+#                 A name whose last segment changes is renamed in every file that imports it from `old`.
+#   [[dependency]] a crate the rewritten code needs: added to each crate whose files name `when`, modelled on the
+#                 first `model` dependency line of the same manifest.
+#   [[feature]]   feature changes on a dependency line at the repin: `drop` removes, `rename` maps old to new;
+#                 `note` is printed with each change.
+#   [[site]]      report patterns (Python regexes over code, strings and comments masked): each hit is a port item
+#                 for the writer, listed under `item` (an item of the runbook's step 4) with `note`. With `requires`
+#                 (a regex), only files whose code matches it count: names an app may also use for its own types.
+
+written_for = "next b436ae9925"
+
+[combo]
+old = "craft_ui::ComboBox"
+new = "egui::ComboBox"
+keep_if_calls = ["show_ui_with_header", "show_rows_with_header"]
+
+[[module]]
+class = "dock"
+old = "craft_ui::docking"
+[module.moved]
+Action = "craft_behavior::dock::Action"
+Column = "craft_behavior::dock::Column"
+ColumnLocation = "craft_behavior::dock::ColumnLocation"
+DockError = "craft_behavior::dock::DockError"
+Floating = "craft_behavior::dock::Floating"
+Group = "craft_behavior::dock::Group"
+GroupLocation = "craft_behavior::dock::GroupLocation"
+Layout = "craft_behavior::dock::Layout"
+Location = "craft_behavior::dock::Location"
+MAX_DEPTH = "craft_behavior::dock::MAX_DEPTH"
+MAX_PANELS = "craft_behavior::dock::MAX_PANELS"
+Monitor = "craft_behavior::Monitor"
+Node = "craft_behavior::dock::Node"
+PanelState = "craft_behavior::dock::PanelState"
+Permissions = "craft_behavior::dock::Permissions"
+# The old Placement is next's DockPlacement; the old Side (Start, End: the edge of a Node::Dock) is next's DockEdge.
+# The old physical Zone (Left, Right, ...) is not a rename: next's DockSide reads in reading order (a [[site]] below).
+Placement = "craft_behavior::dock::DockPlacement"
+Side = "craft_behavior::dock::DockEdge"
+StackEntry = "craft_behavior::dock::StackEntry"
+Target = "craft_behavior::dock::Target"
+Workspace = "craft_behavior::dock::Workspace"
+
+[[module]]
+class = "split"
+old = "craft_ui::layout"
+[module.moved]
+SplitAxis = "craft_behavior::flow::Axis"
+SplitSize = "craft_behavior::dock::SplitSize"
+[module.variants]
+"SplitAxis::Horizontal" = "X"
+"SplitAxis::Vertical" = "Y"
+
+[[module]]
+class = "keymap"
+old = "craft_keymap"
+[module.moved]
+Bindable = "craft_keymap::CommandDef"
+Kind = "craft_keymap::CommandKind"
+
+[[module]]
+class = "keymap"
+old = "craft_keymap::egui"
+[module.moved]
+Hit = "craft_keymap::Hit"
+
+[[dependency]]
+crate = "craft-behavior"
+when = "craft_behavior::"
+model = ["craft-ui", "craft-update", "craft-keymap"]
+
+[[feature]]
+crate = "craft-ui"
+drop = ["serde", "native-windows"]
+note = "next's dock model always derives serde, and native floating windows are built in"
+
+[[feature]]
+crate = "craft-update"
+rename = { egui = "ui" }
+
+[[feature]]
+crate = "craft-window"
+rename = { egui = "ui" }
+
+[[feature]]
+crate = "craft-quit"
+rename = { egui = "ui" }
+
+[[feature]]
+crate = "craft-keymap"
+drop = ["ui"]
+note = "the shortcuts dialog is craft_menu::shortcuts: add craft-menu where the app shows it"
+
+# ---- report patterns, by runbook item
+
+[[site]]
+item = "dock"
+pattern = '\b(UiDock|DockContent|DockStyle|DockCommand|DockOperation|ZoneName|ResizeEdge|PanelLimits|WindowFiles|FloatSpace|Divider)\b'
+requires = 'craft_ui::docking|craft_behavior::dock'
+note = "old dock renderer: DockArea with DockPanels; the ui.dock vocabulary becomes app-local"
+
+[[site]]
+item = "dock"
+pattern = '\b(DockArea|Hit)\b'
+requires = 'craft_ui::docking'
+note = "old dock renderer: craft_ui::patterns::DockArea with DockPanels"
+
+[[site]]
+item = "dock"
+pattern = '\b(cancel_drag|float_space|open_flyout|close_flyout|send_keys|typing_window|route_app_drag|begin_drag)\s*\('
+requires = 'craft_ui::docking|craft_behavior::dock'
+note = "old dock renderer helper: runtime::drag::cancel, the DockArea output, or the host-bound flyout"
+
+[[site]]
+item = "dock"
+pattern = '\bZone::(Left|Right|Top|Bottom|Center)\b'
+requires = 'craft_ui::docking|craft_behavior::dock'
+note = "physical zone: next's DockSide is in reading order (DockPlacement::for_zone); read left and right through the direction"
+
+[[site]]
+item = "dock"
+pattern = '\b(Column|Group|Layout|StackEntry|Floating)\s*\{|\bNode::(Split|Dock|Tabs|Stack)\s*\{|\bAction::[A-Za-z]+\s*\{'
+requires = 'craft_ui::docking|craft_behavior::dock'
+note = "dock model literal or pattern: next's types are non_exhaustive (constructors; patterns need `..`)"
+
+[[site]]
+item = "dock"
+pattern = '(?i)\b\w*(workspace|dock)\w*\.(layout|hidden)\b(?!\s*\()'
+requires = 'craft_ui::docking|craft_behavior::dock'
+note = "Workspace field read: next's fields are private (layout(), hidden())"
+
+[[site]]
+item = "combo"
+pattern = '\b(show_ui_with_header|show_rows_with_header)\b|craft_ui::combo::'
+note = "menu with a header: an app-local menu on egui::Popup::menu with a fixed header and a scrolled list"
+
+[[site]]
+item = "helpers"
+pattern = '\b(split_rect|SplitLayout|ResizeHandle|ResizeHandleStyle|fit_toolbar)\b'
+note = "removed layout helper: app-local egui code, or docking::SplitArea / Splitter"
+
+[[site]]
+item = "helpers"
+pattern = '\bcraft_ui::capture\b|\bCaptureSlot\b'
+note = "capture slot removed: an app-local slot"
+
+[[site]]
+item = "helpers"
+pattern = '\b(WidgetPalette|ButtonVisuals|IconButtonStyle)\b'
+note = "removed styling: set egui WidgetVisuals directly; an icon button with app colours keeps the old painter app-locally"
+
+[[site]]
+item = "helpers"
+pattern = '\bcraft_ui::(ime|direction|icons|printing)\b'
+note = "module moved into the runtime or a framework component"
+
+[[site]]
+item = "keymap"
+pattern = '\bcraft_keymap::ui\b|\bDispatcher\b'
+note = "shortcuts dialog: craft_menu::shortcuts; Dispatcher: craft_keymap::Matcher fed from egui key events"
+
+[[site]]
+item = "dialogs"
+pattern = '\b(CheckResultDialog|CheckResultResponse)\b|craft_update::dialog\b|\.show_if\s*\('
+note = "update dialogs: UpdateCheckDialog and Updater::run on a DialogHost"
+
+[[site]]
+item = "title-bar"
+pattern = '\btitle_bar::|craft_window::(title_bar|decorate)\b|\bsync_movable\b|\bwindow_movable\b'
+note = "title bar: shell::TitleBar; the runtime's window host owns the move area"
+
+[[site]]
+item = "title-bar"
+pattern = '\bcraft_window::(Viewports|WindowEvent|Rect|cascade|CASCADE_STEP)\b'
+note = "removed window helpers: craft_behavior::placement::cascade, app-local viewports"
+
+[[site]]
+item = "host"
+pattern = '\bimpl\s+eframe::App\s+for\b'
+note = "eframe App: the four embed hooks go here (install, before_input, logic, before_ui)"
+
+[[site]]
+item = "host"
+pattern = '\bset_fonts\s*\('
+note = "fonts: load through craft_ui::fonts::load, so the runtime's font stack and the app's stay one"
+
+[[site]]
+item = "host"
+pattern = '\bwith_close_requested_on_terminate\b|craft_quit::on_close_request\b'
+note = "close path: embed::logic owns the root window's close; check Dock Quit and Cmd+Q on macOS"
+
+[[site]]
+item = "input"
+pattern = '\bKey::Escape\b'
+note = "Escape reaches egui only while an app widget has focus; otherwise read the window's Intent::Cancel"
+
+[[site]]
+item = "input"
+pattern = '\bKey::(Tab|F6|F10)\b'
+note = "Tab, F6 and F10 go to framework focus: chrome_toggles, the F6 overrides, or a framework menu bar"
+
+[[site]]
+item = "input"
+pattern = '\b(close_requested|CancelClose)\b'
+note = "close request: decide in the embed::logic closure (Close or Hold)"
+
+[[site]]
+item = "input"
+pattern = '\b(set_)?zoom_factor\b|zoom_with_keyboard'
+note = "keyboard zoom is off and the scale is RootEnv::scale"
+
+[[site]]
+item = "input"
+pattern = '(?i)alt[^\n]{0,40}\bNum[0-9]\b|\bNum[0-9]\b[^\n]{0,40}alt'
+note = "Alt+digit chord: check whether Alt-code entry still takes it at your pin"
+
+[[site]]
+item = "web"
+pattern = '\bWebRunner\b|target_arch\s*=\s*"wasm32"'
+note = "web shell: install the runtime headless and call before_input and the close path; check with the wasm target"
+
+[[site]]
+item = "tests"
+pattern = '\bHarness::(builder|new|new_ui|new_state)\b|\bContext::default\(\)'
+note = "test harness or bare context: install the runtime (headless) when it runs the app's UI"

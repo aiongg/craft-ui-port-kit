@@ -109,6 +109,10 @@ KEYS: list[Key] = [
       "Tests that fail on the unported app at the pinned framework rev (phase 0)."),
     K("work.landing", "{work.dir}/landing", "path", "land/land-framework.sh land/land-app.sh",
       "Scratch clones and scan reports of landing runs."),
+    K("work.mode", "full", "str", "init-workspace lead-context track land/exit-gate.py",
+      "`full`: the phased port of process/00-overview.md. `minimal`: a minimal port (process/minimal-port.md), which "
+      "has steps instead of phases: `track phase` refuses, the session hook names the minimal runbook, and the "
+      "landing gate skips the look and test-ledger rows."),
 
     # ---- framework: craft-libs
     K("framework.repo", "https://github.com/storytold/craft-libs", "str",
@@ -319,6 +323,8 @@ KEYS: list[Key] = [
       "Phase 7 red-round fixer. Empty: `opus` in the fixer mode `build`, `sonnet` in `code-only` (Config.model).",
       default_doc="`opus` in build mode, `sonnet` in code-only"),
     K("models.red_fixer_framework", "opus", "str", "swarm.py", "Phase 7 fixer whose failures have a framework cause."),
+    K("models.minimal_write", "opus", "str", "swarm.py",
+      "Minimal-port writer (process/minimal-port.md); its compile and test rounds resume the same session."),
 
 
     # ---- track: the progress dashboard (tools/track.md)
@@ -368,6 +374,10 @@ KEYS: list[Key] = [
     K("look.differences", "{work.dir}/look/differences.md", "path", "look portkit/gates.py",
       "The differences file: one row per look difference with its judgement, class and outcome (tools/look.md, "
       "\"The differences file\"). `look brief` and the phase 8 gate read it."),
+
+    # ---- minimal: the minimal port (process/minimal-port.md)
+    K("minimal.rules", "{kit}/rules/minimal-port.toml", "path", "minimal-port",
+      "Rewrites and report patterns of the minimal port, labelled with the framework revision they were written for."),
 
     # ---- land: scrub and landing (the tools print push commands and never push)
     K("land.framework_via", "pr", "str", "land/land-framework.sh",

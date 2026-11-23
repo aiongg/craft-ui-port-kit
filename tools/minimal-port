@@ -1,0 +1,718 @@
+#!/usr/bin/env python3
+"""minimal-port: the mechanical parts of a minimal port (process/minimal-port.md): the sites report, the repin and
+the source rewrite, from the rule data in minimal.rules (rules/minimal-port.toml).
+
+usage:
+  minimal-port sites   [--tree PATH] [--rules FILE] [--config PORT.TOML]
+  minimal-port repin   [--tree PATH] [--rev REV] [--rules FILE] [--apply] [--config PORT.TOML]
+  minimal-port rewrite [--tree PATH] [--rules FILE] [--only CLASS,...] [--skip CLASS,...] [--apply] [--config ...]
+
+TREE defaults to app.integration. Every git-tracked .rs file and Cargo.toml of the tree is read; matching sees code
+only (strings, chars and comments are masked).
+
+sites    Lists every port item the rules' [[site]] patterns find, by runbook item, with file:line; per crate counts;
+         the lines of each file with a dock site; the web shells; and the writer split: `all` (one writer) when no
+         dock site is found, else `host` and `dock`. Writes sites.md and sites.json. Changes nothing. Exit 0 when no
+         site is found (the app needs only the repin), 1 when port items exist.
+repin    Rewrites the manifests onto REV (default plan.base):
+           revs      every framework dependency to `git = framework.repo, rev = REV` (land/pin-framework.py's rule);
+                     each `[patch.crates-io]` entry gets the rev the framework's own `[patch.crates-io]` at REV (read
+                     with git show in framework.checkout) gives that crate, or, for a crate the framework does not
+                     patch, the one rev the framework takes from the same git URL (an egui fork's other crates); an
+                     entry the framework patches from another URL, or whose URL the framework does not use, is listed;
+           features  the [[feature]] changes on single-line dependency entries and `features` lines of dependency
+                     tables; a features array over several lines is listed.
+         Cargo.lock is not touched: the first build resolves it.
+rewrite  Rewrites the sources, by class:
+           combo     [combo] old -> new, except a builder chain (to the end of its statement or argument) that calls
+                     a keep_if_calls method: left and listed;
+           <module>  each [[module]] class (dock, split, keymap): `use OLD::{..}` and `use OLD::Name` (pub and
+                     aliases kept) split into the new paths, qualified OLD::Name paths, `Type::Variant` renames, and
+                     bare renames of a name whose last segment changes in every file that imported it from OLD. A
+                     file that already binds the new name imports it `as` the old name instead (listed); a renamed
+                     `pub use` is listed, since its users elsewhere name the old name;
+           deps      each [[dependency]] crate added to the manifest of every crate whose files name `when` and that
+                     lacks it, modelled on that manifest's first `model` line (a `workspace = true` line also adds
+                     the root's [workspace.dependencies] entry, modelled on the root's line); other forms are listed.
+         --only and --skip take class names.
+
+Without --apply, repin and rewrite print the diff and change nothing (a dry run). --apply refuses a tree with
+uncommitted changes, writes the edits and commits once: `minimal-port <cmd>: <n> edits (<class> <n>, ...)`. A second
+run finds nothing to change. Output in <work.runs>/minimal/: <cmd>.diff, <cmd>.json ({"tool", "cmd", "tree",
+"applied", "edits": {class: n}, "files", "listed": [{"class", "file", "line", "text"}], "notes", "commit", "exit"});
+a [[feature]] note goes to "notes" and is printed, without counting as listed. For sites
+sites.md and sites.json ({"rules", "items": {item: [{"file", "line", "text", "note"}]}, "crates": {crate: n},
+"dock_files": {file: lines}, "web_shells": [file], "writers": [...]}). Last stdout line:
+  minimal-port <cmd>: <n> edits (...); <n> listed     |     minimal-port sites: <n> sites (<item> <n>, ...); writers ...
+Exit 0 done with nothing listed, 1 when something is listed for the writer, 2 on a usage or tool failure.
+"""
+from __future__ import annotations
+
+import argparse
+import bisect
+import difflib
+import importlib.util
+import json
+import re
+import subprocess
+import sys
+import tomllib
+from collections import Counter, defaultdict
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from portkit import config, track  # noqa: E402
+
+TOOLS = Path(__file__).resolve().parent
+IDENT = r"[A-Za-z_][A-Za-z0-9_]*"
+
+
+def fail(msg: str):
+    print(f"minimal-port: {msg}", file=sys.stderr)
+    sys.exit(2)
+
+
+def git(tree: Path, *args: str) -> str:
+    r = subprocess.run(["git", "-C", str(tree), *args], capture_output=True, text=True)
+    if r.returncode:
+        fail(f"git {' '.join(args)}: {r.stderr.strip()}")
+    return r.stdout
+
+
+# ---------------------------------------------------------------- Rust masking
+
+def mask(src: str) -> str:
+    """`src` with strings, chars and comments replaced by spaces (newlines kept), so offsets and lines stay."""
+    out = list(src)
+    i, n = 0, len(src)
+
+    def blank(a: int, b: int):
+        for k in range(a, min(b, n)):
+            if out[k] != "\n":
+                out[k] = " "
+
+    while i < n:
+        c = src[i]
+        if c == "/" and src.startswith("//", i):
+            j = src.find("\n", i)
+            j = n if j < 0 else j
+            blank(i, j)
+            i = j
+        elif c == "/" and src.startswith("/*", i):
+            depth, j = 1, i + 2
+            while j < n and depth:
+                if src.startswith("/*", j):
+                    depth, j = depth + 1, j + 2
+                elif src.startswith("*/", j):
+                    depth, j = depth - 1, j + 2
+                else:
+                    j += 1
+            blank(i, j)
+            i = j
+        elif c in "rb" and (m := re.match(r'(?:br|r)(#*)"', src[i:i + 300])) and (i == 0 or not re.match(r"\w", src[i - 1])):
+            end = '"' + m.group(1)
+            j = src.find(end, i + m.end())
+            j = n if j < 0 else j + len(end)
+            blank(i + m.end() - 1, j)
+            i = j
+        elif c == '"':
+            j = i + 1
+            while j < n and src[j] != '"':
+                j += 2 if src[j] == "\\" else 1
+            blank(i, j + 1)
+            i = j + 1
+        elif c == "'":
+            m = re.match(r"'(?:\\(?:u\{[0-9A-Fa-f]{1,6}\}|x[0-9A-Fa-f]{2}|.)|[^\\'\n])'", src[i:i + 12])
+            if m:
+                blank(i, i + m.end())
+                i += m.end()
+            else:
+                i += 1   # a lifetime
+        else:
+            i += 1
+    return "".join(out)
+
+
+def line_of(text: str, pos: int) -> int:
+    return text.count("\n", 0, pos) + 1
+
+
+def apply_edits(src: str, edits: list[tuple[int, int, str]]) -> str:
+    for a, b, rep in sorted(edits, reverse=True):
+        src = src[:a] + rep + src[b:]
+    return src
+
+
+def chain_end(code: str, start: int) -> int:
+    """End of the expression starting at `start`: a `;` or `,` at depth 0, or the bracket that closes its parent."""
+    depth, i = 0, start
+    while i < len(code):
+        c = code[i]
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+            if depth < 0:
+                return i
+        elif c in ";," and depth == 0:
+            return i
+        i += 1
+    return i
+
+
+# ---------------------------------------------------------------- rules
+
+class Rules:
+    def __init__(self, path: Path):
+        try:
+            d = tomllib.loads(path.read_text())
+        except (OSError, tomllib.TOMLDecodeError) as e:
+            fail(f"rules {path}: {e}")
+        self.path = path
+        self.written_for = d.get("written_for", "")
+        self.combo = d.get("combo") or {}
+        self.modules = d.get("module") or []
+        self.deps = d.get("dependency") or []
+        self.features = d.get("feature") or []
+        self.sites = [dict(s, rx=re.compile(s["pattern"]), req=re.compile(s["requires"]) if s.get("requires") else None)
+                      for s in d.get("site") or []]
+        self.classes = ["combo", *dict.fromkeys(m["class"] for m in self.modules), "deps"]
+
+
+# ---------------------------------------------------------------- rewrite
+
+USE = re.compile(r"(?m)^([ \t]*)((?:pub(?:\([^)]*\))?\s+)?)use\s+([^;]*?)\s*;")
+
+
+def split_entries(body: str) -> list[str] | None:
+    """`A, B as C, D` -> entries; None when the list nests braces."""
+    if "{" in body or "}" in body:
+        return None
+    return [e.strip() for e in body.replace("\n", " ").split(",") if e.strip()]
+
+
+class FileRewrite:
+    """The rewrites of one file. Each method edits self.src and counts into self.counts and self.listed."""
+
+    def __init__(self, path: str, src: str, rules: Rules, classes: set[str]):
+        self.path, self.src, self.rules, self.classes = path, src, rules, classes
+        self.counts: Counter = Counter()
+        self.listed: list[dict] = []
+        self.renames: dict = {}   # old name -> (new name, class, variants), for child modules
+
+    def note(self, cls: str, pos: int, text: str):
+        self.listed.append({"class": cls, "file": self.path, "line": line_of(self.src, pos), "text": text})
+
+    def run(self):
+        if "combo" in self.classes and self.rules.combo:
+            self.combo()
+        for m in self.rules.modules:
+            if m["class"] in self.classes:
+                self.module(m)
+        return self
+
+    # -- combo
+    def combo(self):
+        old, new = self.rules.combo["old"], self.rules.combo["new"]
+        keep = self.rules.combo.get("keep_if_calls", [])
+        code = mask(self.src)
+        edits = []
+        for m in re.finditer(r"(?<![\w:])" + re.escape(old) + r"\b", code):
+            seg = code[m.start():chain_end(code, m.end())]
+            hit = next((k for k in keep if re.search(r"\.\s*" + k + r"\b", seg)), None)
+            if hit:
+                self.note("combo", m.start(), f"{old} chain calls `{hit}`: a menu with a header, left for the writer")
+                continue
+            edits.append((m.start(), m.end(), new))
+        self.src = apply_edits(self.src, edits)
+        self.counts["combo"] += len(edits)
+
+    # -- moved names of one old module
+    def module(self, mod: dict):
+        cls, old, moved = mod["class"], mod["old"], mod.get("moved", {})
+        variants = mod.get("variants", {})
+        code = mask(self.src)
+        edits, renames = [], {}   # renames: old name -> name the file uses now
+        defined = set(re.findall(r"\b(?:enum|struct|type|trait|mod|fn|const|static)\s+(" + IDENT + ")", code))
+        for m in USE.finditer(code):
+            indent, vis, path = m.group(1), m.group(2), m.group(3).strip()
+            if not path.startswith(old + "::"):
+                continue
+            rest = path[len(old) + 2:]
+            if rest.startswith("{") and rest.endswith("}"):
+                entries = split_entries(rest[1:-1])
+                if entries is None:
+                    self.note(cls, m.start(), f"nested import from {old}: rewrite by hand")
+                    continue
+            elif re.fullmatch(IDENT + r"(\s+as\s+" + IDENT + r")?", rest):
+                entries = [rest]
+            else:
+                continue   # a deeper module path: another rule's
+            groups: dict[str, list[str]] = defaultdict(list)
+            changed = False
+            for e in entries:
+                name, _, alias = (x.strip() for x in e.partition(" as "))
+                if name not in moved:
+                    groups[old].append(e)
+                    continue
+                changed = True
+                parent, leaf = moved[name].rsplit("::", 1)
+                if alias or leaf == name:
+                    groups[parent].append(leaf + (f" as {alias}" if alias else ""))
+                elif leaf in defined or self._imports(code, leaf, m.start()):
+                    groups[parent].append(f"{leaf} as {name}")
+                    renames[name] = name   # the name stays; its variants still follow
+                    self.note(cls, m.start(), f"`{leaf}` is already bound here: imported as `{name}`")
+                else:
+                    groups[parent].append(leaf)
+                    renames[name] = leaf
+                    if vis.strip():
+                        self.note(cls, m.start(), f"`{vis.strip()} use` renames `{name}` to `{leaf}`: its users "
+                                                  "elsewhere still name the old name")
+            if not changed:
+                continue
+            lines = []
+            for parent, names in groups.items():
+                names = sorted(dict.fromkeys(names))
+                body = names[0] if len(names) == 1 else "{" + ", ".join(names) + "}"
+                lines.append(f"{indent}{vis}use {parent}::{body};")
+            edits.append((m.start(), m.end(), "\n".join(lines)))
+            self.counts[cls] += 1
+        self.src = apply_edits(self.src, edits)
+
+        # qualified paths, variants first
+        code = mask(self.src)
+        edits = []
+        for tv, nv in variants.items():
+            t, v = tv.split("::")
+            for m in re.finditer(r"(?<![\w:])" + re.escape(f"{old}::{t}::{v}") + r"\b", code):
+                edits.append((m.start(), m.end(), f"{moved[t]}::{nv}"))
+        taken = {(a, b) for a, b, _ in edits}
+        names = "|".join(sorted(map(re.escape, moved), key=len, reverse=True))
+        if names:
+            for m in re.finditer(r"(?<![\w:])" + re.escape(old) + r"::(" + names + r")\b(?!::\{)", code):
+                if not any(a <= m.start() < b for a, b in taken):
+                    edits.append((m.start(), m.end(), moved[m.group(1)]))
+        self.src = apply_edits(self.src, edits)
+        self.counts[cls] += len(edits)
+
+        # bare renames and variants in files that imported the name
+        if renames:
+            self.rename_bare(cls, renames, variants)
+            for name, leaf in renames.items():
+                if leaf != name:
+                    self.renames[name] = (leaf, cls, variants)
+
+    def rename_bare(self, cls: str, renames: dict, variants: dict, via_super: bool = False):
+        """Renames each bare name (and its `Name::Variant` paths); with via_super also `super::Name`."""
+        code = mask(self.src)
+        edits = []
+        before = r"(?:(?<=super::)|(?<![\w:.]))" if via_super else r"(?<![\w:.])"
+        for name, leaf in renames.items():
+            vmap = {tv.split("::")[1]: nv for tv, nv in variants.items() if tv.split("::")[0] == name}
+            for m in re.finditer(before + re.escape(name) + r"(?:::(" + IDENT + r"))?\b", code):
+                v = m.group(1)
+                rep = leaf + (f"::{vmap.get(v, v)}" if v else "")
+                if rep != code[m.start():m.end()]:
+                    edits.append((m.start(), m.end(), rep))
+        self.src = apply_edits(self.src, edits)
+        self.counts[cls + " rename"] += len(edits)
+
+    def inherit(self, parent: dict):
+        """A child module of a file that renamed names: the names it takes through `use super::...` follow."""
+        code = mask(self.src)
+        glob = re.search(r"(?m)^\s*use\s+super::\*\s*;", code)
+        imported = set()
+        for m in USE.finditer(code):
+            p = m.group(3).strip()
+            if p.startswith("super::"):
+                rest = p[len("super::"):]
+                ents = split_entries(rest[1:-1]) if rest.startswith("{") else [rest]
+                imported |= {e for e in ents or [] if re.fullmatch(IDENT, e)}
+        defined = set(re.findall(r"\b(?:enum|struct|type|trait)\s+(" + IDENT + ")", code))
+        by_cls: dict = defaultdict(dict)
+        for name, (leaf, cls, variants) in parent.items():
+            if name not in imported and not glob:
+                continue
+            if name in defined or leaf in defined:
+                self.note(cls, 0, f"`{name}` comes from the parent module, which renamed it to `{leaf}`; this file "
+                                  "also defines one of the names: rename by hand")
+                continue
+            by_cls[(cls, tuple(sorted(variants.items())))][name] = leaf
+        for (cls, variants), renames in by_cls.items():
+            self.rename_bare(cls, renames, dict(variants), via_super=True)
+
+    @staticmethod
+    def _imports(code: str, leaf: str, skip_at: int) -> bool:
+        for m in USE.finditer(code):
+            if m.start() != skip_at and re.search(r"(?<![\w])" + re.escape(leaf) + r"\s*(?:[,}]|$)", m.group(3)):
+                return True
+        return False
+
+
+# ---------------------------------------------------------------- manifests
+
+def dep_line_rx(name: str) -> re.Pattern:
+    return re.compile(r"^(\s*)" + re.escape(name) + r"(\.workspace)?\s*=\s*(.*)$")
+
+
+def sections(lines: list[str]) -> list[str]:
+    """The table header each line belongs to."""
+    out, cur = [], ""
+    for ln in lines:
+        s = ln.strip()
+        if s.startswith("["):
+            m = re.match(r"^\[\[?\s*([^\]]+?)\s*\]\]?\s*(#.*)?$", s)
+            if m:
+                cur = m.group(1)
+        out.append(cur)
+    return out
+
+
+def is_dep_section(sec: str) -> bool:
+    return bool(re.fullmatch(r"(target\..+\.)?(dev-|build-)?dependencies|workspace\.dependencies", sec))
+
+
+def crate_of(tree: Path, rel: str) -> str | None:
+    p = (tree / rel).parent
+    while True:
+        if (p / "Cargo.toml").is_file():
+            return str((p / "Cargo.toml").relative_to(tree))
+        if p == tree or tree not in p.parents:
+            return None
+        p = p.parent
+
+
+def add_dependency(tree: Path, manifests: dict[str, str], crate_manifest: str, dep: dict, listed: list) -> int:
+    """Adds dep["crate"] to one crate manifest (and the root's workspace table). Returns the edits made."""
+    name = dep["crate"]
+    text = manifests.get(crate_manifest)
+    if text is None:
+        return 0
+    lines = text.split("\n")
+    secs = sections(lines)
+    if any(dep_line_rx(name).match(ln) and is_dep_section(s) for ln, s in zip(lines, secs)) or \
+            any(re.fullmatch(r"(\S+\.)?dependencies\." + re.escape(name), s) for s in secs):
+        return 0
+    for model in dep["model"]:
+        idx = next((i for i, (ln, s) in enumerate(zip(lines, secs))
+                    if dep_line_rx(model).match(ln) and re.fullmatch(r"dependencies|workspace\.dependencies", s)), None)
+        if idx is None:
+            continue
+        indent, dotted, val = dep_line_rx(model).match(lines[idx]).groups()
+        edits = 0
+        if dotted or re.search(r"\bworkspace\s*=\s*true\b", val):
+            new = f"{indent}{name}.workspace = true" if dotted else f"{indent}{name} = {{ workspace = true }}"
+            root = "Cargo.toml"
+            if root != crate_manifest:
+                edits += add_dependency(tree, manifests, root, dict(dep, model=dep["model"]), listed)
+        else:
+            src = re.search(r'\bgit\s*=\s*"[^"]*"', val)
+            pin = re.search(r'\b(rev|branch|tag)\s*=\s*"[^"]*"', val)
+            if not src:
+                listed.append({"class": "deps", "file": crate_manifest, "line": idx + 1,
+                               "text": f"add {name}: the `{model}` line is not a git dependency; add it by hand"})
+                return 0
+            new = f"{indent}{name} = {{ {src.group(0)}" + (f", {pin.group(0)}" if pin else "") + " }"
+        lines.insert(idx + 1, new)
+        manifests[crate_manifest] = "\n".join(lines)
+        return edits + 1
+    listed.append({"class": "deps", "file": crate_manifest, "line": 1,
+                   "text": f"add {name}: no {' or '.join(dep['model'])} line to model it on; add it by hand"})
+    return 0
+
+
+def repin_text(path: str, text: str, url: str, rev: str, patch_urls: list[str], fw_patches: dict,
+               features: list[dict], pin_text, counts: Counter, listed: list) -> str:
+    new = pin_text(text, url, rev, patch_urls)
+    if new != text:
+        counts["revs"] += sum(1 for a, b in zip(text.split("\n"), new.split("\n")) if a != b) or 1
+    lines = new.split("\n")
+    secs = sections(lines)
+    norm = lambda u: u.rstrip("/").removesuffix(".git")  # noqa: E731
+    by_url: dict[str, set] = defaultdict(set)
+    for v in fw_patches.values():
+        if v.get("git") and v.get("rev"):
+            by_url[norm(v["git"])].add(v["rev"])
+    url_revs = {u: next(iter(rs)) for u, rs in by_url.items() if len(rs) == 1}   # one fork, one commit
+    for i, (ln, sec) in enumerate(zip(lines, secs)):
+        if sec == "patch.crates-io" and (m := re.match(r"^\s*(" + r"[A-Za-z0-9_-]+" + r")\s*=\s*\{(.*)\}\s*$", ln)):
+            name, body = m.groups()
+            g = re.search(r'\bgit\s*=\s*"([^"]*)"', body)
+            r = re.search(r'\brev\s*=\s*"([^"]*)"', body)
+            if not g:
+                continue
+            fw = fw_patches.get(name)
+            if fw and norm(fw.get("git", "")) == norm(g.group(1)):
+                want = fw.get("rev")
+            elif fw and not fw.get("git"):
+                listed.append({"class": "note", "file": path, "line": i + 1,
+                               "text": f"[patch] {name}: the framework patches it from a path (a vendored copy); kept"})
+                continue
+            elif fw:
+                listed.append({"class": "revs", "file": path, "line": i + 1,
+                               "text": f"[patch] {name}: the framework patches it from {fw.get('git')}"})
+                continue
+            else:
+                want = url_revs.get(norm(g.group(1)))
+                if not want:
+                    listed.append({"class": "revs", "file": path, "line": i + 1,
+                                   "text": f"[patch] {name}: the framework patches nothing from {g.group(1)}; check its rev"})
+                    continue
+            if want and r and r.group(1) != want:
+                lines[i] = ln.replace(f'rev = "{r.group(1)}"', f'rev = "{want}"')
+                counts["revs"] += 1
+        for f in features:
+            fm = None
+            if is_dep_section(sec) and dep_line_rx(f["crate"]).match(ln):
+                if re.search(r"\bfeatures\s*=\s*\[[^\]]*$", ln):
+                    listed.append({"class": "features", "file": path, "line": i + 1,
+                                   "text": f"{f['crate']} features over several lines: change by hand"})
+                    continue
+                fm, inline = re.search(r"\bfeatures\s*=\s*\[([^\]]*)\]", ln), True
+            elif re.fullmatch(r"(\S+\.)?dependencies\." + re.escape(f["crate"]), sec):
+                fm, inline = re.match(r"^\s*features\s*=\s*\[([^\]]*)\]", ln), False
+            if not fm:
+                continue
+            items = re.findall(r'"([^"]*)"', fm.group(1))
+            out = [f.get("rename", {}).get(x, x) for x in items if x not in f.get("drop", [])]
+            if out == items:
+                continue
+            if out:
+                arr = "features = [" + ", ".join(f'"{x}"' for x in out) + "]"
+                lines[i] = ln[:fm.start()] + arr + ln[fm.end():]
+            elif inline:
+                lines[i] = re.sub(r",\s*features\s*=\s*\[[^\]]*\]|\bfeatures\s*=\s*\[[^\]]*\]\s*,\s*", "", ln, count=1)
+            else:
+                lines[i] = None
+            counts["features"] += 1
+            if f.get("note"):
+                listed.append({"class": "note", "file": path, "line": i + 1, "text": f"{f['crate']}: {f['note']}"})
+            break
+    return "\n".join(x for x in lines if x is not None)
+
+
+# ---------------------------------------------------------------- commands
+
+def tracked(tree: Path, pattern: str) -> list[str]:
+    return [f for f in git(tree, "ls-files", "-z", "--", pattern).split("\0") if f]
+
+
+def udiff(old: dict[str, str], new: dict[str, str]) -> str:
+    out = []
+    for f in sorted(new):
+        if old.get(f) != new[f]:
+            out += difflib.unified_diff(old.get(f, "").splitlines(True), new[f].splitlines(True), f"a/{f}", f"b/{f}")
+    return "".join(out)
+
+
+def counts_text(c: Counter) -> str:
+    return " (" + ", ".join(f"{k} {v}" for k, v in c.most_common()) + ")" if c else ""
+
+
+def finish(cmd: str, tree: Path, rd: Path, old: dict, new: dict, counts: Counter, listed: list, apply: bool, rec) -> int:
+    changed = sorted(f for f in new if old.get(f) != new[f])
+    notes = [x for x in listed if x["class"] == "note"]
+    listed = [x for x in listed if x["class"] != "note"]
+    text = udiff(old, new)
+    (rd / f"{cmd}.diff").write_text(text)
+    commit = None
+    if apply and changed:
+        for f in changed:
+            (tree / f).write_text(new[f])
+        git(tree, "add", "--", *changed)
+        r = subprocess.run(["git", "-C", str(tree), "commit", "-q", "-m",
+                            f"minimal-port {cmd}: {sum(counts.values())} edits{counts_text(counts)}"],
+                           capture_output=True, text=True)
+        if r.returncode:
+            fail(f"git commit: {r.stderr.strip()}")
+        commit = git(tree, "rev-parse", "HEAD").strip()
+    elif not apply:
+        sys.stdout.write(text)
+    code = 1 if listed else 0
+    (rd / f"{cmd}.json").write_text(json.dumps({"tool": "minimal-port", "cmd": cmd, "tree": str(tree), "applied": apply,
+                                                "edits": dict(counts), "files": changed, "listed": listed, "notes": notes,
+                                                "commit": commit, "exit": code}, indent=1) + "\n")
+    for x in notes:
+        print(f"  note {x['file']}:{x['line']}: {x['text']}")
+    for x in listed[:40]:
+        print(f"  listed {x['class']} {x['file']}:{x['line']}: {x['text']}")
+    if len(listed) > 40:
+        print(f"  ... {len(listed) - 40} more in {rd / (cmd + '.json')}")
+    line = f"minimal-port {cmd}: {sum(counts.values())} edits{counts_text(counts)} in {len(changed)} files; {len(listed)} listed"
+    print(line)
+    rec.result(line, log=str(rd), data={"edits": sum(counts.values()), "listed": len(listed), "commit": commit}, ok=True)
+    return code
+
+
+def child_modules(f: str, files) -> list[str]:
+    """The files of the modules declared one level below file f (`a/b.rs` or `a/b/mod.rs` -> `a/b/*.rs`, `a/b/*/mod.rs`)."""
+    p = Path(f)
+    d = p.parent if p.name in ("mod.rs", "lib.rs", "main.rs") else p.with_suffix("")
+    out = []
+    for g in files:
+        q = Path(g)
+        if g != f and ((q.parent == d and q.name != "mod.rs") or (q.name == "mod.rs" and q.parent.parent == d)):
+            out.append(g)
+    return out
+
+
+def cmd_rewrite(cfg, a, tree: Path, rules: Rules, rd: Path, rec) -> int:
+    classes = set(rules.classes)
+    if a.only:
+        classes &= {c.strip() for c in a.only.split(",")}
+    if a.skip:
+        classes -= {c.strip() for c in a.skip.split(",")}
+    unknown = ({c.strip() for c in (a.only or "").split(",") if c.strip()} |
+               {c.strip() for c in (a.skip or "").split(",") if c.strip()}) - set(rules.classes)
+    if unknown:
+        fail(f"unknown class {', '.join(sorted(unknown))}; the classes are {', '.join(rules.classes)}")
+    old, new, counts, listed = {}, {}, Counter(), []
+    done = {}
+    for f in tracked(tree, "*.rs"):
+        src = (tree / f).read_text(errors="replace")
+        done[f] = FileRewrite(f, src, rules, classes).run()
+        old[f] = src
+    for f, fr in list(done.items()):
+        if fr.renames:
+            for child in child_modules(f, done):
+                done[child].inherit(fr.renames)
+    for f, fr in done.items():
+        if fr.src != old[f]:
+            new[f] = fr.src
+        counts += fr.counts
+        listed += fr.listed
+    if "deps" in classes:
+        manifests = {f: (tree / f).read_text() for f in tracked(tree, "*Cargo.toml")}
+        before = dict(manifests)
+        for dep in rules.deps:
+            crates = sorted({c for f, t in new.items() if dep["when"] in mask(t) and (c := crate_of(tree, f))})
+            for c in crates:
+                counts["deps"] += add_dependency(tree, manifests, c, dep, listed)
+        for f, t in manifests.items():
+            old[f] = before[f]
+            if t != before[f]:
+                new[f] = t
+    return finish("rewrite", tree, rd, old, new, counts, listed, a.apply, rec)
+
+
+def cmd_repin(cfg, a, tree: Path, rules: Rules, rd: Path, rec) -> int:
+    rev = a.rev or cfg.get("plan.base")
+    if not rev:
+        fail("no revision: give --rev or set plan.base")
+    url = cfg.require("framework.repo")
+    patch_urls = list(cfg.get("framework.patch_urls") or [url])
+    if url not in patch_urls:
+        patch_urls = [url, *patch_urls]
+    fw = cfg.path("framework.checkout")
+    r = subprocess.run(["git", "-C", str(fw), "show", f"{rev}:Cargo.toml"], capture_output=True, text=True)
+    if r.returncode:
+        fail(f"framework manifest at {rev}: {r.stderr.strip()}")
+    try:
+        fw_patches = (tomllib.loads(r.stdout).get("patch") or {}).get("crates-io") or {}
+    except tomllib.TOMLDecodeError as e:
+        fail(f"framework manifest at {rev}: {e}")
+    spec = importlib.util.spec_from_file_location("pin_framework", TOOLS / "land" / "pin-framework.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    old, new, counts, listed = {}, {}, Counter(), []
+    for f in tracked(tree, "*Cargo.toml"):
+        text = (tree / f).read_text()
+        old[f] = text
+        t = repin_text(f, text, url, rev, patch_urls, {k: v for k, v in fw_patches.items() if isinstance(v, dict)},
+                       rules.features, mod.pin_text, counts, listed)
+        if t != text:
+            new[f] = t
+    return finish("repin", tree, rd, old, new, counts, listed, a.apply, rec)
+
+
+ITEM_ORDER = ["host", "input", "dock", "dialogs", "title-bar", "helpers", "combo", "keymap", "web", "tests"]
+
+
+def cmd_sites(cfg, a, tree: Path, rules: Rules, rd: Path, rec) -> int:
+    items: dict[str, list] = defaultdict(list)
+    crates: Counter = Counter()
+    dock_files, web = {}, []
+    for f in tracked(tree, "*.rs"):
+        src = (tree / f).read_text(errors="replace")
+        code = mask(src)
+        starts = [0] + [m.end() for m in re.finditer("\n", src)]
+        lines = src.split("\n")
+        seen = set()
+        for s in rules.sites:
+            if s["req"] and not s["req"].search(code):
+                continue
+            for m in s["rx"].finditer(code):
+                ln = bisect.bisect_right(starts, m.start())
+                if (s["item"], ln) in seen:
+                    continue
+                seen.add((s["item"], ln))
+                items[s["item"]].append({"file": f, "line": ln, "text": lines[ln - 1].strip()[:160], "note": s["note"]})
+                if s["item"] not in ("tests",):
+                    crates[crate_of(tree, f) or "."] += 1
+                if s["item"] == "dock":
+                    dock_files[f] = len(lines)
+                if s["item"] == "web" and f not in web:
+                    web.append(f)
+    port = {k: v for k, v in items.items() if k not in ("tests",)}
+    writers = ["host", "dock"] if items.get("dock") else ["all"]
+    data = {"rules": f"{rules.path} ({rules.written_for})", "items": items, "crates": dict(crates),
+            "dock_files": dock_files, "web_shells": web, "writers": writers}
+    (rd / "sites.json").write_text(json.dumps(data, indent=1) + "\n")
+    order = [k for k in ITEM_ORDER if k in items] + sorted(k for k in items if k not in ITEM_ORDER)
+    md = [f"# Minimal port sites\n", f"Tree {tree}; rules {rules.path.name} ({rules.written_for}).\n",
+          f"Writers: {', '.join(writers)}. Dock files: {len(dock_files)}, {sum(dock_files.values())} lines. "
+          f"Web shells: {', '.join(web) or 'none'}.\n", "| Item | Sites |", "|---|---|"]
+    md += [f"| {k} | {len(items[k])} |" for k in order]
+    md += ["", "| Crate | Port sites |", "|---|---|"] + [f"| {c} | {n} |" for c, n in crates.most_common()]
+    if dock_files:
+        md += ["", "| Dock file | Lines |", "|---|---|"] + [f"| {f} | {n} |" for f, n in sorted(dock_files.items())]
+    for k in order:
+        md += ["", f"## {k}", ""]
+        notes = defaultdict(list)
+        for x in items[k]:
+            notes[x["note"]].append(x)
+        for note, xs in notes.items():
+            md.append(f"- {note} ({len(xs)}):")
+            md += [f"  - {x['file']}:{x['line']}: `{x['text']}`" for x in xs]
+    (rd / "sites.md").write_text("\n".join(md) + "\n")
+    c = Counter({k: len(items[k]) for k in order})
+    line = f"minimal-port sites: {sum(len(v) for v in port.values())} sites{counts_text(c)}; writers {', '.join(writers)}"
+    print(f"wrote {rd / 'sites.md'}")
+    print(line)
+    rec.result(line, log=str(rd), data={"sites": {k: len(v) for k, v in items.items()}, "writers": writers}, ok=True)
+    return 1 if port else 0
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("cmd", choices=["sites", "repin", "rewrite"])
+    ap.add_argument("--tree", type=Path)
+    ap.add_argument("--rules", type=Path)
+    ap.add_argument("--rev")
+    ap.add_argument("--only")
+    ap.add_argument("--skip")
+    ap.add_argument("--apply", action="store_true")
+    ap.add_argument("--config")
+    a = ap.parse_args()
+    if a.cmd == "sites" and a.apply:
+        fail("sites changes nothing; --apply is for repin and rewrite")
+    try:
+        cfg = config.load(a.config)
+        tree = (a.tree or cfg.path("app.integration")).resolve()
+        rules = Rules(a.rules or cfg.path("minimal.rules"))
+    except config.ConfigError as e:
+        fail(str(e))
+    if not (tree / ".git").exists():
+        fail(f"{tree} is not a git work tree")
+    if a.apply and git(tree, "status", "--porcelain", "--untracked-files=no").strip():
+        fail(f"{tree} has uncommitted changes; --apply commits its edits alone")
+    rd = cfg.path("work.runs") / "minimal"
+    rd.mkdir(parents=True, exist_ok=True)
+    with track.recorded(f"minimal-port-{a.cmd}") as rec:
+        code = {"sites": cmd_sites, "repin": cmd_repin, "rewrite": cmd_rewrite}[a.cmd](cfg, a, tree, rules, rd, rec)
+    sys.exit(code)
+
+
+if __name__ == "__main__":
+    main()

@@ -39,7 +39,7 @@ git fetch -q landing-upstream "$BRANCH:refs/remotes/landing-upstream/$BRANCH"
 NEXT=$(git rev-parse "landing-upstream/$BRANCH")
 echo "ref $REF = $OLD ; $BRANCH on $URL = $NEXT"
 if ! git merge-base --is-ancestor "$NEXT" "$OLD"; then
-  echo "NOT a fast-forward: $REF lacks these $BRANCH commits (merge $BRANCH into the port first):"
+  echo "NOT a fast-forward: $REF lacks these $BRANCH commits (merge $BRANCH into the port first, with tools/sync):"
   git log --oneline "$OLD..$NEXT"
   [ "${DRY_MERGE:-0}" = 1 ] || exit 1
   echo "DRY_MERGE=1: continuing the preview on $BRANCH..$REF without the merge (never land this)"

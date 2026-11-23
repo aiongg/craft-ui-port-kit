@@ -104,3 +104,21 @@ def case_combine_lost_exits_1(s):
     (s.work / "sets" / "set-a" / "base-fw").write_text(base + "\n")
     p = s.run("combine-lost", "set-a", env={"REPO": "fw", "J": str(fw)})
     check(p.returncode == 1 and "LOST set-a src/a.rs: fn kept_by_nobody() {}" in p.stdout, "a lost line exits 1", p)
+
+
+def case_review_diff_writes_patch(s):
+    portset(s)
+    from portkit.portset import write
+    fw = s.tree("fw", {"src/a.rs": "fn a() {}\n"})
+    base = git(fw, "rev-parse", "HEAD").strip()
+    t = s.work / "trees" / "set-a"
+    git(fw, "worktree", "add", "-q", "-b", "port/set/set-a", str(t))
+    s.commit(t, {"src/a.rs": "fn a() {}\nfn added_by_set() {}\n"}, "set-a")
+    (s.work / "sets" / "set-a").mkdir(parents=True)
+    (s.work / "sets" / "set-a" / "base-fw").write_text(base + "\n")
+    sh = FakeSheet("set-a", t, [])
+    sh.repos = lambda: ["fw"]
+    write.Sheet = lambda sid: sh
+    write.cmd_review_diff(type("A", (), {"sets": ["set-a"]})())
+    patch = s.work / "sets" / "set-a" / "review-diff.patch"
+    check(patch.is_file() and "+fn added_by_set() {}" in patch.read_text(), "review-diff.patch holds the set's change")

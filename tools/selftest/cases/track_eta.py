@@ -45,3 +45,9 @@ def case_unset_batches_and_reset(s):
     c = json.loads(s.run("track", "eta", "--json").stdout)
     check(c["left"] is None and any("plan.build_batches unset" in n for n in c["notes"]), f"says what it counts: {c}")
     check(c["weekly"]["now_pct"] == 5 and c["weekly"]["per_h"] is None, f"a reset starts the samples again: {c['weekly']}")
+
+
+def case_spend_line_without_allowance(s):
+    write(s, [cycle_event("2026-01-01T00:00:00Z", "a-1", "a", 600, None, 1, 10)])
+    p = s.run("track", "eta")
+    check(p.returncode == 0 and "spend: $" in p.stdout, "eta prints the spend", p)

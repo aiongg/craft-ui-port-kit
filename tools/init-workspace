@@ -92,6 +92,8 @@ def prerequisites(cfg: config.Config) -> tuple[list[str], list[str], bool]:
              ("rust-analyzer", False, "rust-analyzer (racheck, SCIP indexes)"), ("claude", False, "the claude CLI"),
              ("gh", False, "gh (landing)"),
              ("git-filter-repo", False, "git-filter-repo (landing scrub; pip install git-filter-repo)"), ("node", False, "node 18+ (only to run workflow scripts)")]
+    if sys.platform.startswith("linux"):
+        tools.append(("Xvfb", False, "Xvfb (look captures; apt install xvfb)"))
     if "capped" in (cfg.get("build.memory_cap") or ""):
         tools.append(("systemd-run", False, "systemd-run (build.memory_cap uses tools/capped)"))
     for exe, is_hard, what in tools:

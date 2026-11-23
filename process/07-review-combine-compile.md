@@ -16,9 +16,10 @@ Record the phase: `tools/track phase 6 "review, combine, compile"`.
 
 One Opus reviewer per area and side (framework or app) reads the diffs of its sets against their sheets, decisions, plan checks and the rules (`prompts/p6-area-review.md`). It edits nothing and builds nothing.
 
-1. Put each review on the board: `tools/track status review-<area>-<side>-<round> todo "<n> sets"`.
-2. Render the prompt with `{{AREA}}`, `{{ROUND}}`, `{{TASK}}` and `{{OUT}}` (the summary path), name the side and the sets in the prompt, and start the reviewers as background tasks. One reviewer handles about 15 to 20 sets in about 120 tool calls; split a larger area.
-3. Each set gets `review-<round>.md`: a verdict (`ok`, `needs fixes`, `back to plan`), numbered findings with `path:line`, the fix, the severity and a draft ruling for the fixer (`fix`, `restore the base hunk`, `back to plan`). The summary ends with "Pipeline lessons": findings by source (sheet or contract, bookkeeping across trees, a writer error a plan check could catch, an error only a compile or test catches).
+1. Write each set's diff for its reviewer: `tools/port-set review-diff <set>...` for every set of the area (writes `review-diff.patch` in each set dir).
+2. Put each review on the board: `tools/track status review-<area>-<side>-<round> todo "<n> sets"`.
+3. Render the prompt with `{{AREA}}`, `{{ROUND}}`, `{{TASK}}` and `{{OUT}}` (the summary path), name the side and the sets in the prompt, and start the reviewers as background tasks. One reviewer handles about 15 to 20 sets in about 120 tool calls; split a larger area.
+4. Each set gets `review-<round>.md`: a verdict (`ok`, `needs fixes`, `back to plan`), numbered findings with `path:line`, the fix, the severity and a draft ruling for the fixer (`fix`, `restore the base hunk`, `back to plan`). The summary ends with "Pipeline lessons": findings by source (sheet or contract, bookkeeping across trees, a writer error a plan check could catch, an error only a compile or test catches).
 
 The reviewer checks the gallery rule for every component or variant the batch adds to the framework: its stories are registered in the same set, at the gallery level of its architectural kind, with a story owner, and its dialogs and windows start closed ([rules/porting-rules.md](../rules/porting-rules.md), "UI gallery"). A missing story is a `fix` finding on the set that adds the component.
 

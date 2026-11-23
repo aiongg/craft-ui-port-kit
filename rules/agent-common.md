@@ -86,9 +86,17 @@ Only when your prompt gives you builds:
 - One cargo command at a time. No workspace-wide build or test, and no full CI command locally.
 - Read only the failing lines of a run: grep the log for `^test .* FAILED$`, `^---- `, `error\[` and `panicked at`. Never read a whole log.
 - To debug, print values at the suspected path with lines that start with `DIAG `, run the one trial, read, repeat. Remove every `DIAG ` line before you commit the final change.
-- Bound every wait with a timeout. No polling loops on a process.
+- Run cargo through `cl` in the foreground with the Bash tool's timeout (up to 10 minutes). A command you move to the background gets one bounded wait per call, `timeout 170 ... until <done marker>`. No bare `sleep`, no unbounded loops, no agent that only waits.
 
 Without builds, you write code that compiles by reading carefully: check every import path, signature and trait bound against the code. **Formatting:** an agent that runs no builds formats each file it changed with `rustfmt --edition 2024 <file>`, which needs no build. `tools/cycle` runs `cargo fmt` on the changed crates only, never on vendored code (`process/11-build-loop.md`, "The cycle").
+
+## Shell
+
+A headless agent's shell denies what its allow list does not name, and each denied call costs a turn at full context.
+
+- One command per Bash call. No `&&`, `;`, `cd`, `$(...)`, `` `...` `` or shell variables: use the tool's own arguments (a path, a flag) instead.
+- Pipe only into allowed commands (`head`, `tail`, `wc`).
+- Write creates missing directories, so never `mkdir` for a file you write; `mkdir -p` is allowed for a directory a tool needs.
 
 ## Git
 

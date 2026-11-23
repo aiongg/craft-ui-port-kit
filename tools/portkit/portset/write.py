@@ -63,6 +63,25 @@ def make_trees(sheet: Sheet) -> None:
         print(f"{tree} at {ctx.base(repo)}")
 
 
+def cmd_review_diff(a) -> Outcome:
+    """Write <set dir>/review-diff.patch: the set's committed change against its writing base, for the area reviewers
+    (their shell runs no `git -C`, which would also allow commits)."""
+    done = []
+    for sid in a.sets:
+        sheet = Sheet(sid)
+        parts = []
+        for repo in sheet.repos():
+            tree = sheet.tree(repo)
+            f = ctx.set_dir(sid) / f"base-{repo}"
+            if not tree.exists() or not f.exists():
+                raise SystemExit(f"{sid}: no tree or base-{repo} for {repo}; run `port-set tree {sid}` first")
+            parts.append(f"# repo: {repo} (tree {tree.name})\n" + git(tree, "diff", "--no-color", f.read_text().strip(), "HEAD"))
+        out = ctx.set_dir(sid) / "review-diff.patch"
+        out.write_text("\n".join(parts))
+        done.append(f"{sid}: {out}")
+    return Outcome("\n".join(done))
+
+
 def need_trees(sheet: Sheet) -> None:
     if not all(sheet.tree(r).exists() for r in sheet.repos()):
         make_trees(sheet)
@@ -322,6 +341,9 @@ def register(sub) -> None:
         s = sub.add_parser(name, help=doc)
         s.add_argument("set")
         s.set_defaults(func=func, owns_state=False)
+    s = sub.add_parser("review-diff", help="write each set's diff against its writing base to review-diff.patch")
+    s.add_argument("sets", nargs="+", metavar="SET")
+    s.set_defaults(func=cmd_review_diff, owns_state=False)
     s = sub.add_parser("bundle", help="write the set's one-file context bundle (bundle.md)")
     s.add_argument("set")
     s.add_argument("--shared", action="store_true",

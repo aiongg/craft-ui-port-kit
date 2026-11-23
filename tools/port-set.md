@@ -35,6 +35,7 @@ Options before the command: `--config PATH` (a port.toml; default `PORT_KIT_CONF
 | Command | What it does | Model calls | Writes |
 |---|---|---|---|
 | `tree SET` | Creates the set's trees, one per repo it writes | 0 | trees, `base-<repo>` |
+| `review-diff SET...` | Writes each set's committed diff against its writing base | 0 | `review-diff.patch` |
 | `bundle SET [--shared]` | Builds the writer bundle | 0 | `bundle.md` |
 | `apply SET EDITS` | Applies an edits file to the set's trees | 0 | `apply.md` |
 | `check SET` | Scripted self-check of the set's trees | 0 | `check.md` |
@@ -244,6 +245,10 @@ The set then ends done (check clean), in review (errors or apply failures left),
 ### agent SET [--continue]
 
 The set written by one `claude -p` agent with edit tools (`models.write`, `pipeline.agent_max_turns` turns) in the set's tree. It reads the writer sheet (`sheet.md`), `decisions.md` and the contract rows itself. Its Bash is limited to read commands (git grep, show, log; grep; rg; ls; sed -n); it must not build. The sheet's `delete` rows are removed before it starts. When it stops, port-set runs the check and commits. An agent that runs out of turns leaves its work committed; `--continue` starts a new agent that reads the committed work, the Errors of `check.md` and `racheck.md`, and finishes only what is left. Batch runners use agent mode above `pipeline.agent_files_over` Files rows and for BLOCKED retries ([process/06-write.md](../process/06-write.md)).
+
+### review-diff SET...
+
+Writes `review-diff.patch` in each set's dir: `git diff <base-<repo>> HEAD` of the set's tree, one section per repo headed `# repo: <name>`. Area reviewers read this file because their shell allows `git diff` and not `git -C <tree>`. Run it for every set of an area before its reviewers start (`process/07-review-combine-compile.md`, step 1).
 
 ### fix SET FINDINGS.md
 

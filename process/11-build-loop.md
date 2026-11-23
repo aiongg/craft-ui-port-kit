@@ -90,7 +90,7 @@ Each of these makes a second copy of a crate and everything above it, or rebuild
 | The app's own build script sets environment the test commands do not (for example `CARGO_INCREMENTAL=0`, a different `RUSTFLAGS`) | Diff the app's build script environment against the test environment | Remove the override, or add the variable to `unset_env`; build snapshots and dev binaries through `cl` too |
 | A command selects one package (`-p <crate>`) | It changes feature unification for everything below | Never pass `-p <one crate>`; `cl` refuses it in app mode |
 | The app's dev build resolves features differently from its tests (optional features turned on only by the binary) | `cl doctor` after building the binary | Put the package that turns them on into `selection` |
-| rust-analyzer checks in a build target dir | Its builds use other settings | rust-analyzer gets its own target dir (`racheck.fw_target`, `racheck.app_target`) |
+| rust-analyzer checks in a build target dir | Its builds use other settings | rust-analyzer gets its own target dir (`racheck.fw_target`, `racheck.app_target`). Never build in, or seed a build tree from, a racheck target dir either: its settings differ from the build's |
 | Profile settings change between builds in one target dir (incremental, codegen units, opt-level overrides) | Compare the command lines in `cl.log` | Use the same settings for every build in a target dir |
 | Tests that keep a scratch reserve read a large `TMPDIR` | Test failures about free space | Set one `TMPDIR` for every command |
 

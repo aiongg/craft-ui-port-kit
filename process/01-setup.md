@@ -149,6 +149,8 @@ If the run does not finish, or most tests fail, the build loop is wrong (a missi
 
 Then record the two build times the fixer mode and the projection use, `build.warm_check_s` and `build.full_run_s`, in `port.toml` ([11-build-loop.md](11-build-loop.md), "Measuring the fixer mode's inputs").
 
+Then state the cost projection for the port to the developer (`process/costs.md`, "Projecting a new port"), as ranges with the measured basis, and record it in `STATE.md`. It is information, not an allowance: nothing stops or asks because of spend, and `track eta` prints the spend so far against this projection.
+
 Then start the framework baseline as a background task, in the framework integration tree at `plan.base`:
 
 ```sh

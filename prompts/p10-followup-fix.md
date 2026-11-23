@@ -40,9 +40,10 @@ you found. If the fix needs a design choice that is not made yet: "Stop and repo
 ## Builds and waits
 - Every cargo command goes through `cl` in the build tree above: `cl check <crate>`, `cl test <crate> -- <tests>
   --test-threads 4`. One cargo command at a time; never `cl test all` or a workspace build.
-- Start every command that takes more than a few seconds as a background task that notifies you when it exits,
-  then end your turn or do other work until the notice comes. No `sleep`, no polling loops, no `until` loops;
-  every wait has a timeout.
+- Run each cargo command through `cl` in the foreground with the Bash tool's timeout (up to 10 minutes). A command
+  you move to the background gets one bounded wait per call, `timeout 170 ... until <done marker>`, and you wait
+  again in the next call if it is not done. No bare `sleep`, no unbounded loops, and no agent whose only job is
+  to wait.
 - Read only the failing lines of a run (agent-common.md, "Builds and runs").
 
 ## Done when

@@ -9,7 +9,7 @@ Your prompt names area `{{AREA}}`, the side (framework or app) and the sets to r
 ## Per set
 
 - The plan: the sheet {{SHEETS}}/<set>.md; the decisions that override or extend it, {{SETS}}/<set>/decisions.md; the plan check, {{SETS}}/<set>/plancheck.md (STUB, RULE and DECIDE items); contract rows in {{PARTS}} (grep the row id).
-- The code: the set's tree under {{TREES}} (`<set>`, and `<set>-<repo>` for a second repo). Review `git -C <tree> diff <base> HEAD`, where the base is in {{SETS}}/<set>/base-<repo>. Expect the writer commit and at most one repair commit.
+- The code: the set's tree under {{TREES}} (`<set>`, and `<set>-<repo>` for a second repo). Review the set's diff in {{SETS}}/<set>/review-diff.patch (made by `port-set review-diff`; one section per repo). Expect the writer commit and at most one repair commit.
 - The rust-analyzer result: {{SETS}}/<set>/racheck.md. Errors under a heading "(not changed by the set)" are readers in files that other sets change: ignore them unless the set should have changed that file. Judge the errors in the set's own files.
 - The framework the app code is written against: {{FW_REF}} (the stub branch head, read only). Other sets are written beside each set, so their items are missing from its tree. A `// PLAN: assumed <signature>` marker names such an item. Check each against the sibling's sheet or the contract row, where one exists.
 

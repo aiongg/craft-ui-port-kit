@@ -17,7 +17,7 @@ Your questions are the groups named in your prompt, in {{PLAN}}/chunks/{{CHUNK}}
 Answer each question on its own, from the code, with file:line evidence (repo `fw` or `app`, path from the repo root, line). Facts only.
 
 - A question that needs a design choice: say so in one line and list its id in `needs_choice`.
-- A question the code does not answer: write "not found" and where you looked, and list its id in `not_found`.
+- A question the code does not answer: before you write "not found", search all of the framework source and tests by the concept and its synonyms (the SCIP index lists readers and callers of a symbol), then write "not found" with the searches you ran, and list its id in `not_found`. A missed fact makes a wrong plan.
 - Never guess. Quote the lines that show the fact.
 
 ## Output

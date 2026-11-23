@@ -31,6 +31,7 @@ def case_follow_up_resumes(s):
     check(p.returncode == 0 and len(calls(s)) == 1, "first call", p)
     allow = calls(s)[0]["argv"][calls(s)[0]["argv"].index("--allowedTools") + 1]
     check("Bash(git commit:*)" in allow and "diag-cut.py" in allow, f"fixer role tools: {allow}")
+    check("Bash(mkdir -p:*)" in allow, f"every role may mkdir -p: {allow}")
     (s.work / "packet-2.md").write_text("still failing: test a\n")
     p = s.run("swarm.py", "--follow-up", "rfix-g1", "packet-2.md")
     check(p.returncode == 0, "follow-up ok", p)

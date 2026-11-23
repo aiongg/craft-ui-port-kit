@@ -28,7 +28,7 @@ Job lists
 Roles
   A job's role names its model (models.<role>, unless "model" is given) and its tools, from one table, ROLE_TOOLS
   below: every role gets Read, Grep, Glob, Bash, Write and Edit, with pipeline.lookup_tools, Write, Edit and the kit's
-  track command auto-approved, and a role in the table also gets its own commands (fixers `git add` and `git commit`,
+  track command auto-approved, and a role in the table also gets its own commands (fixers `git add` and `git commit`, code-only fixers also `rustfmt`, every role `mkdir -p`,
   phase 2 sheet fixes and reconciles coverage.py and port-set). A job's own "tools" and
   "allow" replace these.
 
@@ -106,10 +106,11 @@ MARK = "\x1eSWARM "
 # Commands each job role may run on top of the base set (pipeline.lookup_tools, Write, Edit, track). `{kit}` is the
 # kit root. Roles are [models] keys.
 _FIXER = ["Bash(git add:*)", "Bash(git commit:*)", "Bash(git diff:*)", "Bash(git status:*)", "Bash(git log:*)"]
+_CODE_ONLY = _FIXER + ["Bash(rustfmt:*)"]  # code-only fixers format their files; they run no cargo fmt
 ROLE_TOOLS = {
-    "compile_fix": _FIXER,
-    "fix": _FIXER,
-    "fix_retry": _FIXER,
+    "compile_fix": _CODE_ONLY,
+    "fix": _CODE_ONLY,
+    "fix_retry": _CODE_ONLY,
     "red_fixer": _FIXER + ["Bash(python3 -I {kit}/tools/diag-cut.py:*)", "Bash({kit}/tools/diag-cut.py:*)"],
     "red_fixer_framework": _FIXER + ["Bash(python3 -I {kit}/tools/diag-cut.py:*)", "Bash({kit}/tools/diag-cut.py:*)"],
     "sheet_fix": ["Bash(python3 -I {kit}/tools/coverage.py:*)", "Bash({kit}/tools/port-set:*)"],
@@ -310,7 +311,7 @@ class Swarm:
     def command(self, job: Job, resume: str | None) -> list[str]:
         cfg = self.cfg
         allow = job.allow or ",".join([cfg.get("pipeline.lookup_tools"), "Write", "Edit",
-                                       f"Bash({KIT / 'tools' / 'track'}:*)",
+                                       f"Bash({KIT / 'tools' / 'track'}:*)", "Bash(mkdir -p:*)",
                                        *(c.replace("{kit}", str(KIT)) for c in ROLE_TOOLS.get(job.role or "", []))])
         dirs = []
         cwd = Path(job.cwd or cfg.get("work.dir"))

@@ -1,0 +1,17 @@
+cl: cargo test --no-run --message-format=json-render-diagnostics -p crate-a -p feature-root --tests
+  Executable unittests src/lib.rs (target/debug/deps/crate_a-1)
+  Executable tests/two.rs (target/debug/deps/two-1)
+  Executable tests/three.rs (target/debug/deps/three-1)
+     Running unittests src/lib.rs (target/debug/deps/crate_a-1)
+
+running 2 tests
+test tests::one ... ok
+test tests::two ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/two.rs (target/debug/deps/two-1)
+
+running 1 test
+test boom ... 
+cl: test failed: tests/two.rs (target/debug/deps/two-1) exited with -11

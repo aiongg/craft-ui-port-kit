@@ -108,6 +108,21 @@ def package_of(tree: Path, rel: str) -> str | None:
         d = d.parent
 
 
+def committed_lock(app: Path) -> dict:
+    """The app's Cargo.lock as committed at HEAD (the working copy only when the lock is not tracked): a local build
+    rewrites the working lock with path sources, so only the committed one still names the framework's git sources."""
+    r = subprocess.run(["git", "-C", str(app), "show", "HEAD:Cargo.lock"], capture_output=True, text=True)
+    text = r.stdout if r.returncode == 0 else (app / "Cargo.lock").read_text()
+    return tomllib.loads(text)
+
+
+def framework_packages(cfg, app: Path) -> list[str]:
+    """Packages the app's committed lock takes from a framework URL (framework.patch_urls), sorted."""
+    urls = [u.rstrip("/") for u in cfg.require("framework.patch_urls")]
+    return sorted({p["name"] for p in committed_lock(app).get("package", [])
+                   if any(p.get("source", "").startswith("git+" + u) for u in urls)})
+
+
 def changed_files(tree: Path, base: str, suffix: str | None = None) -> list[str]:
     """Files added, modified or renamed between `base` and HEAD in the tree."""
     out = subprocess.run(["git", "-C", str(tree), "diff", "--name-only", "--diff-filter=AMR", base, "HEAD"],

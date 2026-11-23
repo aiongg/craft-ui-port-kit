@@ -123,7 +123,7 @@ Keep the launcher and the runner apart. Test binaries take no jobserver tokens, 
 
 - `cl test` builds with `cargo test --no-run` through the launcher, then runs each test binary itself through the runner, from its package's directory, as cargo would.
 - In app mode, `cl test all` runs the binaries `run_slots` at a time, longest first (from the last run's recorded times, else `default_seconds`), splits the slowest binary into shards, and ends with one summary line: passed, failed, binaries, overflowed stacks, wall time. Failures follow as `binary test_name`.
-- `tools/test-run` wraps this for full runs and records each run as a round. When `build.target_dir` is set, it deletes the test executables that the build superseded (`tools/trash-stale-tests`): a framework change gives every test binary a new hash, and cargo keeps the old copies.
+- `tools/test-run` wraps this for full runs and records each run as a round. It counts each binary from its own result line (a passing binary's output is not printed in app mode), lists each binary's tests with `--list`, and compares binaries and test lists with the previous run and the baseline. When `build.target_dir` is set, it deletes the test executables that the build superseded (`tools/trash-stale-tests`): a framework change gives every test binary a new hash, and cargo keeps the old copies.
 - Read only the failing lines of a run (`agent-common.md`, "Builds and runs").
 
 ## Reading a slow loop

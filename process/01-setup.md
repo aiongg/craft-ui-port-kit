@@ -124,23 +124,25 @@ Every cargo command goes through the framework's `cl` ([11-build-loop.md](11-bui
 4. Make the first warm build in the app integration tree as a background task: `cl test all --no-run`. Set `build.launcher`, `build.runner` and `build.memory_cap` first if this machine shares its cores or memory with other work.
 5. When it ends, run `cl doctor` again: the target dir must hold one build of each pinned crate. A second build of a framework crate means the selection misses a package; fix the selection and rebuild.
 
-## 7. Record the baseline test run
+## 7. Record the baseline test runs
 
 Run the app's full test suite once, on the port branch with no port changes, as a background task:
 
 ```sh
-tools/test-run baseline --app --round 0
+tools/test-run baseline --app --baseline
 ```
 
-It writes the run's logs under `<work.runs>/baseline/`, the failing tests to `<work.runs>/baseline/app.failed`, and posts the counts to the dashboard as round 0; later runs number their rounds from 1. When it ends, copy the failure list to `work.baseline_failures`:
-
-```sh
-cp <work.runs>/baseline/app.failed <work.baseline_failures>
-```
-
-In phase 7, `compare-runs.py` reads this file, so a test that already fails here is never charged to the port.
+It writes the run's logs under `<work.runs>/baseline/`, the failing tests to `work.baseline_failures`, each test binary's list of tests to `app.tests.tsv`, and posts the counts to the dashboard as round 0; later runs number their rounds from 1 and compare their binaries and test lists with this one. In phase 7, `compare-runs.py` reads `work.baseline_failures`, so a test that already fails here is never charged to the port.
 
 If the run does not finish, or most tests fail, the build loop is wrong (a missing environment variable, a scratch directory the tests expect). Fix it and run again before going on.
+
+Then start the framework baseline as a background task, in the framework integration tree at `plan.base`:
+
+```sh
+tools/test-run baseline-fw --fw-all --baseline
+```
+
+It runs the trials of every framework package the app's lock takes from the framework. It takes longer than the app run; nothing waits on it until phase 6, so go on with phases 1 to 4 while it runs, and check that it finished before the first framework test run. Trials that fail here are base faults: later runs show them against this baseline instead of charging them to a set.
 
 ## 8. Start the racheck daemons
 
@@ -174,7 +176,7 @@ Check each item, then record `tools/track phase 1 "inventory"` and go to [02-inv
 - [ ] The port branch pins the framework at `plan.base` by rev; the local patch points at `framework.integration`.
 - [ ] The snapshots and the production reference exist at their commits.
 - [ ] `cl doctor` is clean after the warm build.
-- [ ] `work.baseline_failures` exists and the baseline counts are on the dashboard.
+- [ ] `work.baseline_failures` exists and the baseline counts are on the dashboard; the framework baseline (`baseline-fw`) is running or done.
 - [ ] Both racheck daemons answered a check.
 - [ ] Both sqlite indexes answer a query.
 - [ ] `STATE.md` records the commits, the selection and the baseline counts; every setup task on the board is `done`.

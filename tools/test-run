@@ -1,63 +1,137 @@
 #!/usr/bin/env python3
-"""test-run: build and run test binaries through cl, and list the failing tests.
+"""test-run: build and run test binaries through cl, count each binary's result, and compare with the last run.
 
-usage: test-run LABEL [--fw CRATE[:FILTER] ...] [--app] [--filter F ...] [--no-run] [--round N] [--config PORT.TOML]
+usage: test-run LABEL [--fw [CRATE[:FILTER]] ...] [--fw-all] [--app] [--filter F ...] [--no-run] [--round N]
+                [--baseline] [--config PORT.TOML]
 
   --app            the app's whole pinned selection (`cl test all`, cl's app mode), run in app.integration. Default
-                   when no --fw is given.
+                   when no --fw or --fw-all is given.
   --fw CRATE[:F]   framework trials: `cl test CRATE` in framework.integration, with the test filter F when given.
-                   Several allowed; each runs on its own.
+                   Several allowed; each runs on its own. `--fw` with no crate: every workspace package changed
+                   between plan.base and HEAD in framework.integration.
+  --fw-all         every framework package the app's lock file takes from framework.patch_urls (the framework
+                   baseline of phase 0).
   --filter F       a test-name filter for the app run (repeatable): build the whole selection, run only the match.
   --no-run         build the test binaries and stop.
   --round N        the red-round number this run counts as. Default: one more than the highest round recorded in
-                   <work.runs>/rounds.tsv (1 for the first). The baseline run of setup is round 0. Only full app runs (no --filter) are recorded as rounds.
+                   <work.runs>/rounds.tsv (1 for the first). Only full app runs (no --filter) are recorded as rounds.
+  --baseline       this run is the baseline of every part it runs (<work.runs>/baseline.json): the app part counts as
+                   round 0 and its failing tests go to work.baseline_failures.
 
 App run: build with --no-run first; when build.target_dir is set, delete the test executables that build superseded
-(trash-stale-tests; a framework change gives every test binary a new hash, so old copies would double the target dir);
-then run with --no-fail-fast, and with --test-threads build.test_threads when that is set. Test binaries run under build.runner (CL_RUNNER).
-Every cl call runs under build.launcher (CL_LAUNCHER) and build.memory_cap.
+(trash-stale-tests); then run with --no-fail-fast, and with --test-threads build.test_threads when that is set. Test
+binaries run under build.runner (CL_RUNNER). Every cl call runs under build.launcher (CL_LAUNCHER) and
+build.memory_cap.
 
-Logs, in <work.runs>/LABEL/: `app.build.log`, `app.log`, `app.failed` (one failing test per line, sorted),
-`fw-<crate>.log`. Prints counts per run. Exit status: 0 when nothing failed or failed to build, 1 otherwise.
-Compare two runs with compare-runs.py; split a failing run into fixer groups with split-failures.py.
+Counting: every binary cl built (its `Executable` lines) gets one status: ok, failed, crashed (it started and gave no
+result line) or not run (cl stopped before it). Counts come only from each binary's own result line: cl's per-binary
+line in app mode, libtest's `test result:` line in framework mode. After the build, each binary lists its tests
+(`<exe> --list --format terse`; no test runs), so a test that disappears is named even when its binary passes.
+
+Comparison: each part (`app`, or `fw:<crate>`) of an unfiltered run is compared with the previous unfiltered run of
+the same part (<work.runs>/test-runs.tsv) and with the part's baseline: binaries run, crashed, not run and missing,
+and the names of tests the previous run or the baseline listed that are gone. Written to compare.md.
+
+Files in <work.runs>/LABEL/: `app.build.log`, `app.log`, `app.failed` (one failing test per line, sorted),
+`fw-<crate>.log`, `<part>.tests.tsv` (`binary<TAB>test` per listed test), `compare.md`, `summary.json`.
+
+Result for other tools: summary.json, and the last stdout line
+  test-run LABEL: exit N; <part>: <status>, <n> passed, <n> failed, <n> crashed, <n> not run, <n> missing, <n> gone; ...
+summary.json: {"tool": "test-run", "label", "exit", "parts": [{"part", "filter", "status", "exit", "passed",
+"failed", "failing": [name...], "binaries": {key: {"status", "passed", "failed", "tests"}}, "previous": label|null,
+"baseline": label|null, "missing": [binary...], "gone": [test...], "gone_vs_baseline": [test...]}]}. A part's
+status is ok, failed (failing tests, a crashed or not-run binary), build-failed or tool-failure.
+
+Exit status: 0 when nothing failed, 1 on failing tests, a crashed or not-run binary or a build with compile errors,
+2 on a tool failure (cl exited nonzero with neither a compile error nor a test result to show for it) or a usage
+error. Compare two runs in detail with compare-runs.py; split a failing run into fixer groups with split-failures.py.
 """
 import argparse
-import re
+import json
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from portkit import config, gates, track
+from portkit import config, gates, testlog, track
 
-RESULT = re.compile(r"^test result: \w+\. (\d+) passed; (\d+) failed")
-FAILED = re.compile(r"^test (.*) \.\.\. FAILED$")
-
-
-def counts(log: Path):
-    passed = failed = 0
-    names = set()
-    for l in open(log, errors="replace"):
-        m = RESULT.match(l)
-        if m:
-            passed += int(m.group(1)); failed += int(m.group(2))
-        m = FAILED.match(l)
-        if m:
-            names.add(m.group(1))
-    return passed, failed, sorted(names)
+TOOLS = Path(__file__).resolve().parent
 
 
-def trial(cfg, tree: Path, args: list[str], log: Path, threads: str, filters: list[str]):
-    """One cl test call; (exit status, passed, failed names, compile errors)."""
+def list_tests(cfg, tree: Path, bins: dict) -> dict[str, list[str] | None]:
+    """{binary key: its tests} from each executable's own list; None when the binary cannot list."""
+    env = gates.cl_env(cfg)
+    out = {}
+    for key, b in bins.items():
+        exe = Path(b.exe) if Path(b.exe).is_absolute() else tree / b.exe
+        try:
+            r = subprocess.run([str(exe), "--list", "--format", "terse"], cwd=tree, env=env, capture_output=True,
+                               text=True, errors="replace", timeout=120)
+            out[key] = sorted(l[:-len(": test")] for l in r.stdout.splitlines() if l.endswith(": test")) if r.returncode == 0 else None
+        except (OSError, subprocess.TimeoutExpired):
+            out[key] = None
+    return out
+
+
+def write_tests(path: Path, tests: dict) -> None:
+    path.write_text("".join(f"{k}\t{t}\n" for k, ts in tests.items() for t in (ts or [])))
+
+
+def read_tests(path: Path) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    if path.is_file():
+        for l in path.read_text().splitlines():
+            k, _, t = l.partition("\t")
+            out.setdefault(k, []).append(t)
+    return out
+
+
+def tests_file(rd: Path, part: str) -> Path:
+    return rd / (part.replace(":", "-") + ".tests.tsv")
+
+
+def part_result(part, flt, rc, bins, tests, failing, errors) -> dict:
+    states = [b.status for b in bins.values()]
+    if rc != 0 and not bins and errors:
+        status = "build-failed"
+    elif rc != 0 and not failing and all(s == "ok" for s in states) and not errors:
+        status = "tool-failure"
+    else:
+        status = "ok" if rc == 0 and not failing and all(s == "ok" for s in states) else "failed"
+    return {"part": part, "filter": flt, "status": status, "exit": rc,
+            "passed": sum(b.passed for b in bins.values()), "failed": sum(b.failed for b in bins.values()),
+            "failing": failing, "compile_errors": errors,
+            "binaries": {k: {"status": b.status, "passed": b.passed, "failed": b.failed,
+                             "tests": None if tests.get(k) is None else len(tests[k])} for k, b in bins.items()}}
+
+
+def fw_part(cfg, rd: Path, crate: str, flt: str, no_run: bool, threads: str) -> dict:
+    fw = cfg.path("framework.integration")
+    log = rd / f"fw-{crate}.log"
     log.write_bytes(b"")
-    cmd = gates.cl(cfg, ["test", *args, "--no-fail-fast", "--", *filters, *(["--test-threads", threads] if threads else [])])
-    rc = gates.run_logged(cmd, tree, log, gates.cl_env(cfg))
-    passed, failed, names = counts(log)
-    return rc, passed, names, len(gates.error_lines(log))
+    t = time.time()
+    if no_run:
+        rc = gates.run_logged(gates.cl(cfg, ["test", crate, "--no-run", "--message-format", "short"]), fw, log, gates.cl_env(cfg))
+        errs = len(gates.error_lines(log))
+        print(f"{crate}: build exit {rc}, {errs} compile errors ({time.time() - t:.0f}s)")
+        st = "ok" if rc == 0 else "build-failed" if errs else "tool-failure"
+        return {"part": f"fw:{crate}", "filter": [], "status": st, "exit": rc, "passed": 0, "failed": 0, "failing": [],
+                "compile_errors": errs, "binaries": {}}
+    cmd = ["test", crate, "--no-fail-fast", "--", *([flt] if flt else []), *(["--test-threads", threads] if threads else [])]
+    rc = gates.run_logged(gates.cl(cfg, cmd), fw, log, gates.cl_env(cfg))
+    text = log.read_text(errors="replace")
+    bins = testlog.framework_binaries(text)
+    tests = list_tests(cfg, fw, bins)
+    write_tests(tests_file(rd, f"fw:{crate}"), tests)
+    r = part_result(f"fw:{crate}", [flt] if flt else [], rc, bins, tests, testlog.failing_names(text),
+                    len(gates.error_lines(log)))
+    print(f"{crate}{' (' + flt + ')' if flt else ''}: exit {rc}, {r['passed']} passed, {r['failed']} failed, "
+          f"{len(bins)} binaries ({time.time() - t:.0f}s)")
+    return r
 
 
-def app_run(cfg, rd: Path, filters: list[str], no_run: bool, threads: str):
+def app_part(cfg, rd: Path, filters: list[str], no_run: bool, threads: str) -> dict:
     app = cfg.path("app.integration")
     env = gates.cl_env(cfg)
     build_log = rd / "app.build.log"
@@ -66,23 +140,101 @@ def app_run(cfg, rd: Path, filters: list[str], no_run: bool, threads: str):
     rc = gates.run_logged(gates.cl(cfg, ["test", "all", "--no-run"]), app, build_log, env)
     errs = len(gates.error_lines(build_log))
     if rc != 0:
-        print(f"app build failed (exit {rc}): {errs} errors; see {build_log}")
-        return dict(ok=False, passed=0, failed=0, names=[], text=f"app build failed, {errs} errors")
+        print(f"app build failed (exit {rc}): {errs} compile errors; see {build_log}"
+              + ("" if errs else " -- TOOL FAILURE: no error line"))
+        for l in ([] if errs else gates.plain_errors(build_log)[:8]):
+            print("  " + l)
+        return {"part": "app", "filter": filters, "status": "build-failed" if errs else "tool-failure", "exit": rc,
+                "passed": 0, "failed": 0, "failing": [], "compile_errors": errs, "binaries": {}}
     target = cfg.get("build.target_dir")
     if target:
-        subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "trash-stale-tests"), "--dir",
-                        str(Path(target) / "debug" / "deps"), "--since", str(start)], check=False)
+        subprocess.run([sys.executable, str(TOOLS / "trash-stale-tests"), "--dir", str(Path(target) / "debug" / "deps"),
+                        "--since", str(start)], check=False)
+    build_text = build_log.read_text(errors="replace")
+    listed = testlog.app_binaries(build_text, "")
+    tests = list_tests(cfg, app, listed)
+    write_tests(tests_file(rd, "app"), tests)
     if no_run:
-        print("app build ok")
-        return dict(ok=True, passed=0, failed=0, names=[], text="app build ok")
+        print(f"app build ok: {len(listed)} binaries")
+        return {"part": "app", "filter": filters, "status": "ok", "exit": 0, "passed": 0, "failed": 0, "failing": [],
+                "compile_errors": 0, "binaries": {}}
     log = rd / "app.log"
+    log.write_bytes(b"")
     t = time.time()
-    rc, passed, names, cerr = trial(cfg, app, ["all"], log, threads, filters)
-    (rd / "app.failed").write_text("".join(n + "\n" for n in names))
-    print(f"app: exit {rc}, {passed} passed, {len(names)} failed, {cerr} compile errors ({time.time() - t:.0f}s)")
-    return dict(ok=rc == 0 and not names, passed=passed, failed=len(names), names=names,
-                text=f"app: {passed} passed, {len(names)} failed")
+    cmd = ["test", "all", "--no-fail-fast", "--", *filters, *(["--test-threads", threads] if threads else [])]
+    rc = gates.run_logged(gates.cl(cfg, cmd), app, log, env)
+    text = log.read_text(errors="replace")
+    bins = testlog.app_binaries(build_text, text)
+    failing = testlog.failing_names(text)
+    (rd / "app.failed").write_text("".join(n + "\n" for n in failing))
+    r = part_result("app", filters, rc, bins, tests, failing, len(gates.error_lines(log)))
+    print(f"app: exit {rc}, {r['passed']} passed, {r['failed']} failed, {len(bins)} binaries ({time.time() - t:.0f}s)")
+    return r
 
+
+# ---------------------------------------------------------------- comparison
+
+def index_file(cfg) -> Path:
+    return cfg.path("work.runs") / "test-runs.tsv"
+
+
+def baselines(cfg) -> dict:
+    f = cfg.path("work.runs") / "baseline.json"
+    return json.loads(f.read_text()) if f.is_file() else {}
+
+
+def previous_label(cfg, part: str, label: str) -> str | None:
+    f = index_file(cfg)
+    rows = [l.split("\t") for l in f.read_text().splitlines()] if f.is_file() else []
+    prev = [r[1] for r in rows if len(r) >= 4 and r[2] == part and r[3] == "0" and r[1] != label]
+    return prev[-1] if prev else None
+
+
+def load_part(cfg, label: str | None, part: str):
+    """(summary part, tests) of an earlier run, or (None, {})."""
+    if not label:
+        return None, {}
+    rd = cfg.path("work.runs") / label
+    try:
+        parts = json.loads((rd / "summary.json").read_text())["parts"]
+    except (OSError, ValueError, KeyError):
+        return None, {}
+    return next((p for p in parts if p["part"] == part), None), read_tests(tests_file(rd, part))
+
+
+def compare(cfg, rd: Path, label: str, r: dict) -> list[str]:
+    """Fill the part's comparison fields; the part's compare.md section."""
+    part = r["part"]
+    prev_l, base_l = previous_label(cfg, part, label), baselines(cfg).get(part)
+    if base_l == label:
+        base_l = None
+    prev, prev_t = load_part(cfg, prev_l, part)
+    base, base_t = load_part(cfg, base_l, part)
+    now_t = read_tests(tests_file(rd, part))
+    keys = list(dict.fromkeys([*r["binaries"], *((prev or {}).get("binaries") or {}), *((base or {}).get("binaries") or {})]))
+    r["previous"], r["baseline"] = (prev_l if prev else None), (base_l if base else None)
+    r["missing"] = [k for k in keys if k not in r["binaries"]]
+    have = {(k, t) for k, ts in now_t.items() for t in ts}
+    gone = lambda old: sorted(f"{k} {t}" for k, ts in old.items() for t in ts  # noqa: E731
+                              if (k, t) not in have and not (k in r["binaries"] and now_t.get(k) is None and r["binaries"][k]["tests"] is None))
+    r["gone"], r["gone_vs_baseline"] = gone(prev_t), gone(base_t)
+
+    def cell(p, k):
+        if p is None:
+            return ""
+        b = (p.get("binaries") or {}).get(k)
+        return "missing" if b is None else f"{b['status']} {b['passed']}/{b['failed']}" + (f", {b['tests']} listed" if b.get("tests") is not None else "")
+    lines = [f"## {part}", "", f"| binary | {label} | previous ({r['previous'] or 'none'}) | baseline ({r['baseline'] or 'none'}) |",
+             "|---|---|---|---|"]
+    lines += [f"| {k} | {cell(r, k)} | {cell(prev, k)} | {cell(base, k)} |" for k in keys]
+    for title, names in (("Tests gone since the previous run", r["gone"]), ("Tests gone since the baseline", r["gone_vs_baseline"])):
+        lines += ["", f"{title}: {len(names)}", ""] + [f"- {n}" for n in names[:300]]
+        if len(names) > 300:
+            lines.append(f"- ... {len(names) - 300} more")
+    return lines + [""]
+
+
+# ---------------------------------------------------------------- main
 
 def next_round(cfg) -> int:
     f = cfg.path("work.runs") / "rounds.tsv"
@@ -90,14 +242,45 @@ def next_round(cfg) -> int:
     return max(seen) + 1 if seen else 1
 
 
+def fw_specs(cfg, a) -> list[tuple[str, str]]:
+    fw = cfg.path("framework.integration")
+    specs, auto = [], []
+    for spec in a.fw:
+        if spec:
+            crate, _, flt = spec.partition(":")
+            specs.append((crate, flt))
+        else:
+            auto += [p for f in gates.changed_files(fw, cfg.require("plan.base")) if (p := gates.package_of(fw, f))]
+    if a.fw_all:
+        auto += gates.framework_packages(cfg, cfg.path("app.integration"))
+    if auto:
+        r = subprocess.run([sys.executable, str(TOOLS / "crate-order.py"), str(fw), "--skip-outside", *sorted(set(auto))],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            raise SystemExit(f"test-run: crate-order.py failed: {r.stderr.strip()}")
+        specs += [(c, "") for c in r.stdout.split() if c not in {s[0] for s in specs}]
+    return specs
+
+
+def summary_line(label: str, code: int, parts: list[dict]) -> str:
+    out = [f"test-run {label}: exit {code}"]
+    for r in parts:
+        n = lambda s: sum(1 for b in r["binaries"].values() if b["status"] == s)  # noqa: E731
+        out.append(f"{r['part']}: {r['status']}, {r['passed']} passed, {r['failed']} failed, {n('crashed')} crashed, "
+                   f"{n('not run')} not run, {len(r.get('missing', []))} missing, {len(r.get('gone', []))} gone")
+    return "; ".join(out)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("label")
-    ap.add_argument("--fw", action="append", default=[], metavar="CRATE[:FILTER]")
+    ap.add_argument("--fw", action="append", default=[], nargs="?", const="", metavar="CRATE[:FILTER]")
+    ap.add_argument("--fw-all", action="store_true")
     ap.add_argument("--app", action="store_true")
     ap.add_argument("--filter", action="append", default=[])
     ap.add_argument("--no-run", action="store_true")
     ap.add_argument("--round", type=int)
+    ap.add_argument("--baseline", action="store_true")
     ap.add_argument("--config")
     a = ap.parse_args()
     cfg = config.load(a.config)
@@ -105,35 +288,44 @@ def main():
     value = cfg.get("build.test_threads")
     threads = "" if value is None else str(value)
     with track.recorded("test-run") as rec:
-        parts, ok = [], True
-        for spec in a.fw:
-            crate, _, flt = spec.partition(":")
-            fw = cfg.path("framework.integration")
-            t = time.time()
-            if a.no_run:
-                log = rd / f"fw-{crate}.log"
-                log.write_bytes(b"")
-                rc = gates.run_logged(gates.cl(cfg, ["test", crate, "--no-run", "--message-format", "short"]), fw, log, gates.cl_env(cfg))
-                print(f"{crate}: build exit {rc} ({time.time() - t:.0f}s)")
-                ok &= rc == 0
-                parts.append(f"{crate} build exit {rc}")
+        parts = [fw_part(cfg, rd, c, f, a.no_run, threads) for c, f in fw_specs(cfg, a)]
+        if a.fw and not parts:
+            print("framework: no changed crates")
+        if a.app or not (a.fw or a.fw_all):
+            parts.append(app_part(cfg, rd, a.filter, a.no_run, threads))
+        md = [f"# {a.label}: comparison", ""]
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%S")
+        base = baselines(cfg)
+        for r in parts:
+            if a.no_run or r["filter"] or r["status"] in ("build-failed", "tool-failure"):
                 continue
-            rc, passed, names, cerr = trial(cfg, fw, [crate], rd / f"fw-{crate}.log", threads, [flt] if flt else [])
-            print(f"{crate}{' (' + flt + ')' if flt else ''}: exit {rc}, {passed} passed, {len(names)} failed, {cerr} compile errors ({time.time() - t:.0f}s)")
-            ok &= rc == 0 and not names
-            parts.append(f"{crate}: {passed} passed, {len(names)} failed")
-        if a.app or not a.fw:
-            r = app_run(cfg, rd, a.filter, a.no_run, threads)
-            ok &= r["ok"]
-            parts.append(r["text"])
-            if not a.no_run and not a.filter and r["passed"] + r["failed"] > 0:
-                n = a.round if a.round is not None else next_round(cfg)
-                with open(cfg.path("work.runs") / "rounds.tsv", "a") as f:
-                    f.write(f"{n}\t{a.label}\t{r['passed']}\t{r['failed']}\n")
-                track.round(n, r["passed"], r["failed"], log=str(rd / "app.log"))
-        text = f"{a.label}: " + "; ".join(parts)
-        rec.result(text, log=str(rd), data={"label": a.label, "ok": ok})
-    sys.exit(0 if ok else 1)
+            md += compare(cfg, rd, a.label, r)
+            with open(index_file(cfg), "a") as f:
+                f.write(f"{stamp}\t{a.label}\t{r['part']}\t0\n")
+            if a.baseline:
+                base[r["part"]] = a.label
+            if r["missing"] or r["gone"]:
+                print(f"WARNING {r['part']}: {len(r['missing'])} binaries missing, {len(r['gone'])} tests gone since "
+                      f"{r['previous']} (compare.md)")
+        (rd / "compare.md").write_text("\n".join(md) + "\n")
+        if a.baseline:
+            (cfg.path("work.runs") / "baseline.json").write_text(json.dumps(base, indent=1) + "\n")
+            app = next((r for r in parts if r["part"] == "app" and r["status"] in ("ok", "failed")), None)
+            if app is not None:
+                Path(cfg.get("work.baseline_failures")).write_text("".join(n + "\n" for n in app["failing"]))
+        states = [r["status"] for r in parts]
+        code = 2 if "tool-failure" in states else 1 if any(s != "ok" for s in states) else 0
+        app = next((r for r in parts if r["part"] == "app"), None)
+        if app and not a.no_run and not a.filter and app["status"] in ("ok", "failed") and app["binaries"]:
+            n = 0 if a.baseline and a.round is None else a.round if a.round is not None else next_round(cfg)
+            with open(cfg.path("work.runs") / "rounds.tsv", "a") as f:
+                f.write(f"{n}\t{a.label}\t{app['passed']}\t{app['failed']}\n")
+            track.round(n, app["passed"], app["failed"], log=str(rd / "app.log"))
+        gates.write_summary(rd, {"tool": "test-run", "label": a.label, "exit": code, "parts": parts})
+        text = summary_line(a.label, code, parts)
+        print(text)
+        rec.result(text, log=str(rd), data={"label": a.label, "ok": code == 0, "exit": code}, ok=code == 0)
+    sys.exit(code)
 
 
 if __name__ == "__main__":

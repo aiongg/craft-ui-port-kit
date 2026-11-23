@@ -69,6 +69,7 @@ ui_dirs = ["crates/ui-egui/src"]              # REQUIRED: UI source dirs to inve
 # target_dir = ""                             # default: cl's <worktree>-target
 # warm_check_s = 120                         # measured in phase 0: warm compile-gate of the app after a one-file change
 # full_run_s = 60                            # measured in phase 0: one full test-run --app, build warm
+# fw_trial_s = 90                            # measured in phase 0: slowest warm cl test of a changed framework crate
 
 [pipeline]
 # batch_runner = "swarm"                      # swarm (claude CLI only) or workflow
@@ -85,8 +86,9 @@ ui_dirs = ["crates/ui-egui/src"]              # REQUIRED: UI source dirs to inve
 # quota_command = ""                          # prints the 5-hour window use in percent; empty: never wait
 # quota_cap = 90
 # weekly_quota_command = ""                   # prints the plan's weekly use as a percent
-# fixer_mode = "code-only"                   # code-only | build | auto (build when warm_check_s + full_run_s <= fixer_build_max_s)
-# fixer_build_max_s = 600                    # placeholder threshold until measured ports set it
+# fixer_mode = "code-only"                   # code-only | build | auto (build when warm_check_s + max(full_run_s, fw_trial_s) <= fixer_build_max_s)
+# fixer_build_max_s = 600                    # placeholder threshold backed by one measured app
+# follow_up_max_context = 150000             # swarm.py --follow-up starts a fresh session at or over this context
 # followup_timeout_min = 120                 # cycle names a fixer stalled past this
 
 # [pipeline.bundle]                           # port-set bundle budgets

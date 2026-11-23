@@ -42,3 +42,28 @@ def case_follow_up_resumes(s):
     check(out["ok"] and out["value"] == "reply 2" and out["session_id"] == "session-1", f"result JSON: {out}")
     p = s.run("swarm.py", "--follow-up", "no-such-task", "packet-2.md")
     check(p.returncode == 2 and json.loads(p.stdout)["error"].startswith("no job"), "unknown task exits 2", p)
+
+
+def case_follow_up_fresh_past_context(s):
+    s.config({"pipeline.follow_up_max_context": 150000})
+    jobs(s, "test a\n")
+    (s.root / "claude").mkdir(exist_ok=True)
+    (s.root / "claude" / "context.txt").write_text("1000\n")
+    check(s.run("swarm.py", "jobs.json").returncode == 0, "first call", s.last)
+    (s.work / "packet-2.md").write_text("still failing: test a\n")
+    p = s.run("swarm.py", "--follow-up", "rfix-g1", "packet-2.md")
+    out = json.loads(p.stdout.strip().splitlines()[-1])
+    check(out["ok"] and not out["fresh"] and out["context"] == 1000, f"a small context resumes: {out}", p)
+    check("--resume" in calls(s)[1]["argv"], "second call resumes")
+    (s.root / "claude" / "context.txt").write_text("300000\n")
+    (s.work / "packet-3.md").write_text("still failing: test a (round 3)\n")
+    s.run("swarm.py", "--follow-up", "rfix-g1", "packet-2.md")       # the session reaches 300k
+    p = s.run("swarm.py", "--follow-up", "rfix-g1", "packet-3.md")
+    out = json.loads(p.stdout.strip().splitlines()[-1])
+    third = calls(s)[3]
+    check(out["ok"] and out["fresh"] and out["context"] == 300000, f"300k gets a fresh session: {out}", p)
+    check("--resume" not in third["argv"], f"no --resume: {third['argv']}")
+    check(third["prompt"].startswith("fix the tests in packet.md") and "reply 3" in third["prompt"]
+          and third["prompt"].rstrip().endswith("still failing: test a (round 3)"),
+          f"job prompt, old report, packet: {third['prompt']!r}")
+    check(out["session_id"] == "session-4", f"the fresh session is the job's session now: {out['session_id']}")

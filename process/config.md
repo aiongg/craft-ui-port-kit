@@ -174,6 +174,7 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `target_dir` | path | `""` | compile-gate, test-run | CARGO_TARGET_DIR for the integration trees. Empty: cl's default (`<worktree>-target` when it exists). Env: `PORT_KIT_BUILD_TARGET_DIR`. |
 | `warm_check_s` | int | unset | cycle, render-prompt | Seconds of a warm `compile-gate` of the app after a one-file change, measured in phase 0. With build.full_run_s it sets the fixer mode when pipeline.fixer_mode is `auto`. Unset: not measured. Env: `PORT_KIT_BUILD_WARM_CHECK_S`. |
 | `full_run_s` | int | unset | cycle, render-prompt | Seconds of one full `test-run --app` (build already warm), measured in phase 0. Unset: not measured. Env: `PORT_KIT_BUILD_FULL_RUN_S`. |
+| `fw_trial_s` | int | unset | cycle, render-prompt | Seconds of the slowest warm `cl test` of a framework crate the port changes, measured from the phase 0 framework baseline (process/11-build-loop.md, "Measuring the fixer mode's inputs"). Unset: counts as 0. Env: `PORT_KIT_BUILD_FW_TRIAL_S`. |
 
 ### [pipeline]
 
@@ -194,8 +195,9 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `quota_command` | str | `""` | run-batch, swarm.py | Command printing the plan's current 5-hour window use as a percent. Empty: never wait on quota. Env: `PORT_KIT_PIPELINE_QUOTA_COMMAND`. |
 | `quota_cap` | int | `90` | run-batch, swarm.py | Start no new job while quota_command reports at or above this. Env: `PORT_KIT_PIPELINE_QUOTA_CAP`. |
 | `weekly_quota_command` | str | `""` | cycle, track | Command printing the plan's weekly use as a percent. cycle records it with each cycle, and `track eta` projects it to the finish. Empty: no weekly line in the projection. Env: `PORT_KIT_PIPELINE_WEEKLY_QUOTA_COMMAND`. |
-| `fixer_mode` | str | `code-only` | cycle, render-prompt | How compile and red fixers work: `code-only` (no cargo; DIAG prints where unsure), `build` (each fixer takes a build tree and runs `cl check` or its own failing tests), or `auto` (`build` when build.warm_check_s plus build.full_run_s is at most pipeline.fixer_build_max_s, else `code-only`). Writers are code-only in every mode (process/11-build-loop.md, rule 3). Env: `PORT_KIT_PIPELINE_FIXER_MODE`. |
-| `fixer_build_max_s` | int | `600` | cycle, render-prompt | The `auto` threshold in seconds on build.warm_check_s plus build.full_run_s. The default is a placeholder until measured ports set it. Env: `PORT_KIT_PIPELINE_FIXER_BUILD_MAX_S`. |
+| `fixer_mode` | str | `code-only` | cycle, render-prompt | How compile and red fixers work: `code-only` (no cargo; DIAG prints where unsure), `build` (each fixer takes a build tree and runs `cl check` or its own failing tests), or `auto` (`build` when build.warm_check_s plus the larger of build.full_run_s and build.fw_trial_s is at most pipeline.fixer_build_max_s, else `code-only`). Writers are code-only in every mode (process/11-build-loop.md, rule 3). Env: `PORT_KIT_PIPELINE_FIXER_MODE`. |
+| `fixer_build_max_s` | int | `600` | cycle, render-prompt | The `auto` threshold in seconds on build.warm_check_s plus the larger of build.full_run_s and build.fw_trial_s. The default is a placeholder backed by one measured app, whose builds stayed well under it. Env: `PORT_KIT_PIPELINE_FIXER_BUILD_MAX_S`. |
+| `follow_up_max_context` | int | `150000` | swarm.py | Tokens of context. `swarm.py --follow-up` resumes a job's session while its last context is under this; at or over it, it starts a fresh session with the job's prompt, its last report and the follow-up. Env: `PORT_KIT_PIPELINE_FOLLOW_UP_MAX_CONTEXT`. |
 | `followup_timeout_min` | int | `120` | cycle | Minutes cycle waits for one fixer's follow-up. A fixer past it is named as stalled in the cycle's summary and report, and the cycle ends without it. Env: `PORT_KIT_PIPELINE_FOLLOWUP_TIMEOUT_MIN`. |
 
 ### [pipeline.bundle]

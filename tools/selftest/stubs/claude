@@ -3,8 +3,12 @@
 
 Each call is appended to <STUB_CLAUDE_DIR>/calls.jsonl as {"argv": [...], "prompt": stdin, "cwd": ...}. The reply
 is a result object whose session_id is the `--resume` value when given, else `session-<n>` for the n-th call; its
-result text is `reply <n>`, or the content of <STUB_CLAUDE_DIR>/reply.txt when that exists.
+result text is `reply <n>`, or the content of <STUB_CLAUDE_DIR>/reply.txt when that exists. When
+<STUB_CLAUDE_DIR>/context.txt holds a number, the call also writes the session's transcript where Claude Code keeps
+it (<CLAUDE_CONFIG_DIR>/projects/<encoded cwd>/<session id>.jsonl): one assistant record whose usage adds up to that
+number of context tokens.
 """
+import re
 import json
 import os
 import sys
@@ -22,3 +26,12 @@ sid = argv[argv.index("--resume") + 1] if "--resume" in argv else f"session-{n}"
 reply = (d / "reply.txt").read_text() if (d / "reply.txt").exists() else f"reply {n}"
 print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "session_id": sid, "result": reply,
                   "num_turns": 1, "total_cost_usd": 0.01, "usage": {"input_tokens": 1, "output_tokens": 1}}))
+ctx = d / "context.txt"
+if ctx.exists() and os.environ.get("CLAUDE_CONFIG_DIR"):
+    t = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / re.sub(r"[^A-Za-z0-9]", "-", os.getcwd()) / f"{sid}.jsonl"
+    t.parent.mkdir(parents=True, exist_ok=True)
+    n_ctx = int(ctx.read_text().strip())
+    with open(t, "a") as f:
+        f.write(json.dumps({"type": "assistant", "sessionId": sid, "message": {"usage": {
+            "input_tokens": 1, "cache_creation_input_tokens": 0, "cache_read_input_tokens": n_ctx - 1,
+            "output_tokens": 1}}}) + "\n")

@@ -62,10 +62,14 @@ Resume
 Follow-up
   --follow-up TASK PROMPT-FILE sends PROMPT-FILE to the newest job of TASK (under --run-dir, else every run dir
   under work.swarm) as a resumed session: same model, tools, working directory and schema check, so the agent keeps
-  what it read and did. Its reply goes to jobs/<key>/followup-<n>.json, its usage to work.usage_log, and the task
-  moves to running, then done or failed, on the dashboard. Prints one JSON object on stdout:
+  what it read and did. That holds while the session's last context (its transcript's last turn, read through
+  portkit/sessions.py) is under pipeline.follow_up_max_context. At or over it, the follow-up starts a fresh session
+  instead: the job's own prompt, then its last report (the newest follow-up reply, else the job's result), then
+  PROMPT-FILE; the fresh session becomes the job's saved session. A context that cannot be read resumes. Its reply
+  goes to jobs/<key>/followup-<n>.json, its usage to work.usage_log, and the task moves to running, then done or
+  failed, on the dashboard. Prints one JSON object on stdout:
   {"task", "ok", "value" (the checked object or reply text; null on failure), "error", "session_id", "cost_usd",
-  "job_dir"}. Exit 0 ok, 1 the call failed, 2 no such task, no saved session, or a usage error.
+  "job_dir", "context" (tokens, or null when unknown), "fresh" (true when a fresh session was started)}. Exit 0 ok, 1 the call failed, 2 no such task, no saved session, or a usage error.
 
 Output: the run log (phase and log lines) on stdout and in <run dir>/log.txt; at the end, the script's return
 value as JSON on stdout and in <run dir>/result[-<stage>].json. Exit 0 when the script returned (failed jobs are
@@ -91,7 +95,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from portkit import config, track  # noqa: E402
+from portkit import config, sessions, track  # noqa: E402
 from portkit.schema import schema_errors  # noqa: E402
 
 KIT = config.KIT_ROOT
@@ -329,7 +333,8 @@ class Swarm:
 
     def env(self) -> dict:
         env = dict(os.environ, CLAUDE_CODE_MAX_OUTPUT_TOKENS="64000")
-        for k in ("TMUX", "TMUX_PANE"):   # a headless agent is not the pane that started it; hooks read these
+        # A headless agent is not the pane or the session that started it; hooks and `track usage` read these.
+        for k in ("TMUX", "TMUX_PANE", sessions.ENV_SESSION):
             env.pop(k, None)
         env["PATH"] = f"{KIT / 'tools'}{os.pathsep}{env.get('PATH', '')}"
         env[config.ENV_AGENT] = "1"
@@ -611,9 +616,31 @@ def find_job(cfg: config.Config, task: str, run_dir: str | None) -> Path | None:
     return max(found, key=lambda d: max(x.stat().st_mtime for x in d.iterdir())) if found else None
 
 
+def last_report(jd: Path) -> str:
+    """The job's last hand-back: the newest follow-up reply, else the job's own result."""
+    files = sorted(jd.glob("followup-*.json"), key=lambda f: int(f.stem.split("-")[1]) if f.stem.split("-")[1].isdigit() else 0)
+    for f in [*reversed(files), jd / "result.json"]:
+        try:
+            v = json.loads(f.read_text()).get("value")
+        except (OSError, ValueError, AttributeError):
+            continue
+        if v:
+            return v if isinstance(v, str) else json.dumps(v, indent=1, ensure_ascii=False)
+    return "(no report was saved)"
+
+
+def fresh_prompt(job, jd: Path, follow: str, ctx: int) -> str:
+    """A fresh session's prompt: the job's brief, its last report, then the follow-up."""
+    return (f"{job.prompt.rstrip()}\n\n## Your earlier session's report\n\nAn earlier session worked on this task and "
+            f"handed back this report. Its context had reached {ctx} tokens, so you start fresh: read what the "
+            f"report names in your trees and keep what is right.\n\n{last_report(jd).rstrip()}\n\n## Follow-up\n\n"
+            f"{follow}")
+
+
 def follow_up(cfg: config.Config, a) -> int:
     task, prompt_file = a.follow_up
-    out = {"task": task, "ok": False, "value": None, "error": None, "session_id": None, "cost_usd": 0.0, "job_dir": None}
+    out = {"task": task, "ok": False, "value": None, "error": None, "session_id": None, "cost_usd": 0.0, "job_dir": None,
+           "context": None, "fresh": False}
 
     def done(code: int, error: str | None = None) -> int:
         out["error"] = error
@@ -638,12 +665,18 @@ def follow_up(cfg: config.Config, a) -> int:
               allow=rec.get("allow"), role=rec.get("role"), inputs=rec.get("inputs") or [])
     n = len(list(jd.glob("followup-*.json"))) + 1
     tag = f"followup-{n}"
+    ctx = sessions.last_context(sid, job.cwd or cfg.get("work.dir"))
+    limit = int(cfg.get("pipeline.follow_up_max_context"))
+    fresh = ctx is not None and ctx >= limit
+    out.update(context=ctx, fresh=fresh)
+    if fresh:
+        prompt = fresh_prompt(job, jd, prompt, ctx)
     (jd / f"{tag}-prompt.md").write_text(prompt)
     sw = Swarm(cfg, jd.parent.parent, a)
     with track.recorded("swarm follow-up", task=task) as r:
-        sw.board(job, "running", f"follow-up {n} ({job.model})")
+        sw.board(job, "running", f"follow-up {n} ({job.model})" + (f", fresh session at {ctx} tokens" if fresh else ""))
         try:
-            value, err = sw.call(job, jd, resume=sid, prompt=prompt, tag=tag)
+            value, err = sw.call(job, jd, resume=None if fresh else sid, prompt=prompt, tag=tag)
         except Exception as e:  # report it as the call's failure, in the same JSON shape
             value, err = None, f"{type(e).__name__}: {e}"
         sw.pool.shutdown(wait=False)

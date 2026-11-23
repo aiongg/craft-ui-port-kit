@@ -28,7 +28,9 @@ class Scratch:
         self.last = None
         self.env = dict(os.environ, PORT_KIT_CONFIG=str(root / "port.toml"), PYTHONDONTWRITEBYTECODE="1",
                         STUB_CL_LOGS=str(root / "cl-logs"), STUB_CLAUDE_DIR=str(root / "claude"),
-                        CARGO=str(STUBS / "cargo"), PORT_KIT_CLAUDE_BIN=str(STUBS / "claude"))
+                        CARGO=str(STUBS / "cargo"), PORT_KIT_CLAUDE_BIN=str(STUBS / "claude"),
+                        CLAUDE_CONFIG_DIR=str(root / "claude-config"))
+        self.env.pop("CLAUDE_CODE_SESSION_ID", None)
         for k in [k for k in self.env if k.startswith("PORT_KIT_") and k not in ("PORT_KIT_CONFIG", "PORT_KIT_CLAUDE_BIN")]:
             del self.env[k]
         (root / "cl-logs").mkdir()

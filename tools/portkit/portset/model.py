@@ -102,7 +102,13 @@ def commit(sheet: Sheet, message: str) -> None:
     for repo in sheet.repos():
         tree = sheet.tree(repo)
         git(tree, "add", "-A")
-        git(tree, "commit", "-qm", message, check=False)
+        if subprocess.run(["git", "-C", str(tree), "diff", "--cached", "--quiet"]).returncode == 0:
+            continue   # nothing staged: nothing to record
+        # Set trees are never pushed (landing re-signs), so signing is off; any other failure (a hook) stops the command.
+        r = subprocess.run(["git", "-C", str(tree), "-c", "commit.gpgsign=false", "commit", "-qm", message],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            raise SystemExit(f"git commit failed in {tree}: {(r.stderr or r.stdout).strip()}")
 
 
 # ---------------------------------------------------------------- plan check

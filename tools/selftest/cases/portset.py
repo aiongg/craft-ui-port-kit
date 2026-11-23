@@ -176,3 +176,21 @@ def case_audit_fails_on_unmatched_ids(s):
     missing, _, _ = audit_stubs(every, every, plan.Trees())
     check(len(missing) == 1 and "no row whose id matches" in missing[0][4],
           f"ids the pattern misses are a finding, not a clean audit: {missing}")
+
+
+def case_commit_failure_stops(s):
+    portset(s)
+    from portkit.portset.model import commit
+    t = s.tree("fw", {"a.txt": "a\n"})
+    sh = FakeSheet("set-d", t, [])
+    sh.repos = lambda: ["fw"]
+    commit(sh, "nothing staged")   # silent: nothing to commit
+    hook = t / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\necho hook says no >&2\nexit 1\n")
+    hook.chmod(0o755)
+    (t / "a.txt").write_text("b\n")
+    try:
+        commit(sh, "change")
+        raise AssertionError("a failing commit must stop the command")
+    except SystemExit as e:
+        check("hook says no" in str(e.code), f"git's error text is printed: {e.code}")

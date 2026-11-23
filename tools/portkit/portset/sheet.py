@@ -165,18 +165,6 @@ def writer_sheet(text: str) -> str:
     return "\n".join(out)
 
 
-def contract_rows(ids: list[str]) -> list[str]:
-    """The contract table rows (from work.parts) of the given ids, in the given order; the first part wins."""
-    want = set(ids)
-    rows = {}
-    for part in sorted(ctx.parts.glob("*.md")):
-        for line in part.read_text().splitlines():
-            m = re.match(rf"^\| ({ID}) \|", line)
-            if m and m.group(1) in want:
-                rows.setdefault(m.group(1), line)
-    return [rows[i] for i in ids if i in rows]
-
-
 def spans_of(cell: str) -> list[str]:
     return re.findall(r"`([^`]+)`", cell)
 

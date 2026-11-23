@@ -9,7 +9,7 @@ This file is for sessions that change the kit itself. A session that runs a port
 | `skills/craft-ui-port/SKILL.md` | The lead's entry point | Points into everything below; keep its phase table in step with `process/` |
 | `.claude-plugin/` | `plugin.json`, `marketplace.json` | Make the repo installable as a Claude Code plugin |
 | `hooks/` | `hooks.json`: the plugin's SessionStart hook | Runs `tools/lead-context`; prints text only, and nothing outside a port workspace |
-| `process/` | `00-overview.md`, one runbook per phase (`01` to `10`), `11-build-loop.md`, `12-running-agents.md`, `costs.md`, `lessons.md`, `config.md` | Phase numbers are those of the table in `00-overview.md`; runbook files are numbered one higher (phase 0 is `01-setup.md`) |
+| `process/` | `00-overview.md`, one runbook per phase (`01` to `10`), `11-build-loop.md`, `12-running-agents.md`, `minimal-port.md` (the minimal port's whole runbook), `costs.md`, `lessons.md`, `config.md` | Phase numbers are those of the table in `00-overview.md`; runbook files are numbered one higher (phase 0 is `01-setup.md`) |
 | `rules/` | Rules every agent or the lead gets in full | Each rule lives in one file; other files link to it |
 | `prompts/` | Agent prompts and `lead.md`, rendered by `tools/render-prompt` | `{{NAME}}` placeholders only from `tools/portkit/config.py` or the per-call list in `render-prompt --help` |
 | `templates/` | `port.toml.example`, the sheet and contract formats, `STATE.md`, report templates, `claude-settings.json` | `templates/sheet.md` is the format `port-set` parses |

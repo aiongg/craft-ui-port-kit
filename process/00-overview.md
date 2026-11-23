@@ -12,6 +12,8 @@ Read this page first. Each phase then has its own runbook (`01` to `10`); the fi
 
 Why: a build-and-gate loop per task repeats the same overhead (rebuild on a moving framework, rebase, queue for a check dir, gate rounds) for every task, and most of the wall time goes to waiting. Planning first moves the judgement into cheap read-only work, and batching pays for each warm build once. `lessons.md` has the numbers from the app where this was learned.
 
+**Two modes.** The phases below are the full port (`work.mode = "full"`). A **minimal port** (`work.mode = "minimal"`) moves an app with no port in progress onto `next` by changing only the APIs `next` removed, while the app keeps its egui UI hosted by next's runtime. It has its own runbook, [minimal-port.md](minimal-port.md), with steps instead of phases.
+
 The per-task model (one agent plans, writes, builds and gates one task) stays only for one-off work: a look fix found in phase 8, or a framework gap found late. `prompts/p8-task-brief.md` is its brief.
 
 ## Phases

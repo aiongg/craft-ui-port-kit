@@ -9,7 +9,7 @@ A cargo workspace in which every app crate links the framework rebuilds far more
 1. Every cargo command goes through the framework's `cl` (`build.cl`), in the framework tree and in the app tree alike.
 2. Each build tree has its own target dir, kept warm. New target dirs are seeded from a warm one.
 3. Writers write in code-only trees in every mode. Compile and red fixers follow the **fixer mode** (`pipeline.fixer_mode`): in `code-only` they write with no cargo and `DIAG ` prints where unsure; in `build` each takes a tree from the build pool and runs `cl check` of its group's crates or its own failing tests there; `auto` picks `build` when `build.warm_check_s` plus the larger of `build.full_run_s` and `build.fw_trial_s` is at most `pipeline.fixer_build_max_s`. Build trees are few, and are held only to compile, run trials and capture.
-4. No workspace-wide build or test locally, and no `--all-features` or `--bins`. CI runs those.
+4. No workspace-wide build or test locally, and no `--all-features` or `--bins`. CI runs those. One exception: a minimal port checks its web shell with `cl cargo check -p <web crate> --target wasm32-unknown-unknown --bins --tests` ([minimal-port.md](minimal-port.md), step 5), because nothing else compiles wasm-only code locally, and the wasm target builds in its own directory.
 5. A slow loop is diagnosed from `cl`'s build records, never by timing another long run.
 
 ## cl

@@ -21,6 +21,10 @@ The lead plans the whole port with many small read-only agents, has every set of
 
 [process/00-overview.md](process/00-overview.md) gives the entry and exit of each phase.
 
+### Minimal port
+
+An app that has no port in progress can move onto craft-libs `next` with a **minimal port** instead: only the APIs that `next` removed change, and the app keeps its egui UI, hosted by next's runtime. `tools/minimal-port` does the repin and the mechanical rewrite and lists the port items; one or two Opus writers do the rest; the app runs on every platform before its PR leaves draft. Faults found in `next` are fixed there, and the app repins to the fix. [process/minimal-port.md](process/minimal-port.md) is its runbook.
+
 ## Prerequisites
 
 - A craft app whose UI is egui code in its own directories, pinning craft-libs by git revision.

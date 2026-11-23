@@ -57,6 +57,29 @@ The panels area ran end to end first: 18 sets (13 framework, 5 app), 7,000 frame
 | Framework compile | 16 crates; 5 writer errors in 5,900 written lines, fixed by hand in minutes; 4 owed lines; no error pointed at the plan. |
 | Tests | First run 1,967 passed, 221 failed: 209 expected (stubs and lines of unwritten sets), 9 writer bugs, 1 plan error, 1 stale test, 1 possibly older than the port. |
 
+## Minimal port (two trials)
+
+Two apps ran the minimal port ([minimal-port.md](minimal-port.md)) against craft-libs `next` b436ae9925, before the kit had the mode. The mechanical part ran as a script equivalent to `tools/minimal-port rewrite`; the writers worked code-only from a brief equivalent to `mp-writer`. "Sites" are the count `tools/minimal-port sites` reports on each app's base, test sites excluded.
+
+| | DesignCraft | SoundCraft |
+|---|---|---|
+| Sites (dock / input / other) | 306 (174 / 91 / 41) | 194 (104 / 62 / 28) |
+| Dock files with a site, lines | 3, 3,050 | 4, 1,354 |
+| Repin and rewrite | 32 files, ±245 lines | 16 files, ±115 lines |
+| Port without tests | not measured separately | about +1,040 / −240 lines |
+| Port with tests | 38 files, +2,115 / −2,076 | 93 files, +1,687 / −951 |
+| Writers | 3 Opus: host (197 tool calls), dock (143), keymap, capture and menus (128) | 1 Opus: 257 tool calls, test round 1 included |
+| Repin and rewrite agent | by hand | 1 Sonnet, 44 tool calls |
+| Compile checks | 6, the rewrite's own included | 1 (clean at the first check) |
+| Test rounds | 1: 874 passed, 169 failed, then a hung binary (stopped there) | 2: 700 passed, 5 failed; then 704 passed, 1 failed (a framework fix) |
+| Web shell | none | wasm check clean |
+
+- The dock is the largest item in both. DesignCraft's dock file was rewritten whole (about 2,300 changed lines, tests included), because next's dock model is not the old one moved over (non_exhaustive types, private fields, one-column floating windows, no command vocabulary).
+- SoundCraft's single writer needed about 1.7 times the 150-call budget, which is why an app with a dock gets two writers.
+- The hung binary is why the runbook sets `build.runner` to a timeout.
+
+**Projecting a minimal port.** Writers: one for an app with no dock site, two otherwise. Size the dock writer by the dock files' lines against the two rows above.
+
 ## Projecting a new port
 
 1. **Phase 1.** Chunks = UI lines / `plan.chunk_lines`. Agents = chunks (Haiku) + 1 (areas) + one per area + 1 (index), all Opus except the readers. Expect about 11 entries per chunk and 2 to 3 entries per map section.

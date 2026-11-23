@@ -1,6 +1,6 @@
 ---
 name: craft-ui-port
-description: Run the port of a craft app's legacy egui UI onto the craft framework (craft-libs) with the craft-ui-port-kit, as the port's lead session. Use when the developer asks to port a craft app's UI to the framework, to start or resume a port, or names the port kit, a port workspace, port.toml, a phase of the port, or the port dashboard.
+description: Run the port of a craft app's legacy egui UI onto the craft framework (craft-libs) with the craft-ui-port-kit, as the port's lead session. Use when the developer asks to port a craft app's UI to the framework, to do a minimal port of an app onto craft-libs next, to start or resume a port, or names the port kit, a port workspace, port.toml, a phase of the port, or the port dashboard.
 ---
 
 # Craft UI port: the lead
@@ -62,6 +62,10 @@ Read these when the situation comes up, not up front:
 | When you need a worked example of an artifact | `examples/photocraft/README.md` |
 
 Render every prompt with `tools/render-prompt <name> [NAME=VALUE]...`; it fills `{{...}}` from `port.toml` and names any placeholder it could not fill. Workflow args come from `tools/render-prompt --workflow-args <workflow>`.
+
+## 3a. A minimal port
+
+When the developer asks for a minimal port (the app moves onto `next` with only the removed APIs switched, keeping its egui UI), the workspace runs in `work.mode = "minimal"` (`init-workspace --mode minimal`). Follow `process/minimal-port.md` instead of the phase table: its steps are board tasks (`mp-*`), `track phase` refuses, and its tools are `minimal-port`, `compile-gate`, `test-run`, `swarm.py` with the `mp-*` prompts, `look` for the run step and `land/land-app.sh`. The section 4 and 5 rules apply as they stand. Two rules are its own: a fault in `next` is fixed in `next` (its own PR, the app repins), and the app runs on every platform of `minimal.run_platforms` before its PR leaves draft.
 
 ## 4. The dashboard: rules, not suggestions
 

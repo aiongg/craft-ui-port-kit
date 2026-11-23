@@ -112,10 +112,10 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `integration` | path | `{framework.checkout}` | combine-area, combine-lost, compile-gate, test-run, patch-framework, racheck-tree, racheck-gate | Framework integration worktree: combines and compile gates run here. Placeholder `{{FW_INT}}`. Env: `PORT_KIT_FRAMEWORK_INTEGRATION`. |
 | `snapshot` | path | `{work.trees}/snap-fw` | init-workspace, make-snapshots, workflows, prompts | Read-only framework checkout at plan.base, read by phase 1 and 2 agents. Placeholder `{{FW}}`. Env: `PORT_KIT_FRAMEWORK_SNAPSHOT`. |
 | `writing_base` | str | `port/stubs` | port-set, combine-area, move-base, racheck.py, compile-gate, racheck-tree, racheck-gate | Framework branch the writers start from: the contract stubs (phase 3). Placeholder `{{FW_WRITING_BASE}}`. Env: `PORT_KIT_FRAMEWORK_WRITING_BASE`. |
-| `facade` | str | `craft` | port-set, prompts, feature-selection.py | Facade crate. App code reaches every member crate through it. Placeholder `{{FACADE}}`. Env: `PORT_KIT_FRAMEWORK_FACADE`. |
-| `facade_manifest` | str | `crates/craft/Cargo.toml` | port-set | Facade manifest, relative to the framework tree; its dependencies give the member crates. Env: `PORT_KIT_FRAMEWORK_FACADE_MANIFEST`. |
+| `facade` | str | `craft` | port-set, prompts, feature-selection.py, racheck.py | Facade crate. App code reaches every member crate through it. Placeholder `{{FACADE}}`. Env: `PORT_KIT_FRAMEWORK_FACADE`. |
+| `facade_manifest` | str | `crates/craft/Cargo.toml` | port-set, racheck.py | Facade manifest, relative to the framework tree; its dependencies give the member crates. Env: `PORT_KIT_FRAMEWORK_FACADE_MANIFEST`. |
 | `lints_file` | path | `{kit}/rules/lints.toml` | port-set | Framework lints, labelled by the framework revision they were written for. `[[lints]]` tables in port.toml add to them. Env: `PORT_KIT_FRAMEWORK_LINTS_FILE`. |
-| `patch_urls` | list | `["{framework.repo}"]` | patch-framework, land/pin-framework.py | Framework URLs the app's Cargo manifests may name (upstream and forks); patch-framework and pin-framework rewrite each. Env: `PORT_KIT_FRAMEWORK_PATCH_URLS`. |
+| `patch_urls` | list | `["{framework.repo}"]` | patch-framework, land/pin-framework.py, test-run | Framework URLs the app's Cargo manifests may name (upstream and forks); patch-framework and pin-framework rewrite each. Env: `PORT_KIT_FRAMEWORK_PATCH_URLS`. |
 
 ### [app]
 
@@ -132,14 +132,14 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `base_branch` | str | `main` | land/land-app.sh, prompts | Branch the released app builds from: the branch of the latest release tag (`git branch -r --contains <tag>`), which can differ from the default branch. Placeholder `{{APP_BASE_BRANCH}}`. Env: `PORT_KIT_APP_BASE_BRANCH`. |
 | `port_branch` | str | `port/framework` | init-workspace, land/land-app.sh, prompts | App branch that carries the port. Placeholder `{{APP_PORT_BRANCH}}`. Env: `PORT_KIT_APP_PORT_BRANCH`. |
 | `writing_base` | str | `port/app-base` | port-set, combine-area, racheck.py, racheck-tree, racheck-gate | App branch the writers start from. Placeholder `{{APP_WRITING_BASE}}`. Env: `PORT_KIT_APP_WRITING_BASE`. |
-| `ui_dirs` | list | required | coverage.py, gate-classify.py, workflows/phase1-inventory-map.js, prompts, render-prompt | UI source dirs, relative to the app tree: what phase 1 inventories and coverage checks. Placeholder `{{UI_DIRS}}`. Env: `PORT_KIT_APP_UI_DIRS`. |
+| `ui_dirs` | list | required | coverage.py, gate-classify.py, workflows/phase1-inventory-map.js, prompts, render-prompt, racheck.py | UI source dirs, relative to the app tree: what phase 1 inventories and coverage checks. Placeholder `{{UI_DIRS}}`. Env: `PORT_KIT_APP_UI_DIRS`. |
 | `facade_dirs` | list | `{app.ui_dirs}` | port-set | App dirs whose code must reach framework crates through the facade, relative to the app tree. Env: `PORT_KIT_APP_FACADE_DIRS`. |
 
 ### [plan]
 
 | Key | Type | Default | Read by | Meaning |
 |---|---|---|---|---|
-| `base` | str | unset | port-set, coverage.py, workflows, prompts | Framework commit the plan was made against; phase 3 stubs are diffed from it. Placeholder `{{PLAN_BASE}}`. Env: `PORT_KIT_PLAN_BASE`. |
+| `base` | str | unset | port-set, coverage.py, workflows, prompts, test-run | Framework commit the plan was made against; phase 3 stubs are diffed from it. Placeholder `{{PLAN_BASE}}`. Env: `PORT_KIT_PLAN_BASE`. |
 | `app_base` | str | unset | coverage.py, workflows, prompts | App commit the plan was made against. Placeholder `{{APP_PLAN_BASE}}`. Env: `PORT_KIT_PLAN_APP_BASE`. |
 | `linebase` | path | `{work.plan}/LINEBASE` | port-set, move-base | State file holding the framework commit that sheet and contract line numbers refer to. init-workspace writes plan.base into it; `port-set remap` moves it. Env: `PORT_KIT_PLAN_LINEBASE`. |
 | `chunk_lines` | int | `3000` | workflows/phase1-inventory-map.js, render-prompt | Target size of one inventory chunk, in lines. Env: `PORT_KIT_PLAN_CHUNK_LINES`. |

@@ -14,7 +14,7 @@ This file is for sessions that change the kit itself. A session that runs a port
 | `prompts/` | Agent prompts and `lead.md`, rendered by `tools/render-prompt` | `{{NAME}}` placeholders only from `tools/portkit/config.py` or the per-call list in `render-prompt --help` |
 | `templates/` | `port.toml.example`, the sheet and contract formats, `STATE.md`, report templates, `claude-settings.json` | `templates/sheet.md` is the format `port-set` parses |
 | `workflows/` | The phase 1 and 2 workflow scripts | Run under `tools/swarm.py` or the Workflow tool |
-| `tools/` | Every script, `tools/portkit/` (shared Python package), `tools/README.md` | Tools read `port.toml` through `portkit.config` and post dashboard events through `portkit.track` |
+| `tools/` | Every script, `tools/portkit/` (shared Python package), `tools/selftest/` (fixture cases and stubs), `tools/README.md` | Tools read `port.toml` through `portkit.config` and post dashboard events through `portkit.track` |
 | `dashboard/` | The static dashboard page `track publish` copies out | Self-contained: no CDN, no external fonts |
 | `examples/photocraft/` | Scrubbed excerpts of a real port | Each file's source and snapshot date in its README |
 
@@ -38,6 +38,7 @@ tools/kit-check
 python3 -I -m py_compile <each Python tool you changed>
 bash -n <each shell tool you changed>
 tools/check-workflow            # the workflow scripts; plain `node --check` rejects their top-level return
+tools/selftest/run              # the fixture cases of the tools, against stubbed cl, cargo and claude
 node --check dashboard/app.js
 ```
 

@@ -118,14 +118,14 @@ KEYS: list[Key] = [
       "Read-only framework checkout at plan.base, read by phase 1 and 2 agents.", placeholder="FW"),
     K("framework.writing_base", "port/stubs", "str", "port-set combine-area move-base racheck.py compile-gate racheck-tree racheck-gate",
       "Framework branch the writers start from: the contract stubs (phase 3).", placeholder="FW_WRITING_BASE"),
-    K("framework.facade", "craft", "str", "port-set prompts feature-selection.py",
+    K("framework.facade", "craft", "str", "port-set prompts feature-selection.py racheck.py",
       "Facade crate. App code reaches every member crate through it.", placeholder="FACADE"),
-    K("framework.facade_manifest", "crates/craft/Cargo.toml", "str", "port-set",
+    K("framework.facade_manifest", "crates/craft/Cargo.toml", "str", "port-set racheck.py",
       "Facade manifest, relative to the framework tree; its dependencies give the member crates."),
     K("framework.lints_file", "{kit}/rules/lints.toml", "path", "port-set",
       "Framework lints, labelled by the framework revision they were written for. `[[lints]]` tables in port.toml "
       "add to them."),
-    K("framework.patch_urls", ["{framework.repo}"], "list", "patch-framework land/pin-framework.py",
+    K("framework.patch_urls", ["{framework.repo}"], "list", "patch-framework land/pin-framework.py test-run",
       "Framework URLs the app's Cargo manifests may name (upstream and forks); patch-framework and pin-framework "
       "rewrite each."),
 
@@ -154,14 +154,14 @@ KEYS: list[Key] = [
       "App branch that carries the port.", placeholder="APP_PORT_BRANCH"),
     K("app.writing_base", "port/app-base", "str", "port-set combine-area racheck.py racheck-tree racheck-gate",
       "App branch the writers start from.", placeholder="APP_WRITING_BASE"),
-    K("app.ui_dirs", None, "list", "coverage.py gate-classify.py workflows/phase1-inventory-map.js prompts render-prompt",
+    K("app.ui_dirs", None, "list", "coverage.py gate-classify.py workflows/phase1-inventory-map.js prompts render-prompt racheck.py",
       "UI source dirs, relative to the app tree: what phase 1 inventories and coverage checks.", required=True,
       placeholder="UI_DIRS"),
     K("app.facade_dirs", "{app.ui_dirs}", "list", "port-set",
       "App dirs whose code must reach framework crates through the facade, relative to the app tree."),
 
     # ---- plan
-    K("plan.base", None, "str", "port-set coverage.py workflows prompts",
+    K("plan.base", None, "str", "port-set coverage.py workflows prompts test-run",
       "Framework commit the plan was made against; phase 3 stubs are diffed from it.", placeholder="PLAN_BASE"),
     K("plan.app_base", None, "str", "coverage.py workflows prompts", "App commit the plan was made against.",
       placeholder="APP_PLAN_BASE"),

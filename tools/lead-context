@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""lead-context: print the port lead's context at session start, resume, clear and compaction.
+
+The kit's plugin runs it as a SessionStart hook (hooks/hooks.json); Claude Code adds what it prints to the session.
+It reads the hook's JSON on stdin (`source`, `cwd`) and finds port.toml the usual way (PORT_KIT_CONFIG, the session's
+directory or a parent). Outside a port workspace, and in agents the kit starts (PORT_KIT_AGENT set), it prints
+nothing. It prints only text and always exits 0.
+
+usage: lead-context [--source startup|resume|clear|compact] [--cwd DIR]    (without stdin JSON, for a manual run)
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+
+def hard_rules(skill: Path) -> list[str]:
+    """The first sentence of each bullet of SKILL.md section 5, so the rules are written once."""
+    text = skill.read_text()
+    m = re.search(r"^## 5\. Hard rules\n(.*?)(?=^## )", text, re.S | re.M)
+    out = []
+    for b in re.findall(r"^- (.+)$", m.group(1), re.M) if m else []:
+        first = re.split(r"(?<=\.)\s", b.replace("**", ""), maxsplit=1)[0]
+        out.append(first if len(first) <= 220 else first[:217] + "...")
+    return out
+
+
+def context(source: str, cwd: str) -> str:
+    from portkit import config as C
+    from portkit import gates
+    from portkit import track as T
+    found = C.find_config(None) if os.environ.get(C.ENV_CONFIG) else None
+    if found is None:
+        d = Path(cwd).resolve()
+        found = next((p / "port.toml" for p in (d, *d.parents) if (p / "port.toml").is_file()), None)
+    if found is None:
+        return ""
+    cfg = C.load(str(found))
+    kit = C.KIT_ROOT
+    L = []
+    if source == "compact":
+        L.append("Your context was just compacted: the kit's rules and the current runbook are no longer in it. "
+                 "Read the files below again before your next step.")
+    L.append(f"Craft UI port of {cfg.get('app.name') or 'an app'}: you are its lead (skill craft-ui-port, "
+             f"{kit}/skills/craft-ui-port/SKILL.md). Workspace port.toml: {found}")
+    st = None
+    try:
+        s = T.open_store(str(found))
+        st = s.state() if s else None
+    except Exception as e:   # a broken store must not hide the rest
+        L.append(f"Dashboard store not readable: {e}")
+    ph = (st or {}).get("phase") or {}
+    if ph:
+        L.append(f"Now: {T.phase_label(ph)}, recorded {ph.get('t')}" + (f" ({ph['note']})" if ph.get("note") else ""))
+    else:
+        L.append("Now: no phase recorded; phase 0 starts with process/01-setup.md.")
+    rb = gates.runbook(ph.get("n", 0))
+    L.append("Read now, in this order:")
+    L.append(f"  1. {cfg.get('work.state')} (STATE.md: step, next action, running agents)")
+    L.append(f"  2. `{kit}/tools/track show`")
+    if rb:
+        L.append(f"  3. {rb}, in full: the runbook of the current phase")
+    L.append(f"  4. {kit}/rules/lead-rules.md, in full")
+    rules = hard_rules(kit / "skills" / "craft-ui-port" / "SKILL.md")
+    if rules:
+        L.append("Hard rules (SKILL.md, section 5):")
+        L += [f"  - {r}" for r in rules]
+    if st:
+        c = st.get("counts", {})
+        busy = ", ".join(f"{k} {c[k]}" for k in ("running", "review", "waiting", "blocked", "failed") if c.get(k))
+        qs = [q for q in st.get("questions", []) if not q.get("answer")]
+        blocking = sum(1 for q in qs if q.get("blocking", True))
+        L.append(f"Board: {busy or 'nothing in flight'}; open questions: {blocking} blocking, "
+                 f"{len(qs) - blocking} proceeding on their recommendation.")
+    L.append(f"Start `{kit}/tools/track watch` as a background task if none runs, and start it again after each exit.")
+    return "\n".join(L) + "\n"
+
+
+def main() -> int:
+    source, cwd = "startup", os.getcwd()
+    args = sys.argv[1:]
+    if "-h" in args or "--help" in args:
+        print(__doc__.strip())
+        return 0
+    for flag in ("--source", "--cwd"):
+        if flag in args and args.index(flag) + 1 < len(args):
+            v = args[args.index(flag) + 1]
+            source, cwd = (v, cwd) if flag == "--source" else (source, v)
+    if not sys.stdin.isatty():
+        try:
+            d = json.loads(sys.stdin.read() or "{}")
+            source, cwd = d.get("source") or source, d.get("cwd") or cwd
+        except ValueError:
+            pass
+    from portkit import config as C
+    if os.environ.get(C.ENV_AGENT):
+        return 0
+    try:
+        sys.stdout.write(context(source, cwd))
+    except Exception as e:   # a hook must never stop the session
+        print(f"lead-context: {e}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

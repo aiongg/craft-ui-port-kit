@@ -1,0 +1,17 @@
+{
+  "description": "Prints the port lead's context (phase, runbook, hard rules, STATE.md) when a session in a port workspace starts, resumes, clears or compacts. Silent elsewhere.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/tools/lead-context\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

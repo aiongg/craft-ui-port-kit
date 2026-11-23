@@ -24,7 +24,7 @@ The process: plan everything first with many small read-only agents, write all c
 4. `STATE.md` in the workspace, then `track show`. They say which phase and step the port is in, what runs, and what waits on whom.
 5. `process/lessons.md`, once per port: what went wrong on earlier ports and what changed because of it.
 
-A session that starts without context does steps 2, 4 and 5 of this list before anything else, then reads the runbook of the current phase.
+A session that starts without context does steps 2, 4 and 5 of this list before anything else, then reads the runbook of the current phase. With the kit installed as a plugin, a hook prints what to read at every start, resume, clear and compaction (section 6).
 
 ## 3. Run the current phase
 
@@ -88,6 +88,8 @@ Kit tools post their own events (gate results, test rounds, set states, swarm jo
 - **Kit tools never push.** Landing prepares scrubbed clones and prints the push commands; the developer pushes (`process/10-land.md`).
 - **The kit is read only during a port.** Write only in the workspace and the trees `port.toml` names. A rule that should bind every port is a proposal to the kit's maintainers, not an edit.
 
-## 6. Hand-off
+## 6. Context and hand-off
+
+The plugin's SessionStart hook (`hooks/hooks.json`, `tools/lead-context`) runs when a session in the workspace starts, resumes, is cleared or is compacted. It prints the phase, batch and area from the board, the files to read now (STATE.md, `track show`, the current runbook, `rules/lead-rules.md`), the hard rules above and the board's open items. After a compaction, read those files again before your next step: the summary keeps none of the kit's rules. Without the plugin (a clone loaded as a skill), run `tools/lead-context` yourself after a compaction.
 
 Before you stop, or once your context is large: write the current state into `STATE.md` (phase, step, next action, running agents and their task ids, open questions, pointers rather than copies), run `track md`, and stop your monitors. The next session starts at section 2 of this file.

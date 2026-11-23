@@ -322,6 +322,7 @@ class Swarm:
         for k in ("TMUX", "TMUX_PANE"):   # a headless agent is not the pane that started it; hooks read these
             env.pop(k, None)
         env["PATH"] = f"{KIT / 'tools'}{os.pathsep}{env.get('PATH', '')}"
+        env[config.ENV_AGENT] = "1"
         if self.cfg.file:
             env[config.ENV_CONFIG] = str(self.cfg.file)
         return env

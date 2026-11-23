@@ -39,6 +39,8 @@ KIT_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_NAME = "port.toml"
 ENV_CONFIG = "PORT_KIT_CONFIG"
 ENV_PREFIX = "PORT_KIT_"
+# Set in every agent the kit starts headless: the plugin's SessionStart hook (tools/lead-context) stays silent there.
+ENV_AGENT = "PORT_KIT_AGENT"
 
 
 @dataclass(frozen=True)
@@ -521,7 +523,7 @@ def load(config_file: str | None = None, overrides: dict[str, str] | None = None
         if name in env:
             values[path] = _from_text(BY_PATH[path], env[name])
     for name in env:
-        if name.startswith(ENV_PREFIX) and name not in ENV_NAMES and name != ENV_CONFIG:
+        if name.startswith(ENV_PREFIX) and name not in ENV_NAMES and name not in (ENV_CONFIG, ENV_AGENT):
             warnings.append(f"environment: {name} names no config key (ignored)")
     for path, text in (overrides or {}).items():
         if path not in BY_PATH:

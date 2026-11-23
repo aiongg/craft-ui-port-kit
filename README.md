@@ -42,7 +42,7 @@ From a local clone, add the clone instead: `/plugin marketplace add <path-to-clo
 
 > Port `<app>` to the craft framework using the craft-ui-port-kit. The app is at `<path>`, craft-libs at `<path>`.
 
-The session loads the skill ([skills/craft-ui-port/SKILL.md](skills/craft-ui-port/SKILL.md)), becomes the port's lead, creates the workspace (`tools/init-workspace`), and asks you how you want to view the dashboard. From then on it asks you only about goals, design principles and architecture.
+The session loads the skill ([skills/craft-ui-port/SKILL.md](skills/craft-ui-port/SKILL.md)), becomes the port's lead, creates the workspace (`tools/init-workspace`), and asks you how you want to view the dashboard. From then on it asks you only about goals, design principles and architecture. The plugin also adds one hook: when a session in the workspace starts, resumes or is compacted, it prints the lead's context (phase, the runbook to read, the hard rules). It only prints text, and nothing outside a port workspace.
 
 ## How long and what it costs
 

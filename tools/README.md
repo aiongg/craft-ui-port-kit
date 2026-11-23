@@ -66,7 +66,7 @@ Every long-running tool posts one event to the progress dashboard when it ends, 
 
 ### Other tools
 
-`coverage.py`, `compare-runs.py`, `diag-cut.py`, `feature-selection.py`, `crate-order.py`, `swarm.py`, `render-prompt`, `init-workspace`, `land/*`, `track`, `look`, `collect-logs` (packs a run's logs for review; README "Sending your run's logs"), `kit-check` and `check-workflow` (parses the workflow scripts as `swarm.py` loads them) are described in their own headers and in the process docs that use them; `track` and `look` also in `track.md` and `look.md`.
+`coverage.py`, `compare-runs.py`, `diag-cut.py`, `feature-selection.py`, `crate-order.py`, `swarm.py`, `render-prompt`, `init-workspace`, `land/*`, `track`, `look`, `collect-logs` (packs a run's logs for review; README "Sending your run's logs"), `lead-context` (the plugin's SessionStart hook, `hooks/hooks.json`: prints the lead's context in a port workspace), `kit-check` and `check-workflow` (parses the workflow scripts as `swarm.py` loads them) are described in their own headers and in the process docs that use them; `track` and `look` also in `track.md` and `look.md`.
 
 ## Interfaces between tools
 

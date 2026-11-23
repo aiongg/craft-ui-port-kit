@@ -14,6 +14,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 
+from portkit import config as _config
 from portkit import track
 
 from .bundle import build_bundle, task_text
@@ -53,6 +54,7 @@ def claude(prompt: str, sheet: Sheet, model: str, tools: str, max_turns: int, la
     # A headless writer is not the terminal pane it was started from; hooks that read these would report as that pane.
     for k in ("TMUX", "TMUX_PANE"):
         env.pop(k, None)
+    env[_config.ENV_AGENT] = "1"
     dirs = [a for r in sheet.repos()[1:] for a in ("--add-dir", str(sheet.tree(r)))]
     for repo in ("fw", "app"):   # the base checkout of a repo the set does not write: the code it calls or moves
         if repo not in sheet.repos() and ctx.ref_tree(repo).exists():

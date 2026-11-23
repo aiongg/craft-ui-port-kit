@@ -294,7 +294,7 @@ class Swarm:
         self.say(f"{job.task}: FAILED: {err[:300]}")
         return None
 
-    def command(self, job: Job, schema_session: bool, resume: str | None) -> list[str]:
+    def command(self, job: Job, resume: str | None) -> list[str]:
         cfg = self.cfg
         allow = job.allow or ",".join([cfg.get("pipeline.lookup_tools"), "Write", "Edit",
                                        f"Bash({KIT / 'tools' / 'track'}:*)"])
@@ -312,8 +312,6 @@ class Swarm:
             cmd += ["--json-schema", json.dumps(job.schema)]
         if resume:
             cmd += ["--resume", resume]
-        elif not schema_session:
-            cmd.append("--no-session-persistence")
         cap = cfg.get("build.memory_cap")
         if cap:
             cmd = shlex.split(cap.replace("{gb}", str(self.a.memory_gb))) + cmd
@@ -356,7 +354,7 @@ class Swarm:
             self.say(f"{job.task}: schema mismatch ({len(errs)} errors); asking once more")
 
     def one_call(self, job: Job, jd: Path, prompt: str, resume: str | None, n: int):
-        cmd = self.command(job, schema_session=bool(job.schema), resume=resume)
+        cmd = self.command(job, resume=resume)
         cwd = job.cwd or self.cfg.get("work.dir")
         t0 = time.time()
         try:

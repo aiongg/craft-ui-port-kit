@@ -1,0 +1,83 @@
+#!/bin/bash
+# Pack a port run's logs into one archive, so the kit's maintainers can see where the run spent its time:
+#   collect-logs [--out DIR]
+# Run it from the port's workspace (or with PORT_KIT_CONFIG naming port.toml) on every machine the port used: the
+# machine the lead runs on and any build machine that ran agents. Writes
+# <DIR>/port-logs-<app id>-<host>-<date>.tar.gz (DIR defaults to the home directory) and prints its size.
+#
+# It takes:
+# - work.dir without its worktrees (work.trees), build output, compiled artifacts and files over 50 MB: plans, maps,
+#   sheets, set output (sets/), swarm job prompts and replies, runs/ logs and shots, usage.tsv, the dashboard events,
+#   STATE.md and port.toml;
+# - the Claude Code sessions whose folder under ~/.claude/projects/ belongs to a directory of this port (work.dir and
+#   everything under it, app.checkout, framework.checkout): the lead's session with its subagents and every headless
+#   agent's session;
+# - the kit's commit and the claude version.
+# A machine without port.toml (a build machine that only ran builds) gets the sessions only; set PORT_KIT_WORK_DIR and
+# PORT_KIT_APP_ID there if the port's directories have other names than on the lead's machine.
+# Sessions hold whatever a command printed. Look through the archive (tar tzf) before you send it.
+. "$(dirname "$(readlink -f "$0")")/portkit/lib.sh"
+set -euo pipefail
+
+out=$HOME
+while [ $# -gt 0 ]; do
+  case $1 in
+    --out) out=$2; shift 2 ;;
+    *) die "unknown argument $1 (see --help)" ;;
+  esac
+done
+
+work=$(cfg work.dir 2>/dev/null || true)
+trees=$(cfg work.trees 2>/dev/null || true)
+app=$(cfg app.id 2>/dev/null || true)
+dirs=$(printf '%s\n' "$work" "$(cfg app.checkout 2>/dev/null || true)" "$(cfg framework.checkout 2>/dev/null || true)" | sed '/^$/d')
+[ -n "$app" ] || app=port
+[ -n "$work$dirs" ] || die "no port.toml found and PORT_KIT_WORK_DIR unset: run it from the port's workspace"
+
+host=$(hostname -s)
+file=$out/port-logs-$app-$host-$(date +%Y%m%d-%H%M).tar.gz
+stage=$(mktemp -d)
+trap 'rm -rf -- "$stage"' EXIT
+
+if [ -n "$work" ] && [ -d "$work" ]; then
+  excl=()
+  case $trees in "$work"/*) excl+=(--exclude "/${trees#"$work"/}/") ;; esac
+  mkdir -p "$stage/work"
+  rsync -a --prune-empty-dirs "${excl[@]}" \
+    --exclude 'target*/' --exclude '.git/' --exclude 'incremental/' --exclude 'deps/' \
+    --exclude '*.rlib' --exclude '*.rmeta' --exclude '*.so' --exclude '*.a' --exclude '*.o' --exclude '*.d' \
+    --max-size=50m "$work"/ "$stage/work/"
+fi
+
+# A session folder's name is its directory with every character other than a letter or digit turned into '-'. Every
+# session under work.dir belongs to the port; in the app and framework checkouts only those since the port started
+# (work.dir's creation), since other work happens there too.
+since=@0
+if [ -n "$work" ] && [ -d "$work" ]; then
+  b=$(stat -c %W "$work" 2>/dev/null || echo 0)
+  [ "$b" -gt 0 ] 2>/dev/null || b=$(stat -c %Y "$work/port.toml" 2>/dev/null || echo 0)
+  since=@$b
+fi
+mkdir -p "$stage/sessions"
+if [ -d "$HOME/.claude/projects" ]; then
+  while IFS= read -r d; do
+    slug=$(printf '%s' "$d" | sed 's/[^A-Za-z0-9]/-/g')
+    from=@0
+    case $d in "$work"|"$work"/*) ;; *) from=$since ;; esac
+    (cd "$HOME/.claude/projects" && find . -mindepth 2 -path "./$slug*" -name '*.jsonl' -newermt "$from" -print0 |
+      xargs -0 -r cp --parents -t "$stage/sessions/")
+  done <<< "$dirs"
+fi
+
+{
+  echo "host: $host"
+  echo "date: $(date -u +%FT%TZ)"
+  echo "work dir: ${work:-unset}"
+  git -C "$KIT" log -1 --format='kit commit: %H %cs' 2>/dev/null || echo "kit commit: unknown"
+  grep -h '"version"' "$KIT/.claude-plugin/plugin.json" 2>/dev/null | sed 's/^ */kit plugin /' || true
+  claude --version 2>/dev/null || true
+} > "$stage/about.txt"
+
+tar -C "$stage" -czf "$file" .
+echo "wrote $file ($(du -h "$file" | cut -f1)): $(find "$stage/sessions" -name '*.jsonl' | wc -l) session files," \
+  "$(find "$stage/work" -type f 2>/dev/null | wc -l) workspace files"

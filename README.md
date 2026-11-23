@@ -58,6 +58,14 @@ Measured on PhotoCraft (86 inventory chunks of about 3,000 lines, 251 writer set
 
 Wall time in phases 6 and 7 follows the number of build passes, not the number of sets. The lead states the projected cost of every batch before it starts it.
 
+## Sending your run's logs
+
+The kit improves from real runs: where the time went, what was redone, where you had to step in. When a port finishes, or when it seems stuck, send the kit's maintainers your run's logs. Paste this to your lead agent:
+
+> Collect this port's logs with the kit's `tools/collect-logs`: run it in the port's workspace here, and on every other machine that ran agents or builds for this port (over ssh, from the same workspace path). Show me each archive's path and size and the list of files in it (`tar tzf`), so I can check them before sending.
+
+`tools/collect-logs` takes the workspace without worktrees or build output (plans, set output, agent prompts and replies, build and test logs, screenshots, the usage log, the dashboard events, STATE.md, port.toml) and the Claude Code sessions of the lead, its subagents and every headless agent of this port. Sessions hold whatever a command printed, so look through the archive before you send it.
+
 ## Where to look next
 
 | To | Read |

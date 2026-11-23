@@ -43,10 +43,11 @@ def lookup_extra() -> tuple[str, str]:
     return ("--allowedTools", ctx.lookup_tools)
 
 
-def claude(prompt: str, sheet: Sheet, model: str, tools: str, max_turns: int, label: str, extra=(), keep=False,
+def claude(prompt: str, sheet: Sheet, model: str, tools: str, max_turns: int, label: str, extra=(),
            resume=None) -> Reply:
-    """One `claude -p` call in the set's own tree. keep: save the session so a later call can resume it (its context
-    then comes from the prompt cache); resume: continue that session with this prompt."""
+    """One `claude -p` call in the set's own tree. Its session is saved, so a later call can resume it (its context then
+    comes from the prompt cache) and `tools/collect-logs` can send it for review; resume: continue that session with
+    this prompt."""
     od = ctx.set_dir(sheet.id)
     env = dict(os.environ, CLAUDE_CODE_MAX_OUTPUT_TOKENS="64000")
     # A headless writer is not the terminal pane it was started from; hooks that read these would report as that pane.
@@ -56,7 +57,7 @@ def claude(prompt: str, sheet: Sheet, model: str, tools: str, max_turns: int, la
     for repo in ("fw", "app"):   # the base checkout of a repo the set does not write: the code it calls or moves
         if repo not in sheet.repos() and ctx.ref_tree(repo).exists():
             dirs += ["--add-dir", str(ctx.ref_tree(repo))]
-    persist = ["--resume", resume] if resume else ([] if keep else ["--no-session-persistence"])
+    persist = ["--resume", resume] if resume else []
     cmd = ["claude", "-p", "--model", model, "--tools", tools, "--strict-mcp-config", "--output-format", "json",
            "--settings", SETTINGS, *persist, "--max-turns", str(max_turns), *dirs, *extra]
     t0 = time.time()
@@ -157,7 +158,7 @@ def plan_check(sheet: Sheet, model: str, max_turns: int) -> tuple[str, Reply]:
     """One call on the write bundle (same prefix, so the write call that resumes it reuses its cache). Writes
     plancheck.md; returns the open items ("" when clear) and the reply."""
     prompt = build_bundle(sheet) + PLANCHECK.replace("{facade}", ctx.facade)
-    reply = claude(prompt, sheet, model, READ_TOOLS, max_turns, "plancheck", extra=lookup_extra(), keep=True)
+    reply = claude(prompt, sheet, model, READ_TOOLS, max_turns, "plancheck", extra=lookup_extra())
     (ctx.set_dir(sheet.id) / "plancheck.md").write_text(reply.text)
     m = re.search(r"^@@@ ITEMS\s*\n(.*?)(?:^@@@ END|\Z)", reply.text, re.M | re.S)
     return (m.group(1).strip() if m else ""), reply

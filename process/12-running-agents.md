@@ -26,7 +26,7 @@ Every headless agent the kit starts runs `claude -p` with these settings. Use th
 | `--strict-mcp-config` | No MCP servers from your own config |
 | `--output-format json` | The result, the session id, the turn count, token usage and cost. Kit tools log each call in `work.usage_log` |
 | `--max-turns <n>` | A bound per call (`pipeline.*_max_turns`). A call that runs out reports `OUT OF TURNS` and can be continued |
-| `--no-session-persistence`, unless the call will be resumed | Sessions that are never resumed only fill the disk. Keep the session when a follow-up will resume it, and pass `--resume <session id>` then |
+| Sessions kept (no `--no-session-persistence`); `--resume <session id>` for a follow-up | A follow-up resumes from the prompt cache, and the saved sessions are what `tools/collect-logs` sends when a run is reviewed. They sit under `~/.claude/projects/`, a few MB per agent |
 | `--add-dir <tree>` for each other tree it reads | A set that spans both repos reads the other tree; an app set reads the framework at `racheck.fw_base` |
 | `CLAUDE_CODE_MAX_OUTPUT_TOKENS` raised (the kit uses 64000) | A writer's reply carries whole edited files |
 | Terminal multiplexer variables (`TMUX`, `TMUX_PANE`) removed from the environment | Otherwise hooks report the headless agent as the lead's own pane |

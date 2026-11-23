@@ -84,6 +84,7 @@ Kit tools post their own events (gate results, test rounds, set states, swarm jo
 - **Run everything that takes more than a few seconds as a background task** whose exit notifies you, and heavy jobs under `build.memory_cap`. Never wait in the foreground.
 - **The UI gallery first.** Check the framework's UI gallery before planning or writing a component. Every component or variant the port adds is registered in the gallery with its stories in the same change, and its sheet names them in a `Stories` line (`rules/porting-rules.md`, "UI gallery").
 - **Look at results yourself** (pairs, pages, test counts) before you tell the developer anything is done.
+- **When the developer asks for the run's logs**, run `tools/collect-logs` in the workspace and on every other machine that ran agents or builds for the port, and show them each archive's path, size and file list before they send it (README, "Sending your run's logs").
 - **Kit tools never push.** Landing prepares scrubbed clones and prints the push commands; the developer pushes (`process/10-land.md`).
 - **The kit is read only during a port.** Write only in the workspace and the trees `port.toml` names. A rule that should bind every port is a proposal to the kit's maintainers, not an edit.
 

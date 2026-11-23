@@ -306,7 +306,28 @@ class Cycle:
         d = self.runs / f"{self.a.label}-compile"
         errs = {"fw": _lines(d / "fw.errors"), "app": _lines(d / "app.errors")}
         return {"exit": rc, "fw_errors": fw.get("errors", 0), "app_status": app.get("status"),
-                "app_errors": app.get("errors", 0), "errors": errs}
+                "app_errors": app.get("errors", 0), "errors": errs, "unlinked": self.unlinked()}
+
+    def unlinked(self) -> list[str]:
+        """New .rs files (since each repo's writing base) that no `mod` line reaches: they are never built. Printed, not a
+        failure."""
+        found = []
+        for repo, tree in self.trees.items():
+            base = self.cfg.get(BASES[repo])
+            if not base:
+                continue
+            new = subprocess.run(["git", "-C", str(tree), "diff", "--name-only", "--diff-filter=A", base, "HEAD", "--", "*.rs"],
+                                 capture_output=True, text=True).stdout.split()
+            if not new:
+                continue
+            tracked = subprocess.run(["git", "-C", str(tree), "ls-files", "*.rs"], capture_output=True, text=True).stdout
+            out = subprocess.run([sys.executable, "-I", str(TOOLS / "mod-lines.py"), "--unlinked", *new], input=tracked,
+                                 cwd=tree, capture_output=True, text=True).stdout
+            found += [f"{repo}: {line}" for line in out.splitlines()]
+        for line in found:
+            print(f"UNLINKED {line}", flush=True)
+        (self.rd / "unlinked.txt").write_text("".join(f"{x}\n" for x in found))
+        return found
 
     # ------------------------------------------------------------ 3. lint
     def lint(self) -> dict:
@@ -721,6 +742,8 @@ def summary_line(c: Cycle, code: int) -> str:
     if "compile" in o:
         k = o["compile"]
         parts.append("compile: ok" if k["exit"] == 0 else f"compile: {k['fw_errors']} framework, {k['app_errors']} app errors")
+        if k.get("unlinked"):
+            parts.append(f"{len(k['unlinked'])} new file(s) no mod line reaches (unlinked.txt)")
     if "lint" in o:
         parts.append(f"lint: {o['lint']['count']} findings" + (", formatted" if o["lint"]["fmt"] else ""))
     if "tests" in o and "app" in o["tests"]:

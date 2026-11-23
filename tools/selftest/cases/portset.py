@@ -239,3 +239,21 @@ def case_untouched_row_is_not_written(s):
     (s.work / "list").write_text("set-f f.md\n")
     p = s.run("fix-batch", "list")
     check("SKIPPED: not written" in p.stdout, "fix-batch skips an unwritten set", p)
+
+
+def case_mod_lines_lists_unlinked_files(s):
+    files = {"crates/x/src/lib.rs": "mod a;\npub mod b;\n#[path = \"odd/c.rs\"]\nmod c;\n",
+             "crates/x/src/a.rs": "mod inner;\n", "crates/x/src/a/inner.rs": "",
+             "crates/x/src/b/mod.rs": "", "crates/x/src/odd/c.rs": "",
+             "crates/x/src/orphan.rs": "fn f() {}\n", "crates/x/src/a/orphan_too.rs": "",
+             "crates/x/tests/t.rs": "", "crates/x/src/bin/tool.rs": ""}
+    for p, text in files.items():
+        f = s.root / p
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(text)
+    p = s.run("mod-lines.py", "--unlinked", stdin="\n".join(files) + "\n", cwd=s.root)
+    out = sorted(p.stdout.splitlines())
+    check(out == ["crates/x/src/a/orphan_too.rs: no mod line reaches it", "crates/x/src/orphan.rs: no mod line reaches it"],
+          f"only the orphans are listed: {out}", p)
+    p = s.run("mod-lines.py", "--unlinked", "crates/x/src/a.rs", stdin="\n".join(files) + "\n", cwd=s.root)
+    check(p.stdout == "", "PATH limits the report", p)

@@ -59,6 +59,7 @@ REPO=app tools/combine-area <batch> <set>...      # app side, in app.integration
 - Each set lands as **one net-change commit**: its whole diff from its base, not its separate commits. A set with a second repo lands from its `<set>-<repo>` tree.
 - Where two sets edit the same lines, the later set wins (`-X theirs`). combine-area prints the files where that decided; read each and confirm both sets' intent survived.
 - combine-area then runs `tools/combine-lost`: lines a set added that the combined tree lacks, and that no later set removed or changed. Each lost line is a combine error: combine-area exits 1, and you restore the line before the gate.
+- combine-area also prints `UNLINKED <path>` for each new `.rs` file that no `mod` line reaches (cargo never builds it, so its code and tests are silently absent), and the cycle's compile step lists them in `unlinked.txt`. Add the `mod` line before the gate.
 - **Owed lines.** A set not yet written may owe a line the batch needs to compile (a `mod` line, a re-export, a call it will add). Add it on the integration branch as a separate commit whose message starts `owed by <set>:`, so its writer finds and replaces it. Never edit another set's branch for it.
 - `tools/cross-owner <set>...` lists files a set changed that `owners.tsv` gives to another set. Each is a bookkeeping error: move the change to its owner, or record why it stays.
 

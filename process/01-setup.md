@@ -164,7 +164,7 @@ Check each with one query, for example `tools/scip/scipdb.py refs <work.scip>/fw
 
 ## 10. Exit
 
-Check each item, then record `tools/track phase 1 "inventory"` and go to [02-inventory-and-map.md](02-inventory-and-map.md).
+Check each item, then record `tools/track phase 1 "inventory"` and go to [02-inventory-and-map.md](02-inventory-and-map.md). `track phase` runs the items a script can check and refuses while one fails ([tools/track.md](../tools/track.md), "The phase gate").
 
 - [ ] `port.toml` has every required key, `plan.base` and `plan.app_base`.
 - [ ] The landing questions are answered and recorded ([step 3a](#3a-ask-the-landing-questions)).

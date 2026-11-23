@@ -95,4 +95,4 @@ A panel is accepted when every state's pair matches by the rules and every remai
 - [ ] Every fix is merged onto the port branch, and the tests still pass (one full run after the last fix: `tools/test-run look-final --app`).
 - [ ] The developer has the report of what was compared.
 
-Then record `tools/track phase 9 "land"` and go to [10-land.md](10-land.md).
+Then record `tools/track phase 9 "land"` and go to [10-land.md](10-land.md). `track phase` runs the items a script can check and refuses while one fails ([tools/track.md](../tools/track.md), "The phase gate").

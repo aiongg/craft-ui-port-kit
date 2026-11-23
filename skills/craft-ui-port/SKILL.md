@@ -28,7 +28,7 @@ A session that starts without context does steps 2, 4 and 5 of this list before 
 
 ## 3. Run the current phase
 
-Each phase has one runbook. Read it in full when the phase starts, and follow its steps and exit list. Record each phase change with `track phase N "<name>"`.
+Each phase has one runbook. Read it in full when the phase starts, and follow its steps and exit list. Record each phase change with `track phase N "<name>"` (`--batch` and `--area` in phases 5 to 7): it runs the exit items of the phase you leave that a script can check, refuses while one fails, and prints the next runbook's path. Fix what it names; `--force "reason"` only for a decision you record.
 
 | # | Phase | Runbook | Main prompts | Main tools and runs |
 |---|---|---|---|---|

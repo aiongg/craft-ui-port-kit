@@ -95,4 +95,4 @@ Record what you did to the batch: `tools/track event decision "<area>: <sets> mo
 - [ ] For the pilot: the app compiles and runs with the pilot's parts, and their states are captured against production ([09-look-and-behaviour.md](09-look-and-behaviour.md)).
 - [ ] For the pilot: the projection from its measured costs is in `STATE.md` and went to the developer.
 
-Then review, combine and compile the batch: [07-review-combine-compile.md](07-review-combine-compile.md). Phases 5 to 7 repeat for each build batch; record `tools/track phase 6 "review, combine, compile"` when the batch moves on.
+Then review, combine and compile the batch: [07-review-combine-compile.md](07-review-combine-compile.md). Phases 5 to 7 repeat for each build batch; record `tools/track phase 6 "review, combine, compile"` when the batch moves on. `track phase` runs the items a script can check and refuses while one fails ([tools/track.md](../tools/track.md), "The phase gate").

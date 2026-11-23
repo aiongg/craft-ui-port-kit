@@ -111,4 +111,4 @@ Fix what you find in the map directly when it is small; rerun the area with a no
 - [ ] Every area has its map; the index exists and its coverage section lists no unmapped entry.
 - [ ] The lead's spot-check is recorded in `STATE.md`.
 
-Then record `tools/track phase 2 "plan"` and go to [03-plan.md](03-plan.md).
+Then record `tools/track phase 2 "plan"` and go to [03-plan.md](03-plan.md). `track phase` runs the items a script can check and refuses while one fails ([tools/track.md](../tools/track.md), "The phase gate").

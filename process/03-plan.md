@@ -127,4 +127,4 @@ Then put the sets on the board, so phases 4 to 7 have a task per set from the st
 - [ ] The lead's check is recorded in `STATE.md`; every set is on the board.
 - [ ] `sizing.md` and the projection went to the developer.
 
-Then record `tools/track phase 3 "contract stubs"` and go to [04-contract-stubs.md](04-contract-stubs.md).
+Then record `tools/track phase 3 "contract stubs"` and go to [04-contract-stubs.md](04-contract-stubs.md). `track phase` runs the items a script can check and refuses while one fails ([tools/track.md](../tools/track.md), "The phase gate").

@@ -92,4 +92,4 @@ The phase 4 audits and the writers' bundles look up items the stubs added. Rebui
 - [ ] `port-set remap` moved the line references to the stub head.
 - [ ] The racheck bases and the framework index are on the stub head.
 
-Then record `tools/track phase 4 "plan check and decisions"` and go to [05-plancheck-decide.md](05-plancheck-decide.md).
+Then record `tools/track phase 4 "plan check and decisions"` and go to [05-plancheck-decide.md](05-plancheck-decide.md). `track phase` runs the items a script can check and refuses while one fails ([tools/track.md](../tools/track.md), "The phase gate").

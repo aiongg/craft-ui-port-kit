@@ -120,4 +120,4 @@ Every new or changed item that a decision names gets a stub with its full signat
 - [ ] `port-set audit` reports 0 on stub pins, story owners, decision files and readers.
 - [ ] `STATE.md` records the decisions and developer answers.
 
-Then record `tools/track phase 5 "write"` and go to [06-write.md](06-write.md).
+Then record `tools/track phase 5 "write"` and go to [06-write.md](06-write.md). `track phase` runs the items a script can check and refuses while one fails ([tools/track.md](../tools/track.md), "The phase gate").

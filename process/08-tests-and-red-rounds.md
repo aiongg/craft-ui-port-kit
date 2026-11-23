@@ -94,4 +94,4 @@ The first full rounds of one port showed an app rebuild after a framework change
 - [ ] `cargo fmt` has run on the changed crates (not on vendored code), and both integration branches are committed.
 - [ ] The last round's report is written and the dashboard shows its counts.
 
-Then go to the next build batch ([06-write.md](06-write.md), "Write order"). After the last app batch, record `tools/track phase 8 "look and behaviour"` and go to [09-look-and-behaviour.md](09-look-and-behaviour.md).
+Then go to the next build batch: record `tools/track phase 5 "write" --batch <batch>` and follow [06-write.md](06-write.md), "Write order". After the last app batch, record `tools/track phase 8 "look and behaviour"` and go to [09-look-and-behaviour.md](09-look-and-behaviour.md). `track phase` runs the items a script can check and refuses while one fails ([tools/track.md](../tools/track.md), "The phase gate").

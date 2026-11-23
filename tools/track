@@ -9,7 +9,8 @@ Agents (judgement):
   track answer QID "ANSWER" [--by NAME]
   track round N --pass P --fail F [--log PATH] [--data KEY=VALUE]...
   track event KIND TEXT [--task ID] [--link NAME=URL]... [--data KEY=VALUE]...
-  track phase N [NOTE]
+  track phase N [NOTE] [--batch B] [--area A] [--force REASON]
+        runs the exit checks of the current phase first and refuses (exit 1) when one fails
 The lead and the developer:
   track show [TASK] [--json]          text view
   track alerts [--stale-min N]        stale, blocked and failed tasks, open questions, answers waiting; exit 0 always
@@ -38,6 +39,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from portkit import config as C  # noqa: E402
+from portkit import gates  # noqa: E402
 from portkit import track as T  # noqa: E402
 
 EXIT_PAUSED = 3
@@ -153,10 +155,64 @@ def cmd_event(a):
     print(f"event {a.kind}: {' '.join(a.text)}")
 
 
+EXIT_REFUSED = 1
+
+
+def phase_move_ok(cur: int | None, n: int) -> bool:
+    """The moves the process makes: the next phase, back to 5 after 7 for the next build batch, or the same phase."""
+    if cur is None:
+        return n == 0
+    return n in (cur, cur + 1) or (cur == 7 and n == 5)
+
+
 def cmd_phase(a):
+    if a.n not in T.PHASES:
+        die(f"phase {a.n}: the phases are 0 to {max(T.PHASES)}")
     s = store(a)
-    s.write([T.new_event("phase", n=a.n, note=" ".join(a.note) or None)])
-    print(f"phase {a.n} {T.PHASES.get(a.n, '')}".rstrip())
+    st = s.state()
+    ph = st.get("phase") or {}
+    cur = ph.get("n")
+    failures, ran = [], 0
+    if cur is not None and a.n != cur:
+        events, _, _ = s.read_events()
+        last = max((i for i, e in enumerate(events) if e.get("kind") == "phase"), default=-1)
+        now = T.now_utc()
+        ctx = gates.GateContext(s.cfg, st, events[last + 1:], T.parse_t(ph.get("t")),
+                                [i for i, tk in st["tasks"].items() if T.is_stale(tk, now, s.stale_min) is not None])
+        ran, failures = gates.exit_failures(cur, ctx)
+    if not phase_move_ok(cur, a.n):
+        failures.insert(0, ("The move follows the phase order",
+                            f"phase {cur if cur is not None else 'not set'} to {a.n}: allowed are "
+                            + ("0" if cur is None else f"{cur}, {cur + 1}" + (" or 5 (next build batch)" if cur == 7 else ""))))
+    if failures and not a.force:
+        print(f"track: phase {a.n} refused: {len(failures)} exit item(s) of phase {cur} {T.PHASES.get(cur, '')} fail:",
+              file=sys.stderr)
+        for text, why in failures:
+            print(f"  - {text}: {why}", file=sys.stderr)
+        print(f'Fix them, or record the decision: track phase {a.n} --force "<reason>"', file=sys.stderr)
+        sys.exit(EXIT_REFUSED)
+    recs = []
+    if failures:
+        recs.append(T.new_event("decision", text=f"phase {a.n} forced past {len(failures)} exit item(s) of phase {cur}: "
+                                + "; ".join(f"{t} ({w})" for t, w in failures) + f". Reason: {a.force}"))
+    if cur in (5, 6, 7) and a.n in (5, 6, 7):   # the build batch phases keep the batch and area until given anew
+        a.batch, a.area = a.batch or ph.get("batch"), a.area or ph.get("area")
+    recs.append(T.new_event("phase", n=a.n, note=" ".join(a.note) or None, batch=a.batch, area=a.area))
+    s.write(recs)
+    where = ", ".join(x for x in (f"batch {a.batch}" if a.batch else "", f"area {a.area}" if a.area else "") if x)
+    print(f"phase {a.n} {T.PHASES[a.n]}" + (f" ({where})" if where else ""))
+    if cur is not None and a.n != cur:
+        print(f"exit of phase {cur} {T.PHASES.get(cur, '')}: {ran - len(failures)} of {ran} checks passed"
+              + (f", {len(failures)} forced" if failures else ""))
+    if a.n != cur:
+        rb = gates.runbook(a.n)
+        if rb:
+            print(f"read now, in full: {rb}")
+            items = gates.exit_list(a.n)
+            if items:
+                print("its exit list:")
+                for it in items:
+                    print(f"  - [ ] {it}")
 
 
 def cmd_pause(a, on=True):
@@ -437,8 +493,10 @@ def main(argv=None):
     c.add_argument("--link", action="append", metavar="NAME=URL"); c.add_argument("--data", action="append", metavar="KEY=VALUE")
     c.set_defaults(fn=cmd_event)
 
-    c = sub.add_parser("phase", help="set the port's phase")
+    c = sub.add_parser("phase", help="set the port's phase, after the exit checks of the phase it leaves")
     c.add_argument("n", type=int); c.add_argument("note", nargs="*")
+    c.add_argument("--batch", help="the build batch the port is in"); c.add_argument("--area", help="the area")
+    c.add_argument("--force", metavar="REASON", help="record the phase despite failing checks, as a decision")
     c.set_defaults(fn=cmd_phase)
 
     c = sub.add_parser("show", help="text view")

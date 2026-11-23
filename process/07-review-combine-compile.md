@@ -129,4 +129,4 @@ Then write the app batch ([06-write.md](06-write.md)) and come back to step 1 fo
 - [ ] Every component the batch adds has stories that render, checked by the lead.
 - [ ] Plan errors found by the compile are fixed in the plan, and `STATE.md` records them.
 
-Then run the tests: record `tools/track phase 7 "tests and red rounds"` and go to [08-tests-and-red-rounds.md](08-tests-and-red-rounds.md).
+Then run the tests: record `tools/track phase 7 "tests and red rounds"` and go to [08-tests-and-red-rounds.md](08-tests-and-red-rounds.md). `track phase` runs the items a script can check and refuses while one fails ([tools/track.md](../tools/track.md), "The phase gate").

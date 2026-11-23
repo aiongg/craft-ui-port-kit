@@ -10,6 +10,7 @@ It needs Python 3.11 or later and nothing else: no external fonts or scripts, no
 
 - [Viewing the page](#viewing-the-page)
 - [Commands](#commands)
+- [The phase gate](#the-phase-gate)
 - [States, steps and questions](#states-steps-and-questions)
 - [Keeping the dashboard current](#keeping-the-dashboard-current)
 - [Python API for kit tools](#python-api-for-kit-tools)
@@ -46,7 +47,7 @@ Run `tools/track --help` for the summary. `--config PATH` before the command pic
 | `track answer QID "ANSWER" [--by NAME]` | The answer (default `--by lead`). The task stays `waiting` until its agent or the lead moves it. |
 | `track round N --pass P --fail F [--log PATH] [--data KEY=VALUE]...` | A full test run's result. The page draws failing tests per round. |
 | `track event KIND TEXT [--task ID] [--link NAME=URL]... [--data KEY=VALUE]...` | A free event: `merge`, `landing`, `decision`, or any lowercase kind that is not a command name. |
-| `track phase N [NOTE]` | The port's current phase, in the process/ numbering (0 Setup to 9 Land). |
+| `track phase N [NOTE] [--batch B] [--area A] [--force REASON]` | The port's current phase, in the process/ numbering (0 Setup to 9 Land), after the exit checks of the phase it leaves ([The phase gate](#the-phase-gate)). `--batch` and `--area` name the build batch and area; phases 5 to 7 keep them until given anew. |
 
 ### For the lead and the developer
 
@@ -78,7 +79,19 @@ answered q3 (<task> still waiting) by developer: <answer>
 
 ### Exit codes
 
-`0` done; `2` usage or config error (the message names it); `3` `track step` while paused. `track run` exits with the command's status (127 when it cannot start). `track alerts` always exits 0.
+`0` done; `1` `track phase` refused (the failing exit items are listed); `2` usage or config error (the message names it); `3` `track step` while paused. `track run` exits with the command's status (127 when it cannot start). `track alerts` always exits 0.
+
+## The phase gate
+
+`track phase N` checks the move before it records it:
+
+- **The order.** Allowed without `--force`: the next phase, the current phase again (a new note, batch or area; no checks run), and 7 to 5 for the next build batch. With no phase recorded yet, only 0.
+- **The exit items.** It runs every row of `PHASE_EXITS` in `tools/portkit/gates.py` for the phase it leaves: the items of that runbook's Exit list a script can decide without a build (files that must exist, board state, the last gate events since the phase began, `coverage.py`, `port-set audit`, `git grep 'DIAG '`), plus four rows for every phase: `STATE.md` written since the phase began, no blocked or failed task, no stale task, no open blocking question.
+- **On a pass** it records the phase and prints the new runbook's path and its exit list. Read that runbook in full.
+- **On a failure** it records nothing, prints each failing item with its reason, and exits 1.
+- **`--force "reason"`** records the phase anyway, with a `decision` event naming every failing item and the reason.
+
+The other exit items stay the lead's to check. A new machine-checkable item is one function and one `ExitCheck` entry in `PHASE_EXITS`.
 
 ## States, steps and questions
 
@@ -182,7 +195,7 @@ The store is `track.dir` (default `<workspace>/track`):
 | `ask` | `task`, `text`, `options`, `for` |
 | `answer` | `qid`, `text`, `by` |
 | `round` | `n`, `pass`, `fail`, `log`, `data` |
-| `phase` | `n`, `note` |
+| `phase` | `n`, `note`, `batch`, `area` |
 | `pause`, `resume` | `note` |
 | `head` | `label`, `sha`, `prev`, `ref`, `path` (posted by the fold when a watched head moved) |
 | any other | `text`, `task`, `ok` (tool results), `data`, `links` |
@@ -193,7 +206,7 @@ The store is `track.dir` (default `<workspace>/track`):
 |---|---|
 | `version`, `generated`, `events`, `bytes`, `bad_lines` | Format version, fold time, event count, bytes folded, unreadable lines |
 | `app`, `how_served`, `stale_min` | From port.toml |
-| `phase` | `{n, name, note, t}` or null |
+| `phase` | `{n, name, note, t, batch, area}` or null |
 | `paused` | `{on, note, t}` |
 | `counts` | Tasks per state |
 | `tasks` | By id, in creation order: `title`, `group`, `state`, `step`, `note`, `on`, `links`, `model`, `calls`, `runs`, `created`, `updated` (last event naming it), `changed` (last state or step change), `started`, `ended`, `last` (last tool event), `history` (last 40 state changes) |

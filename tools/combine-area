@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Combine written set trees, each as its net change, onto the writing base in an integration worktree as branch
-# area/NAME, then run combine-lost and print the touched crates.
+# <work.branch_prefix>area/NAME, then run combine-lost and print the touched crates.
 #
 # Usage: [REPO=fw|app] [BASE=REF] combine-area NAME SET[@REV]...
 #   A set without @REV lands at its tree's HEAD.
@@ -29,7 +29,7 @@ name=$1; shift
 cd "$J"
 # cl rewrites Cargo.lock on every build; a dirty lock would abort the switch and leave the old tree checked.
 git checkout -q -- Cargo.lock 2>/dev/null || true
-git switch -q -C "area/$name" "$BASE"
+git switch -q -C "$(cfgr work.branch_prefix)area/$name" "$BASE"
 for a in "$@"; do
   s=${a%@*}; r=HEAD; [[ $a == *@* ]] && r=${a#*@}
   t=$trees/$s; [[ -d $t-$REPO ]] && t=$t-$REPO

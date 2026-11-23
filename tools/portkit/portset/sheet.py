@@ -117,7 +117,8 @@ class Sheet:
         return ctx.trees / (self.id if repo == self.repo else f"{self.id}-{repo}")
 
     def branch(self, repo: str) -> str:
-        return f"port/set/{self.id}" if repo == self.repo else f"port/set/{self.id}-{repo}"
+        base = f"{ctx.cfg.get('work.branch_prefix')}set/{self.id}"
+        return base if repo == self.repo else f"{base}-{repo}"
 
     def fp(self, p: str) -> Path:
         return self.tree(self.repo_of(p)) / p

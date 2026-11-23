@@ -86,6 +86,9 @@ KEYS: list[Key] = [
       "File ownership: every file the port writes, in exactly one set.", placeholder="OWNERSHIP"),
     K("work.settled", "{work.plan}/settled.md", "path", "port-set render-prompt",
       "Design questions settled during planning.", placeholder="SETTLED"),
+    K("work.branch_prefix", "port/", "str", "port-set combine-area cycle",
+      "Prefix of the branches the kit creates: set branches `<prefix>set/<set>`, red-fixer branches `<prefix>red/<track>`, "
+      "combine branches `<prefix>area/<batch>`. Two ports in one framework clone need different prefixes."),
     K("work.sets", "{work.dir}/sets", "path", "port-set run-area run-batch fix-batch combine-area combine-lost cross-owner move-base gate-classify.py render-prompt",
       "Per-set output dirs (bundle, edits, check.md, plancheck.md, decisions.md, review findings, base-<repo>).",
       placeholder="SETS"),

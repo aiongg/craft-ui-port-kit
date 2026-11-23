@@ -42,7 +42,7 @@ Every long-running tool posts one event to the progress dashboard when it ends, 
 
 | Tool | What it does |
 |---|---|
-| `combine-area NAME SET[@REV]...` | Lands each set as one net-change commit on branch `area/NAME` in the integration worktree (`REPO=fw` or `REPO=app`), prints the files where a later set overrode an earlier one, and the touched crates. |
+| `combine-area NAME SET[@REV]...` | Lands each set as one net-change commit on branch `<work.branch_prefix>area/NAME` in the integration worktree (`REPO=fw` or `REPO=app`), prints the files where a later set overrode an earlier one, and the touched crates. |
 | `combine-lost SET[@REV]...` | Lists lines a set added that the combined tree lacks; exit 1 when there is one. Run by `combine-area`, which then exits 1 too. |
 | `racheck-gate LABEL` | rust-analyzer errors over every app file the combined trees changed, plus missing `mod` files. Writes `racheck-gate.json`. |
 | `gate-classify.py GATE.json BATCH-LISTS --later LATER-LISTS` | Sorts a gate's errors into `later:<set>`, `ra-gap`, `mod-file`, `downstream`, `macro` and `real`. |

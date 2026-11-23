@@ -139,7 +139,7 @@ The parser is `tools/portkit/portset/sheet.py`. [templates/sheet.md](../template
 
 ### tree SET
 
-Adds one worktree per repo the set writes, from that repo's integration tree, on branch `port/set/<set>` (own repo) or `port/set/<set>-<repo>` (other repo), at the writing base. Writes the start commit to `base-<repo>`. A tree that exists is left as it is. Every other writing command makes missing trees first.
+Adds one worktree per repo the set writes, from that repo's integration tree, on branch `<work.branch_prefix>set/<set>` (own repo) or `<work.branch_prefix>set/<set>-<repo>` (other repo), at the writing base. Writes the start commit to `base-<repo>`. A tree that exists is left as it is. Every other writing command makes missing trees first.
 
 ### bundle SET [--shared]
 

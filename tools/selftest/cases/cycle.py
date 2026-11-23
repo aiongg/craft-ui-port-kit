@@ -42,7 +42,7 @@ def setup(s, keys=None):
                          "app/Cargo.toml": "[package]\nname = \"app\"\n", "app/src/lib.rs": "\n"})
     for t in (fw, app):
         git(t, "branch", "base")
-        git(t, "switch", "-q", "-c", "red/t1")
+        git(t, "switch", "-q", "-c", "port/red/t1")
     s.commit(fw, {"crates/a/src/lib.rs": "fix\n"}, "t1 framework fix")
     s.commit(app, {"app/src/lib.rs": "fix\n// DIAG left\n"}, "t1 app fix")
     for t in (fw, app):
@@ -73,7 +73,7 @@ def case_red_cycle_code_only(s):
     p = s.run("cycle", "b1-run-1", "--fixers", "fixers.txt", "--tracks", "groups.md", "--batch", "b1")
     check(p.returncode == 1, "a failing test leaves work: exit 1", p)
     for t in (fw, app):
-        check("cycle b1-run-1: merge red/t1" in git(t, "log", "-3", "--format=%s"), f"red/t1 merged in {t.name}", p)
+        check("cycle b1-run-1: merge port/red/t1" in git(t, "log", "-3", "--format=%s"), f"red/t1 merged in {t.name}", p)
     keys = [c[:2] for c in s.cl_calls()]
     for k in (["check", "crate-a"], ["check", "all"], ["cargo", "fmt"], ["cargo", "clippy"], ["cargo", "doc"],
               ["test", "crate-a"], ["test", "all"]):
@@ -160,7 +160,7 @@ def case_red_round_runs_each_tracks_crates(s):
         git(t, "branch", "base")
     s.commit(fw, {"crates/c/src/lib.rs": "an earlier batch\n"}, "crate-c changed since the base")
     for task, x in (("t1", "a"), ("t2", "b")):
-        git(fw, "switch", "-q", "-c", f"red/{task}", "main")
+        git(fw, "switch", "-q", "-c", f"port/red/{task}", "main")
         s.commit(fw, {f"crates/{x}/src/lib.rs": f"{task} fix\n"}, f"{task} fix")
     git(fw, "switch", "-q", "main")
     s.config({"framework.writing_base": "base", "app.writing_base": "base", "plan.base": "base"})

@@ -271,3 +271,15 @@ def case_rule_resting_on_another_set_is_decide(s):
              "- [STUB] already there (set-a's own row)\n- [DECIDE] pick one\n")
     t = tags_of(items, "set-a")
     check(t == {"STUB": 1, "RULE": 1, "DECIDE": 3}, f"promotion: {t}")
+
+
+def case_branch_prefix(s):
+    portset(s)
+    from portkit.portset.sheet import Sheet
+    (s.work / "plan" / "sheets").mkdir(parents=True, exist_ok=True)
+    (s.work / "plan" / "sheets" / "set-g.md").write_text("# set-g\n\n- Repo: fw\n")
+    check(Sheet("set-g").branch("fw") == "port/set/set-g", "default prefix")
+    s.config({"work.branch_prefix": "other/"})
+    portset(s)
+    check(Sheet("set-g").branch("fw") == "other/set/set-g", f"configured prefix: {Sheet('set-g').branch('fw')}")
+    check(Sheet("set-g").branch("app") == "other/set/set-g-app", "second repo")

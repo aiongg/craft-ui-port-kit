@@ -9,7 +9,7 @@ usage: cycle LABEL [--fixers FILE] [--tracks SRC] [--groups DIR] [--batch B] [--
                  compile LABEL-compile, all under work.runs.
   --fixers FILE  the round's fixers, one per line `TASK [fw:BRANCH] [app:BRANCH]` (# comments and blank lines
                  skipped). TASK is the fixer's board task and swarm.py task; for a red fixer it is also its track id
-                 in the tracks file. A line with no branch means `red/<TASK>` in each integration tree that has it.
+                 in the tracks file. A line with no branch means `<work.branch_prefix>red/<TASK>` in each integration tree that has it.
   --tracks SRC   which tests each red fixer owns (groups.md, a split-failures.py directory or a TSV), for
                  compare-runs.py and diag-cut.py.
   --groups DIR   split-errors.py output: a compile or lint error that no fixer's branch touched goes to the group
@@ -184,8 +184,8 @@ class Cycle:
                 branches[repo] = br
             if not specs:
                 for repo, tree in self.trees.items():
-                    if git(tree, "rev-parse", "--verify", "-q", f"refs/heads/red/{task}", check=False).returncode == 0:
-                        branches[repo] = f"red/{task}"
+                    if git(tree, "rev-parse", "--verify", "-q", f"refs/heads/{self.cfg.get('work.branch_prefix')}red/{task}", check=False).returncode == 0:
+                        branches[repo] = f"{self.cfg.get('work.branch_prefix')}red/{task}"
             out.append({"task": task, "branches": branches})
         return out
 

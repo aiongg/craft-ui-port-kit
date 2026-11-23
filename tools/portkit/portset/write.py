@@ -47,7 +47,7 @@ class Outcome:
 # ---------------------------------------------------------------- trees
 
 def make_trees(sheet: Sheet) -> None:
-    """One code-only worktree per repo the set writes, on branch port/set/<set>[-<repo>] at the repo's writing base;
+    """One code-only worktree per repo the set writes, on branch <work.branch_prefix>set/<set>[-<repo>] at the repo's writing base;
     the start commit goes to <set dir>/base-<repo>."""
     ctx.trees.mkdir(parents=True, exist_ok=True)
     for repo in sheet.repos():

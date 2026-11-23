@@ -8,7 +8,7 @@ Phase 6 turns a written build batch into one branch that compiles. The code is r
 | Ends when | Every set has a review verdict and its findings are fixed or ruled; the combined branch compiles, framework crates first, then the app; every component the batch adds has a registered story that renders. |
 | Agents | Opus reviewer per area and side (`models.review`); Sonnet fixers (`models.fix`, Opus `models.fix_retry` for a set that failed twice); Sonnet compile fixers per crate group (`models.compile_fix`). |
 | Builds | One compile per cycle in the integration trees, through `tools/cycle`. |
-| Output | `<work.sets>/<set>/review-<round>.md`, the review summaries, `<work.plan>/rulings.md`, the combined branch `area/<batch>` in each integration tree, compile logs under `work.runs`. |
+| Output | `<work.sets>/<set>/review-<round>.md`, the review summaries, `<work.plan>/rulings.md`, the combined branch `<work.branch_prefix>area/<batch>` in each integration tree, compile logs under `work.runs`. |
 
 Record the phase: `tools/track phase 6 "review, combine, compile"`.
 

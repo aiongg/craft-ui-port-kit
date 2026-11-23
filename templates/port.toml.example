@@ -11,6 +11,7 @@
 [work]
 # dir = "."                                   # default: this file's directory
 # trees = "{work.dir}/trees"                  # per-set worktrees and read-only base checkouts
+# branch_prefix = "port/"                     # prefix of set, red and combine branches; one per port sharing a framework clone
 
 [framework]
 checkout = "../craft-libs"                    # REQUIRED: local framework clone

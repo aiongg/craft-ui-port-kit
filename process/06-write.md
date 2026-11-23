@@ -8,7 +8,7 @@ Phase 5 writes every set from its sheet and decisions, with no builds. Each set 
 | Ends when | Every set of the build batch is written; each set's `check.md` has no scripted error; racheck errors in the set's own files are 0 or explained. |
 | Agents | Sonnet by default (`models.write`); Opus for sets that change a shared mechanism (`models.write_shared`) and for a retry of a set Sonnet failed (`models.retry`). |
 | Builds | None. racheck only. |
-| Output | Per set: `<work.sets>/<set>/` (bundle, edits, `check.md`, `racheck.md`, `run.log`), its branch `port/set/<set>` (and `port/set/<set>-<repo>` for a second repo) in its worktree under `work.trees`. |
+| Output | Per set: `<work.sets>/<set>/` (bundle, edits, `check.md`, `racheck.md`, `run.log`), its branch `<work.branch_prefix>set/<set>` (and `<work.branch_prefix>set/<set>-<repo>` for a second repo) in its worktree under `work.trees`. |
 
 ## What a set run does
 

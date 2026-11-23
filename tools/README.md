@@ -10,7 +10,7 @@ Every tool here reads the port's config, `port.toml`, and writes its logs into t
 - `gh` and `git-filter-repo` for landing.
 - Node 18 or later: `swarm.py` runs the workflow scripts of phases 1 and 2 under it. A plain job list needs no Node.
 - The framework's `cl` build tool (`build.cl`). Every cargo command the kit runs goes through it, in the framework's tree and in the app's tree (cl's app mode).
-- For `look` (phase 8): Pillow and numpy, or `uv` to fetch them; on Linux, `Xvfb` for headless app instances.
+- For `look` (set up in phases 0 and 1, judged in phase 8): Pillow and numpy, or `uv` to fetch them; on Linux, `Xvfb` for headless app instances.
 - `systemd-run` only when you set `build.memory_cap` to `{kit}/tools/capped {gb}`. Without a cap, the heavy jobs run uncapped.
 
 ## Config resolution
@@ -66,7 +66,7 @@ Every long-running tool posts one event to the progress dashboard when it ends, 
 
 ### Other tools
 
-`coverage.py`, `compare-runs.py`, `diag-cut.py`, `feature-selection.py`, `crate-order.py`, `swarm.py` (also `--follow-up TASK PROMPT-FILE`), `render-prompt`, `init-workspace`, `land/*`, `track`, `look`, `collect-logs` (packs a run's logs for review; README "Sending your run's logs"), `lead-context` (the plugin's SessionStart hook, `hooks/hooks.json`: prints the lead's context in a port workspace), `kit-check` and `check-workflow` (parses the workflow scripts as `swarm.py` loads them) are described in their own headers and in the process docs that use them; `track` and `look` also in `track.md` and `look.md`.
+`coverage.py`, `compare-runs.py`, `diag-cut.py`, `feature-selection.py`, `crate-order.py`, `swarm.py` (also `--follow-up TASK PROMPT-FILE`), `render-prompt`, `init-workspace`, `land/*` (both landing tools run the look gate, `land/look-gate.py`), `track`, `look` (also `look brief CLASS`, a look fixer's brief), `collect-logs` (packs a run's logs for review; README "Sending your run's logs"), `lead-context` (the plugin's SessionStart hook, `hooks/hooks.json`: prints the lead's context in a port workspace), `kit-check` and `check-workflow` (parses the workflow scripts as `swarm.py` loads them) are described in their own headers and in the process docs that use them; `track` and `look` also in `track.md` and `look.md`.
 
 ## Interfaces between tools
 

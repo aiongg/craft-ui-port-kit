@@ -9,7 +9,7 @@ Area `{{AREA}}`: inventory chunks <first>-<last> (<n> present, <m> entries; none
 - **Fit**: `direct` (use as is), `needs props` (listed), `missing component` (what it would be), `app-only` (stays app code, built from framework widgets).
 - **Gaps** name framework changes. `FG-n` are the framework gaps listed at the end; `CH-n` are missing control hooks for the old and new captures (list at the end). Section ids (such as `G1`) are this file's.
 - **Tests**: `(n)` is the number of test functions in the file (a grep of the snapshot), then the share that concerns this entry. Verdicts: `delete` (behaviour the framework now owns, or code that is deleted; one-line reason), `table` (event-to-command cases fold into a few table-driven tests per event family), `keep` (the app's own decisions: command ids and params, engine effects, saved settings), `new`.
-- **States** use the format of the capture states files (process/09-look-and-behaviour.md): `{id, title, setup?, steps: [{method, params}]}`.
+- **States** use the format of the capture states files (tools/look.md, "States from the map"): `{id, title, setup?, steps: [{method, params}]}`; `none`, with the reason, for a part with nothing to show.
 - **Size**: S under about 40 agent tool calls, M up to about 100, L about 150 or more (split if larger).
 
 ## Inventory corrections (spot checks against the code)

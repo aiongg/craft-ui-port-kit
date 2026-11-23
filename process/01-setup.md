@@ -1,13 +1,13 @@
 # Phase 0: setup
 
-The lead runs this phase alone, with the developer answering a few questions. It ends with a workspace every later phase uses: one config file, a dashboard, a warm build of the app against one framework rev, a record of the tests that already fail, and the two indexes that stand in for the compiler while nothing builds.
+The lead runs this phase alone, with the developer answering a few questions. It ends with a workspace every later phase uses: one config file, a dashboard, a warm build of the app against one framework rev, production built with its control hooks and driven by the look driver, a record of the tests that already fail, and the two indexes that stand in for the compiler while nothing builds.
 
 | | |
 |---|---|
 | Starts when | The developer has picked the app and the framework rev to port onto (normally the head of `framework.branch`; step 2 says how to choose it). |
 | Ends when | The checks under "Exit" all pass. |
 | Agents | None. The lead runs every step. |
-| Builds | One warm app build and one full test run; the SCIP indexes. |
+| Builds | One warm app build, one production build with the control hooks, and one full test run; the SCIP indexes. |
 
 Steps 7, 8 and 9 take minutes to tens of minutes each. Start each as a background task and go on with the next step; the tools post their own events to the dashboard when they end. On a machine with less than about 64 GB of memory, run them one after another (`costs.md` has the measured sizes).
 
@@ -124,6 +124,16 @@ Every cargo command goes through the framework's `cl` ([11-build-loop.md](11-bui
 4. Make the first warm build in the app integration tree as a background task: `cl test all --no-run`. Set `build.launcher`, `build.runner` and `build.memory_cap` first if this machine shares its cores or memory with other work.
 5. When it ends, run `cl doctor` again: the target dir must hold one build of each pinned crate. A second build of a framework crate means the selection misses a package; fix the selection and rebuild.
 
+## 6a. Set up the look comparison
+
+The port is compared with production state by state from its first compile on, so production must be drivable before any code is written. `tools/look` does the capturing ([tools/look.md](../tools/look.md)); how both apps are driven is in craft-libs `docs/porting.md`, "6.4 Compare old and new".
+
+1. In the app checkout, make a local branch from the commit `app.production` is at. Never push it.
+2. Add the control channel and the state methods production already needs to open its panels and dialogs, following craft-libs `docs/porting.md` ("Expose the control channel in the app"). Use the method names and parameters the framework's control channel uses, so one states file drives both apps. Hooks change no behaviour of production; they only make its states reachable. Phase 1 adds the hooks the maps find missing.
+3. Build production once with the profile the comparison uses, as a background task, and set `look.production_binary` to it. Rebuild it only when the hooks change.
+4. Write the app's driver, starting from `examples/photocraft/look-driver/driver.py` (its README lists what to change), and set `look.driver` to it. Set `look.port_binary` to the port's binary in the app integration tree's target dir; it exists after the first compile.
+5. Check production with one hand-written states file for one small panel with one state: `tools/look pair <Panel> --side up`. The page must show the state, not a driver error. The port side waits for the first compile.
+
 ## 7. Record the baseline test runs
 
 Run the app's full test suite once, on the port branch with no port changes, as a background task:
@@ -176,6 +186,7 @@ Check each item, then record `tools/track phase 1 "inventory"` and go to [02-inv
 - [ ] The port branch pins the framework at `plan.base` by rev; the local patch points at `framework.integration`.
 - [ ] The snapshots and the production reference exist at their commits.
 - [ ] `cl doctor` is clean after the warm build.
+- [ ] The look driver and the production build with its control hooks exist, and production reached one state ([step 6a](#6a-set-up-the-look-comparison)).
 - [ ] `work.baseline_failures` exists and the baseline counts are on the dashboard; the framework baseline (`baseline-fw`) is running or done.
 - [ ] Both racheck daemons answered a check.
 - [ ] Both sqlite indexes answer a query.

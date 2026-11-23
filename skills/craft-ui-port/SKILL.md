@@ -32,16 +32,16 @@ Each phase has one runbook. Read it in full when the phase starts, and follow it
 
 | # | Phase | Runbook | Main prompts | Main tools and runs |
 |---|---|---|---|---|
-| 0 | Setup | `process/01-setup.md` | `lead` | `init-workspace`, `feature-selection.py`, `test-run`, `racheck.py`, `scip/scipdb.py`, `track` |
-| 1 | Inventory and map | `process/02-inventory-and-map.md` | `p1-*` | `workflows/phase1-inventory-map.js` through `swarm.py` |
+| 0 | Setup | `process/01-setup.md` | `lead` | `init-workspace`, `feature-selection.py`, `test-run`, `racheck.py`, `scip/scipdb.py`, `look pair --side up`, `track` |
+| 1 | Inventory and map | `process/02-inventory-and-map.md` | `p1-*` | `workflows/phase1-inventory-map.js` through `swarm.py`; `look states` |
 | 2 | Plan | `process/03-plan.md` | `p2-*` | `workflows/phase2-*.js` through `swarm.py`; `coverage.py` |
 | 3 | Contract stubs | `process/04-contract-stubs.md` | `p3-contract-stubs-stage` | `cl check`; `scip/scipdb.py` |
 | 4 | Plan check and decisions | `process/05-plancheck-decide.md` | `p4-*` | `run-batch --plancheck`, `port-set collect`, `port-set remap`, `port-set audit` |
 | 5 | Write | `process/06-write.md` | (port-set builds its own) | `run-area`, `run-batch`, `port-set`, `racheck.py` |
 | 6 | Review, combine, compile | `process/07-review-combine-compile.md` | `p6-*`, `p-rulings` | `fix-batch`, `combine-area`, `racheck-gate`, `gate-classify.py`, `compile-gate`, `split-errors.py` |
 | 7 | Tests and red rounds | `process/08-tests-and-red-rounds.md` | `p7-*` | `test-run`, `compare-runs.py`, `split-failures.py`, `diag-cut.py` |
-| 8 | Look and behaviour | `process/09-look-and-behaviour.md` | `p8-task-brief` | `look` |
-| 9 | Land | `process/10-land.md` | `p9-production-merge` | `land/scan-range.py`, `land/land-framework.sh`, `land/land-app.sh`, `land/pin-framework.py` |
+| 8 | Look and behaviour | `process/09-look-and-behaviour.md` | `p8-task-brief` | `look pair`, `look brief` |
+| 9 | Land | `process/10-land.md` | `p9-production-merge` | `land/scan-range.py`, `land/land-framework.sh`, `land/land-app.sh` (both run `land/look-gate.py`), `land/pin-framework.py` |
 
 Phases 5 to 7 repeat per build batch: the pilot, then the framework-side sets as one batch (two above about 60 sets), then the app sets.
 

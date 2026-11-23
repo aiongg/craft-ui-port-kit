@@ -5,9 +5,9 @@ Phase 1 finds every user-visible part of the app's UI and decides what each part
 | | |
 |---|---|
 | Starts when | Setup is done ([01-setup.md](01-setup.md)). |
-| Ends when | Every UI file is in a chunk; every inventory entry is in an area map; the index reports no unmapped entry; the lead has spot-checked each area map against the code. |
+| Ends when | Every UI file is in a chunk; every inventory entry is in an area map; the index reports no unmapped entry; the lead has spot-checked each area map against the code; every map section's states are in a states file and production reaches each one. |
 | Agents | Haiku, one per chunk (`models.inventory`); Opus for the area proposal and one per area map (`models.area_map`); Opus for the index (`models.index`). |
-| Builds | None. Every agent reads the snapshots and writes only its own output file. |
+| Builds | None for the agents, which read the snapshots and write only their own output file. Production is rebuilt once with the hooks the maps add (step 7). |
 | Runs | `workflows/phase1-inventory-map.js`, twice: stage `inventory`, then stage `maps`. |
 
 ## What the map holds
@@ -104,11 +104,23 @@ The agents' maps are the plan's foundation, so the lead reads a sample itself be
 
 Fix what you find in the map directly when it is small; rerun the area with a note in its prompt when a pattern repeats. Record each finding class in `STATE.md`.
 
+## Step 7: write the states files
+
+As you accept each area map in step 6, write its states, so the look comparison runs from the port's first compile ([tools/look.md](../tools/look.md)):
+
+1. For each section of the map, run `tools/look states <area> <section>`. It writes the section's **States** field into the panel's states file (`<look.states_dir>/<Panel>.json`), records the section on each state (`map`), and puts the panel's task `look-<Panel>` on the board. Sections on one panel share its file. A part with nothing to show has `none` in its States field, with the reason.
+2. Read each file against its map section: every state the section lists, every named variant, the empty, mixed and long-text cases the map names. A state that leaves a dialog open ends by closing it, or the file's `reset` closes it.
+3. Fill in what the map could not give: the panel's `crop`, the steps of each named setup, and the steps of every state marked `needs: "steps"`.
+4. Add the hooks the index lists as missing (`H-n`, marked `needs: "CH-n"` on the states) to the production branch from phase 0 ([01-setup.md](01-setup.md), step 6a), with the method names and parameters the port will answer. Remove each `needs` field once its hook exists.
+5. When every map is accepted, rebuild production once, then run `tools/look pair --all --side up` as a background task. Every state must show production on its page; fix a driver error or a wrong step now, while nothing waits on it. The port's side comes from the build loop once the port compiles.
+
 ## Exit
 
 - [ ] Every file under `app.ui_dirs` is in a chunk, and every chunk file parses.
 - [ ] `[[areas]]` in `port.toml` matches `areas.json`.
 - [ ] Every area has its map; the index exists and its coverage section lists no unmapped entry.
 - [ ] The lead's spot-check is recorded in `STATE.md`.
+- [ ] Every map section has a states file (`none` in its States field for a part with nothing to show).
+- [ ] Production reaches every state: no state has `needs`, and `look pair --all --side up` shows each one.
 
 Then record `tools/track phase 2 "plan"` and go to [03-plan.md](03-plan.md). `track phase` runs the items a script can check and refuses while one fails ([tools/track.md](../tools/track.md), "The phase gate").

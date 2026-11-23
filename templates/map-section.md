@@ -7,7 +7,7 @@
 - **Gaps**: <framework changes the part needs, by gap id; or "none">
 - **App glue**: <what stays in the app: commands it sends, models it owns, what is deleted as the part ports>
 - **Tests**: <file (count): how many keep, how many fold into table tests, how many delete, each group with its reason>
-- **States**: <the app states to capture for the old and new comparison, in the form the control channel can reach; hooks that are missing go to the area map's hook list>
+- **States**: <the app states to capture for the old and new comparison, in the form the control channel can reach; hooks that are missing go to the area map's hook list; `none` and the reason for a part with nothing to show>
 - **Look reference**: <the literal sizes, paddings, alignments and icon sizes of the old part, and the framework variant that matches, each with `path:line` in the old code; "none" for a part with no visible surface>
 - **Depends on**: <section ids of the same area, shared gap ids, app-side change ids>
 - **Size**: S (under about 40 tool calls) | M (up to about 100) | L (about 150 or more; split before briefing).

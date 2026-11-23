@@ -14,4 +14,4 @@ To use it as a starting point for another app:
 3. Replace `clear_startup` with whatever your app shows at launch on a headless display, or remove it.
 4. Keep the order in `shoot`: setup when it changed, reset, window size, theme, the state's steps, a short settle, the screenshot. One states file then drives production and the port alike.
 
-Production needs the same control methods as the port before it can be driven ([process/09-look-and-behaviour.md](../../../process/09-look-and-behaviour.md), step 1). For PhotoCraft that was a local branch from the production release with the missing hooks added, built once.
+Production needs the same control methods as the port before it can be driven ([process/01-setup.md](../../../process/01-setup.md), step 6a; phase 1 adds the hooks the maps find missing, [process/02-inventory-and-map.md](../../../process/02-inventory-and-map.md), step 7). For PhotoCraft that was a local branch from the production release with the missing hooks added, built once.

@@ -47,7 +47,8 @@ The lead is the agent session that runs the port (`process/00-overview.md`, "Rol
 - **Integration.** One shared branch per repo, in one warm integration tree. In the batch phases, combine and build per batch (`process/07-review-combine-compile.md`). For one-off tasks, merge a change onto the shared branch as soon as it passes its own checks, then check the changed crates and run their trials there. A failure goes back to the agent that wrote the change.
 - **One owner per bug or task, start to finish.** Follow-ups go back to the same agent, resumed. Start a fresh agent only when the old one's context is too large (`process/12-running-agents.md`).
 - **Never redirect a running agent.** Stop it, and start a fresh one with a corrected brief. Resuming an agent after it handed back is not a redirect.
-- **Sync once a day.** Merge the framework branch's new commits and the app's production main into the port once a day, at the heads as they are when the sync starts. Commits that land during or after it wait for the next sync. Never chase each upstream commit: the port would spend its time rebasing.
+- **Sync once a day.** Merge the framework branch's new commits and the app's production main into the port once a day, at the heads as they are when the sync starts. Commits that land during or after it wait for the next sync. Never chase each upstream commit: the port would spend its time rebasing. `cycle` reports `sync due` (a day passed, or more than `land.sync_after_commits` upstream commits); `tools/sync` runs the merge ([10-land.md](../process/10-land.md), step 1).
+- **Early CI after each green framework batch.** When `cycle` notes the `land/early-ci.sh` command (the pilot's framework sets and each framework batch green), run it: it pushes to the developer's fork only with `land.early_ci_approved`, else it prints the commands ([10-land.md](../process/10-land.md), "Early CI on the fork").
 
 ## Review and results
 

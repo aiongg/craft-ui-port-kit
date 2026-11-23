@@ -1,6 +1,6 @@
 # Phase 9: land
 
-Phase 9 puts the port where others can build it: the framework changes on the framework's port branch (`framework.branch`), and the app on its landing branch, pinned to the framework revision that landed. Before anything leaves the machine, production's newest changes are merged into the port, and every commit to be pushed is scanned and scrubbed of anything that names the developer, their machine or their local tools. The landing tools prepare all of this in scratch clones and print the push commands; they never push.
+Phase 9 puts the port where others can build it: the framework changes on the framework's port branch (`framework.branch`), and the app on its landing branch, pinned to the framework revision that landed. Before anything leaves the machine, production's newest changes are merged into the port, and every commit to be pushed is scanned and scrubbed of anything that names the developer, their machine or their local tools. The landing tools prepare all of this in scratch clones and print the push commands; they never push. The one exception is early CI on the developer's fork during the port ([Early CI on the fork](#early-ci-on-the-fork)).
 
 | | |
 |---|---|
@@ -19,6 +19,14 @@ The framework's changes go to `framework.branch`, never to the framework's main 
 ## Step 1: sync with upstream
 
 Merge upstream's new work into the port before landing, and once a day during the port (`rules/lead-rules.md`, "Sync once a day"), at the heads as they are when the sync starts. Never chase commits that land during a sync.
+
+`cycle` says when a sync is due: its report and summary line carry `sync due` when an integration tree is more than `land.sync_after_commits` commits behind its upstream branch, or behind with its last sync more than a day ago. Then run:
+
+```sh
+tools/sync                 # --fw or --app for one repo; --dry-run measures only
+```
+
+It refuses a tree with uncommitted changes, fetches the upstream branch (into `refs/portkit/upstream/`, moving none of your branches), counts the commits and the files that would conflict, and merges with one merge commit when nothing conflicts. It never rebases and never pushes. Each run is a row in `<work.runs>/syncs.tsv` with its seconds. When files would conflict it changes nothing, lists them and exits 3: merge by hand by the rules below (for the app, the production merge), then run `tools/sync` again, which records the merge. The next `cycle` compiles and tests the merged trees.
 
 **Framework.** Merge the new commits of `framework.branch` into the port's framework integration branch, as a merge commit.
 
@@ -49,6 +57,18 @@ Once a branch has been pushed, sync it with merges only. Rebasing or force-pushi
 7. **Fold into one merge commit** with both parents: `git commit-tree <final tree> -p <port branch head> -p <production head>`, then fast-forward the port branch to it. No rebase.
 8. Move `app.production` to the merged production commit, and record the merge: `tools/track event merge "production <sha> merged into the port"`.
 9. **Compare again.** Merge production's commits into the production hooks branch ([01-setup.md](01-setup.md), step 6a), rebuild production, build the port at the merged head, and run `tools/look pair --all`. Judge what changed as in phase 8 ([09-look-and-behaviour.md](09-look-and-behaviour.md), step 2). The landing tools want every pair from the head they land (next section).
+
+## Early CI on the fork
+
+The repositories' CI builds legs that no local build runs: wasm, macOS, Windows. Run them on small diffs during the port, not all at once at landing. After the pilot's framework sets go green, and after each green framework batch, `cycle` notes the command when `land.early_ci_fork` is set:
+
+```sh
+tools/land/early-ci.sh fw <framework tree> <ref> <label>
+```
+
+It clones `<ref>` under `work.landing`, scans and scrubs the range since its merge base with `framework.branch` (step 2), and stops before any push when hits remain. Then it pushes upstream's `framework.branch` head to the fork's `framework.branch` without force, so the PR's diff is the port's alone (a fork branch that has diverged stops it), pushes the scrubbed head to the fork's `port-ci/<label>` with force (the kit owns those branches), and opens one draft PR there into `framework.branch` with `gh`, or leaves the open one, which the push updated. It never targets `framework.repo`, `app.upstream` or `land.push_target`, and every PR is a draft.
+
+It pushes only when `land.early_ci_approved` is true, the developer's standing approval from phase 0 ([01-setup.md](01-setup.md), step 3a). Otherwise it prints the commands for the developer. Each run is a row in `<work.landing>/early-ci.tsv`. A red leg is fixed on the port branch like any failure: a small red round for a test, a direct fix for a lint or a platform gap. Early CI covers the framework; the app's CI runs at landing (step 5).
 
 ## The look gate
 

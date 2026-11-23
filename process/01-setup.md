@@ -86,7 +86,7 @@ Ask the developer now, in chat, so landing never stops on a question at the end 
 1. **Targets.** The app repository URL and branch the port lands on (`land.push_target`, `land.push_branch`), and the framework branch (`framework.branch`, already set in step 2).
 2. **How the framework changes arrive.** One PR per build batch, or a fast-forward push (`land.framework_via`).
 3. **Commit identity on the build machine.** The name and email the port's commits carry: `git config user.name` and `git config user.email` in the app checkout (`init-workspace` reports a missing email).
-4. **Early CI.** May the lead push scrubbed port branches to the developer's fork and open draft PRs there, so the wasm, macOS and Windows legs run early on small diffs? Set `land.early_ci_approved = true` only on a yes; the default is no, and kit tools never push or open anything without it. Fork pushes and draft PRs only: never the upstream repository.
+4. **Early CI.** May the lead push scrubbed port branches to the developer's fork and open draft PRs there, so the wasm, macOS and Windows legs run early on small diffs ([10-land.md](10-land.md), "Early CI on the fork")? Ask for the fork's URL (`land.early_ci_fork`) either way. Set `land.early_ci_approved = true` only on a yes; the default is no, and kit tools never push or open anything without it. Fork pushes and draft PRs only: never the upstream repository.
 5. **Tools.** `git-filter-repo` must be installed (`init-workspace` reports it missing; the landing tools stop without it).
 
 ## 4. Pin the framework and make the port branch

@@ -13,3 +13,4 @@ tools/land/rewrite-rules.txt	regex:/tmp/claude-[^\s"'`)\]>,;]*==>/tmp/scratch
 @ident	aiongg <67543387+aiongg@users.noreply.github.com>
 # Selftest commits in scratch repos use a reserved, non-routable address.
 tools/selftest/lib.py	selftest@example.invalid
+tools/selftest/cases/early_ci.py	selftest@example.invalid

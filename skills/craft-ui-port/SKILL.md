@@ -34,14 +34,14 @@ Each phase has one runbook. Read it in full when the phase starts, and follow it
 |---|---|---|---|---|
 | 0 | Setup | `process/01-setup.md` | `lead` | `init-workspace`, `feature-selection.py`, `test-run`, `racheck.py`, `scip/scipdb.py`, `look pair --side up`, `track` |
 | 1 | Inventory and map | `process/02-inventory-and-map.md` | `p1-*` | `workflows/phase1-inventory-map.js` through `swarm.py`; `look states` |
-| 2 | Plan | `process/03-plan.md` | `p2-*` | `workflows/phase2-*.js` through `swarm.py`; `coverage.py` |
+| 2 | Plan | `process/03-plan.md` | `p2-*` | `workflows/phase2-*.js` through `swarm.py`; `reconcile` (with `plan-collate.py`, `plan-rebuild.py`); `coverage.py` |
 | 3 | Contract stubs | `process/04-contract-stubs.md` | `p3-contract-stubs-stage` | `cl check`; `scip/scipdb.py` |
 | 4 | Plan check and decisions | `process/05-plancheck-decide.md` | `p4-*` | `run-batch --plancheck`, `port-set collect`, `port-set remap`, `port-set audit` |
 | 5 | Write | `process/06-write.md` | (port-set builds its own) | `run-area`, `run-batch`, `port-set`, `racheck.py` |
 | 6 | Review, combine, compile | `process/07-review-combine-compile.md` | `p6-*`, `p-rulings` | `fix-batch`, `combine-area`, `racheck-gate`, `gate-classify.py`, `cycle` (runs `compile-gate`), `split-errors.py` |
 | 7 | Tests and red rounds | `process/08-tests-and-red-rounds.md` | `p7-*` | `cycle` (runs `test-run`, `compare-runs.py`, `diag-cut.py`, `swarm.py --follow-up`), `split-failures.py`, `track eta` |
 | 8 | Look and behaviour | `process/09-look-and-behaviour.md` | `p8-task-brief` | `look pair`, `look brief` |
-| 9 | Land | `process/10-land.md` | `p9-production-merge` | `land/scan-range.py`, `land/land-framework.sh`, `land/land-app.sh` (both run `land/look-gate.py`), `land/pin-framework.py` |
+| 9 | Land | `process/10-land.md` | `p9-production-merge` | `sync`, `land/scan-range.py`, `land/land-framework.sh`, `land/land-app.sh` (both run `land/look-gate.py`), `land/pin-framework.py`; during the port `land/early-ci.sh` |
 
 Phases 5 to 7 repeat per build batch: the pilot, then the framework-side sets as one batch (two above about 60 sets), then the app sets.
 
@@ -87,7 +87,7 @@ Kit tools post their own events (gate results, test rounds, set states, swarm jo
 - **The UI gallery first.** Check the framework's UI gallery before planning or writing a component. Every component or variant the port adds is registered in the gallery with its stories in the same change, and its sheet names them in a `Stories` line (`rules/porting-rules.md`, "UI gallery").
 - **Look at results yourself** (pairs, pages, test counts) before you tell the developer anything is done.
 - **When the developer asks for the run's logs**, run `tools/collect-logs` in the workspace and on every other machine that ran agents or builds for the port, then sanitise each archive: search it for names, usernames, emails, hosts, home paths, private project names, customer data and secrets that the tool's redaction missed, remove them, and show the developer each archive's path, size, what you removed and the unchecked screenshots before they send it (README, "Sending your run's logs").
-- **Kit tools never push.** Landing prepares scrubbed clones and prints the push commands; the developer pushes (`process/10-land.md`).
+- **Kit tools never push, with one exception.** Landing prepares scrubbed clones and prints the push commands; the developer pushes (`process/10-land.md`). The exception: `land/early-ci.sh` pushes scrubbed framework branches to the developer's fork and opens draft PRs there, only when `land.early_ci_approved` is true.
 - **The kit is read only during a port.** Write only in the workspace and the trees `port.toml` names. A rule that should bind every port is a proposal to the kit's maintainers, not an edit.
 
 ## 6. Context and hand-off

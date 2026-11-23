@@ -7,7 +7,7 @@ Every tool here reads the port's config, `port.toml`, and writes its logs into t
 - Python 3.11 or later, git, bash.
 - `rust-analyzer` for the racheck tools.
 - The `claude` CLI for `port-set` and `swarm.py`.
-- `gh` and `git-filter-repo` for landing.
+- `git-filter-repo` for landing; `gh` for early CI on the fork (`land/early-ci.sh`).
 - Node 18 or later: `swarm.py` runs the workflow scripts of phases 1 and 2 under it. A plain job list needs no Node.
 - The framework's `cl` build tool (`build.cl`). Every cargo command the kit runs goes through it, in the framework's tree and in the app's tree (cl's app mode).
 - For `look` (set up in phases 0 and 1, judged in phase 8): Pillow and numpy, or `uv` to fetch them; on Linux, `Xvfb` for headless app instances.
@@ -57,6 +57,16 @@ Every long-running tool posts one event to the progress dashboard when it ends, 
 | `patch-framework [--dry-run]` | Writes the framework path patches into the app's `Cargo.toml` for local builds, from the committed lock, as marked overrides beside the app's own patch lines; a rerun changes nothing. Exit 1 when the lock takes no framework package. |
 | `trash-stale-tests --dir DEPS --since EPOCH` | Removes test executables a build superseded (to the trash when a `trash` command exists, else deleted). |
 
+### Plan and sync
+
+| Tool | What it does |
+|---|---|
+| `plan-collate.py` | Sorts the phase 2 requests, contract change logs and the newest re-evaluation's must-fix items into one inbox per set, contract part and routing job (`<plan>/fix/inbox/`, `groups.json`). Must-fix items are checked against `templates/eval-result.schema.json`; rows no inbox takes and rejected items are listed in `inbox/unrouted.md`. |
+| `plan-rebuild.py` | Rebuilds `ownership.md`, the joined `contract.md` and `sizing.md` from the sheets and parts, runs `coverage.py --from sheets`, and lists the consistency findings. Exit 1 on a finding or a coverage gap. |
+| `reconcile [--only AREA]... [--from STAGE] [-- SWARM-OPTION...]` | Runs the three stages of `phase2-reconcile.js` (contract, sheets, evaluate) under `swarm.py`, each after `render-prompt` has run the collation or the rebuild. Stops at a stage with failed jobs. |
+| `sync [--fw] [--app] [--dry-run]` | Merges upstream's new commits into the integration trees with one merge commit each (never a rebase, never a push), at the heads as they are now; a conflict changes nothing and exits 3. Records each run in `<work.runs>/syncs.tsv`. |
+| `land/early-ci.sh fw TREE REF LABEL` | Scrubs REF and, with `land.early_ci_approved`, pushes it to the fork's `port-ci/LABEL` and opens one draft PR there (else prints the commands). |
+
 ### Build helpers
 
 | Tool | What it does |
@@ -91,3 +101,6 @@ Stubs in `tools/selftest/stubs/`, for cases of any tool:
 - `cl`: prints `<STUB_CL_LOGS>/<key>.log` and exits with `<key>.rc` (0 when missing). The key is the command word and its first argument, plus `-no-run` with `--no-run` (`check-craft-ui`, `check-all`, `test-all-no-run`, `test-all`); `<key>.<n>.log` and `<key>.<n>.rc`, when present, answer the n-th call of that key. Every call is appended to `<STUB_CL_LOGS>/calls.jsonl`. `lib.Scratch` points `build.cl` at it; `Scratch.cl_log(key, text, rc)` writes a canned answer, and canned logs live in `tools/selftest/fixtures/`.
 - `cargo`: answers `cargo metadata` with the tree's `.stub-metadata.json` (`lib.cargo_metadata()` writes one).
 - `claude`: records each call (`<STUB_CLAUDE_DIR>/calls.jsonl`) and answers like `claude -p --output-format json`, keeping the `--resume` session id.
+- `gh`: records each call (`<STUB_GH_DIR>/calls.jsonl`); `pr list` prints `<STUB_GH_DIR>/open.txt` (default 0) and `pr create` a PR URL. `land/early-ci.sh` runs `PORT_KIT_GH_BIN` when it is set.
+
+`lib.Scratch` points `framework.repo` and `app.upstream` at paths that do not exist, so `cycle`'s sync check fails fast without the network unless a case sets them.

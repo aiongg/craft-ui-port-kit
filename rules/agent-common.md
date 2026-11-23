@@ -34,7 +34,7 @@ The port has one progress dashboard (`tools/track.md`). Your prompt gives your t
 
 - At the start of every step: `track step TASK STEP` (`plan`, `write`, `compile`, `test`, `fix`, `merge`, or the steps your prompt names). If it exits 3, the port is paused: stop and report.
 - On every state change: `track status TASK STATE "what happened"`. When blocked or waiting, name what on with `--on` (a task id, `developer`, `lead`, `review`, `check`).
-- Every question: `track ask TASK "question" --option A --option B`. Then stop and report as your prompt says, or carry on with the work that does not depend on the answer. Never wait silently.
+- Every question: `track ask TASK "question" --recommend A --option A --option B`, as "Questions" below says. Never wait silently.
 - On hand-back: `track status TASK review "summary" --calls N --link report=PATH`, where N is your tool-call count.
 
 Kit tools record their own results (gate outcomes, test counts, set states). Do not repeat them with `track`; report only your judgement.
@@ -48,16 +48,26 @@ If your prompt names a report file, also append one line per step under its `## 
 - Use the framework's own signals: what a story opens, which key was pressed, which kind of component it is, what has focus. Never infer such a fact from side effects (focus movement, sizes, text, draw order). If the framework has no signal for it, adding the signal at its mechanism is part of the fix.
 - Do not start subagents or workflows. If you need to find something your brief does not give, search for it yourself with one narrow, batched search (several patterns in one command), or ask the lead.
 
-## Stop and report
+## Questions
 
-Stop, and report with file:line and the options you see, when:
+Most questions have an answer already, and most of the rest do not need to wait for one.
 
-- the fix needs a design choice your brief does not settle: a new public concept, a choice between two designs, a behaviour change nobody has decided;
-- your brief or sheet is wrong or contradicts the code;
-- production and a rule in `porting-rules.md` disagree, and your brief does not say which applies;
-- your work turns out much bigger than your brief expected (past about 150 tool calls, or a second distinct piece of work appears). Commit what is done and hand back with what is left.
+1. **Look first:** the plan's `settled.md` and `rulings.md`, the set's `decisions.md`, and the cross-set decisions (`shared.md` in the decide directory). A question one of them answers is not a question.
+2. **Recommend.** Every question carries the option you recommend: `track ask TASK "question" --recommend A --option A --option B`.
+3. **Proceed** on your recommendation, unless the question is on the always-DECIDE list below. List it in your report under "Assumptions": the question id, the option you took, and the file:line it shaped. The lead rules on the batch's assumptions together; a ruling that differs from yours comes back as a fix.
+4. **Always DECIDE.** A question on this list blocks the work that depends on it. Ask it with `--blocking`, stop that work, carry on with the rest, and report with the options:
+   - your prompt, brief or sheet contradicts a source above it ("Source precedence");
+   - a new public concept in the framework, or a change to a contract row or pinned signature that other sets build on;
+   - a behaviour change from production that no rule or decision settles, or production and a rule in `porting-rules.md` disagree;
+   - a change to saved data: file formats, settings, document contents;
+   - deleting a test that the plan or the triage table marks `keep`;
+   - anything that only the developer decides: goals, design principles, architecture.
 
-Give a recommendation with each set of options. The lead decides, and starts a fresh agent with a corrected brief when the brief was wrong.
+A brief or sheet that describes code differently from the code is not a question: the code is right ("Source precedence"); follow it and report the difference.
+
+## Stop and hand back
+
+Stop, commit what is done, and hand back with what is left when your work turns out much bigger than your brief expected (past about 150 tool calls, or a second distinct piece of work appears). The lead decides, and starts a fresh agent with a corrected brief when the brief was wrong.
 
 ## Shared code
 
@@ -102,4 +112,5 @@ Write your report where your prompt says (its template is `templates/task-report
 - the checks you ran, with their actual results (counts, failures); never a check you did not run;
 - what still differs from production, with the states compared;
 - findings outside your goal, one line each with file:line;
-- questions you stopped on, with options and your recommendation.
+- "Assumptions": each question you proceeded on, with its id, the option you took and the file:line it shaped;
+- blocking questions you stopped on, with options and your recommendation.

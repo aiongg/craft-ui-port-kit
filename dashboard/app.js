@@ -179,7 +179,10 @@ function renderQuestions() {
     } else {
       body = `<div>Answer: ${esc(q.answer.text)} <span class="meta">(${esc(q.answer.by)}, ${timeEl(q.answer.t)})</span></div>`
     }
-    return `<div class="ask"><div class="meta"><b>${esc(q.id)}</b> ${esc(forWho(q))} · task <code>${esc(q.task || '-')}</code> · asked ${timeEl(q.t)}</div><div class="q">${esc(q.text)}</div>${body}</div>`
+    // A question asked without --blocking: its asker went on with the recommended option until the batch's rulings.
+    const how = q.blocking === false ? ' · proceeding on the recommendation' : (q.answer ? '' : ' · blocking')
+    const rec = q.recommend ? `<div class="meta">Recommended: ${esc(q.recommend)}</div>` : ''
+    return `<div class="ask"><div class="meta"><b>${esc(q.id)}</b> ${esc(forWho(q))} · task <code>${esc(q.task || '-')}</code> · asked ${timeEl(q.t)}${how}</div><div class="q">${esc(q.text)}</div>${rec}${body}</div>`
   }
   el.innerHTML = head('questions-h', 'Questions', open.length ? `${open.length} open` : 'none open') +
     (open.length ? `<div class="asks">${open.map(item).join('')}</div>` : '<p class="empty">No open questions.</p>') +

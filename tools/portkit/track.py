@@ -432,10 +432,11 @@ def fold(events: list[dict], now: datetime, stale_min: int = 20) -> dict:
             qid = f"q{len(questions) + 1}"
             q = {"id": qid, "task": e.get("task"), "text": e.get("text", ""), "options": e.get("options") or [],
                  "for": e.get("for") if e.get("for") in ASK_FOR else "lead", "t": t, "answer": None,
-                 "event": e.get("id")}
+                 "event": e.get("id"), "recommend": e.get("recommend"),
+                 "blocking": bool(e.get("blocking", True))}   # a question recorded without the field blocked its task
             questions.append(q)
             e = {**e, "qid": qid}
-            if tk is not None and tk["state"] != "done":
+            if tk is not None and tk["state"] != "done" and q["blocking"]:
                 set_state(tk, t, "waiting", None, f"{qid}: {q['text'][:200]}", q["for"])
         elif k == "answer":
             q = next((q for q in questions if q["id"] == e.get("qid")), None)
@@ -540,30 +541,57 @@ def is_stale(tk: dict, now: datetime, stale_min: int) -> int | None:
     return None
 
 
-def alert_lines(state: dict, now: datetime | None = None, stale_min: int | None = None) -> list[str]:
+def _options(q: dict) -> str:
+    parts = [" | ".join(q["options"])] if q.get("options") else []
+    if q.get("recommend"):
+        parts.append(f"recommended: {q['recommend']}")
+    return f" [{'; '.join(parts)}]" if parts else ""
+
+
+def alert_items(state: dict, now: datetime | None = None, stale_min: int | None = None) -> list[tuple[str, str, bool]]:
+    """(key, line, wakes) per item that needs the lead. The key changes when the item is new; `track watch` wakes
+    on a new key whose item wakes. Questions proceeding on their recommendation come as one digest line that does
+    not wake: they wait for the batch's rulings."""
     now = now or now_utc()
     stale_min = state.get("stale_min", 20) if stale_min is None else stale_min
     out = []
-    if (state.get("paused") or {}).get("on"):
-        out.append("paused" + (f": {state['paused']['note']}" if state["paused"].get("note") else ""))
+    p = state.get("paused") or {}
+    if p.get("on"):
+        out.append((f"paused:{p.get('t')}", "paused" + (f": {p['note']}" if p.get("note") else ""), True))
     tasks = state.get("tasks", {})
     for tk in tasks.values():
         m = is_stale(tk, now, stale_min)
         if m is not None:
-            out.append(f"stale {tk['id']}: {tk['state']}" + (f" ({tk['step']})" if tk.get("step") else "")
-                       + f", no update for {m} min (limit {stale_min})" + (f": {tk['note']}" if tk.get("note") else ""))
+            out.append((f"stale:{tk['id']}:{tk['updated']}",
+                        f"stale {tk['id']}: {tk['state']}" + (f" ({tk['step']})" if tk.get("step") else "")
+                        + f", no update for {m} min (limit {stale_min})" + (f": {tk['note']}" if tk.get("note") else ""),
+                        True))
     for tk in tasks.values():
         if tk["state"] in ("blocked", "failed"):
-            out.append(f"{tk['state']} {tk['id']}" + (f" on {tk['on']}" if tk.get("on") else "")
-                       + (f": {tk['note']}" if tk.get("note") else ""))
+            out.append((f"{tk['state']}:{tk['id']}:{tk.get('changed')}",
+                        f"{tk['state']} {tk['id']}" + (f" on {tk['on']}" if tk.get("on") else "")
+                        + (f": {tk['note']}" if tk.get("note") else ""), True))
+    proceeding = []
     for q in state.get("questions", []):
         if not q.get("answer"):
-            out.append(f"question {q['id']} for {q['for']} ({q.get('task') or '-'}, {_age(q['t'], now)}): {q['text']}"
-                       + (f" [options: {' | '.join(q['options'])}]" if q.get("options") else ""))
+            if not q.get("blocking", True):
+                proceeding.append(q["id"])
+                continue
+            out.append((f"q:{q['id']}", f"question {q['id']} for {q['for']} ({q.get('task') or '-'}, {_age(q['t'], now)}): "
+                        f"{q['text']}{_options(q)}", True))
         elif q.get("task") in tasks and tasks[q["task"]]["state"] == "waiting":
             a = q["answer"]
-            out.append(f"answered {q['id']} ({q['task']} still waiting) by {a['by']}: {a['text']}")
+            out.append((f"a:{q['id']}", f"answered {q['id']} ({q['task']} still waiting) by {a['by']}: {a['text']}", True))
+    if proceeding:
+        shown = " ".join(proceeding[:20]) + (f" and {len(proceeding) - 20} more" if len(proceeding) > 20 else "")
+        out.append((f"proceeding:{','.join(proceeding)}",
+                    f"questions proceeding on their recommendation: {len(proceeding)} unruled ({shown}); "
+                    "rule them per batch (prompts/p-rulings.md)", False))
     return out
+
+
+def alert_lines(state: dict, now: datetime | None = None, stale_min: int | None = None) -> list[str]:
+    return [line for _, line, _ in alert_items(state, now, stale_min)]
 
 
 def show_text(state: dict, task: str | None = None, now: datetime | None = None) -> str:
@@ -628,8 +656,8 @@ def show_text(state: dict, task: str | None = None, now: datetime | None = None)
     if open_q:
         L.append(f"\nopen questions ({len(open_q)})")
         for q in open_q:
-            L.append(f"  {q['id']} for {q['for']} ({q.get('task') or '-'}): {q['text']}"
-                     + (f" [options: {' | '.join(q['options'])}]" if q.get("options") else ""))
+            L.append(f"  {q['id']} for {q['for']} ({q.get('task') or '-'}"
+                     + (", proceeding" if not q.get("blocking", True) else "") + f"): {q['text']}{_options(q)}")
     return "\n".join(L)
 
 

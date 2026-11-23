@@ -106,7 +106,7 @@ If an area is still above `plan.max_error_rate`, fix its must-fix list (a Sonnet
 
 The lead decides every open question the rules, the code or production behaviour settle, and records each in `settled.md` with its reason (`L-1`, `L-2`, ...). Record a batch of decisions on the dashboard: `tools/track event decision "settled L-<from>..L-<to>"`.
 
-The developer gets only questions about goals, design principles and architecture, never layout or product detail. Ask each one with `tools/track ask plan "<question>" --option "<A>" --option "<B>" --for developer`, and in chat at the same time; record the answer with `tools/track answer <qid> "<answer>"` wherever it came from. A decision that changes the plan goes through the same contract and sheet fix as a request.
+The developer gets only questions about goals, design principles and architecture, never layout or product detail. Ask each one with `tools/track ask plan "<question>" --option "<A>" --option "<B>" --recommend "<A>" --blocking --for developer`, and in chat at the same time; record the answer with `tools/track answer <qid> "<answer>"` wherever it came from. A decision that changes the plan goes through the same contract and sheet fix as a request.
 
 ## Step 8: the lead's own check
 

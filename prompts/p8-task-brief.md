@@ -48,7 +48,7 @@ Not in this task (outside the goal): <one line each, or "none">.
 You report under the board task `{{TASK}}`. These calls are rules:
 - `track step {{TASK}} <step>` when each step starts. If it exits 3, the port is paused: stop and report. Steps: `plan`, `write`, `compare`, `tests`, `report`.
 - `track status {{TASK}} <state> [--on WHAT]` on every state change (`running`, `review`, `waiting`, `blocked`, `done`); name the blocker with `--on`.
-- `track ask {{TASK}} "question" --option A --option B` for every question; then continue with what does not depend on the answer.
+- `track ask {{TASK}} "question" --recommend A --option A --option B` for every question that the rules, the recorded decisions and the code do not settle. Proceed on your recommendation; add `--blocking` and hold the work that depends on it only for the always-DECIDE list ({{RULES}}/agent-common.md, "Questions").
 - `track status {{TASK}} review "<one-line summary>" --calls N` as the last action, where N is your tool-call count.
 
 ## Report

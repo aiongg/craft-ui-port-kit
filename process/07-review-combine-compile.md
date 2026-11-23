@@ -24,7 +24,9 @@ The reviewer checks the gallery rule for every component or variant the batch ad
 
 ## Step 2: rule on the findings
 
-Read every review summary and every `back to plan` finding yourself.
+First rule the area's open questions and `back to plan` findings in one pass: put a task on the board (`tools/track status rulings-<area> todo`), render `prompts/p-rulings.md` with `{{AREA}}`, `{{ROUND}}`, `{{TASK}}` and `{{OUT}}` (`<work.runs>/rulings-<area>-<round>.tsv`), and run it as a background task. Check its `cross-set` and `framework` rows, apply them, and record every ruling with `tools/track answer --file <OUT> --by rulings` ([rules/lead-rules.md](../rules/lead-rules.md), "The dashboard").
+
+Then read every review summary and every `back to plan` finding yourself.
 
 - The reviewer's draft rulings stand unless you overrule them. Write overrides at the end of the set's review file under "Lead rulings (final)". Rulings that apply to a whole area go to `<work.plan>/rulings.md`.
 - A `back to plan` finding means the sheet or contract is wrong. Fix the sheet, the contract row or `decisions.md` first (and the stubs, if a signature changes), then let the fixer apply it.

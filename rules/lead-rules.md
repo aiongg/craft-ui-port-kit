@@ -66,14 +66,15 @@ The dashboard (`tools/track.md`) is the developer's view of the port. These duti
 
 - **Before launching an agent, put its task on the board:** `track import sheets`, `track import tracks FILE`, or `track status TASK todo --title "..."`. Give the agent its task id.
 - **At each phase change:** `track phase N "note"`.
-- **Run `track alerts` in your monitor loop** every few minutes while agents run, and act on every line:
+- **Keep `track watch` running as a background task** while agents run. When it exits, act on every line of its digest, then start it again:
   - stale: read the agent's output; resume it, or stop it and start a fresh one with a corrected brief;
   - blocked or failed: remove the blocker or reassign, then set the task running again;
-  - question: answer it, or pass it to the developer.
-- **Every question to the developer goes on the board and in chat:** `track ask TASK "..." --for developer --option ...`, and the same question in chat, in full, with the options and your recommendation. An answer in either place counts. Record it with `track answer QID "..."` and in `STATE.md` "Developer answers", in the same step. Closing or moving a task does not answer its question: the answer is recorded on the question itself, and a question left open after it was answered is a bug.
+  - question: a blocking question; answer it, or pass it to the developer.
+- **Rule on questions per batch, not one by one.** Agents proceed on their recommendation unless a question is on the always-DECIDE list (`agent-common.md`, "Questions"). Before the review findings of a batch are ruled, run `prompts/p-rulings.md` per area: it drafts a ruling for every open question and back-to-plan finding and applies the set-scope ones to the sets' `decisions.md`. Check its `cross-set` and `framework` rows yourself, write the ones that bind other sets into `shared.md` or `settled.md`, then record every ruling with one `track answer --file <rulings.tsv> --by rulings`. A ruling that changes an asker's assumption is a fix for that set's fixer.
+- **Every question to the developer goes on the board and in chat:** `track ask TASK "..." --for developer --blocking --option ... --recommend ...`, and the same question in chat, in full, with the options and your recommendation. An answer in either place counts. Record it with `track answer QID "..."` and in `STATE.md` "Developer answers", in the same step. Closing or moving a task does not answer its question: the answer is recorded on the question itself, and a question left open after it was answered is a bug.
 - **Record merges, landings and decisions:** `track event merge|landing|decision "..." --task ID`.
 - **Pause around shared-branch moves:** `track pause` before a move that agents must not start steps across, `track resume` after it.
-- **Questions reach you at once.** Your monitor loop shows new questions on its next poll; never rely on the stale timer to notice a question.
+- **Blocking questions reach you at once.** `track watch` exits on the next poll after one is asked; never rely on the stale timer to notice a question.
 
 ## Background work and the machine
 

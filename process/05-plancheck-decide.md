@@ -74,7 +74,7 @@ Each part agent writes `<work.sets>/<set>/decisions.md` for every set with items
 
 Part agents decide everything the rules settle. An architecture question the rules leave open (a new shared mechanism, a change to a contract that other areas call) comes back in a report with options and a recommendation. Decide every one you can yourself, record it in `shared.md` as a lead decision, and record it on the board: `tools/track event decision "<part>: <decision>" --task decide-<part>`.
 
-Only questions about goals, design principles or architecture go to the developer. Ask each on the board and in chat at once: `tools/track ask decide-<part> "<question>" --option "<A>" --option "<B>" --for developer`. Record the answer with `tools/track answer <qid> "<answer>"` and in `shared.md`. Never hold the other parts for an answer: only the sets that depend on it wait.
+Only questions about goals, design principles or architecture go to the developer. Ask each on the board and in chat at once: `tools/track ask decide-<part> "<question>" --option "<A>" --option "<B>" --recommend "<A>" --blocking --for developer`. Record the answer with `tools/track answer <qid> "<answer>"` and in `shared.md`. Never hold the other parts for an answer: only the sets that depend on it wait.
 
 ## Step 6: consistency pass
 

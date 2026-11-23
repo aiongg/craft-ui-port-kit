@@ -38,7 +38,7 @@ Each phase has one runbook. Read it in full when the phase starts, and follow it
 | 3 | Contract stubs | `process/04-contract-stubs.md` | `p3-contract-stubs-stage` | `cl check`; `scip/scipdb.py` |
 | 4 | Plan check and decisions | `process/05-plancheck-decide.md` | `p4-*` | `run-batch --plancheck`, `port-set collect`, `port-set remap`, `port-set audit` |
 | 5 | Write | `process/06-write.md` | (port-set builds its own) | `run-area`, `run-batch`, `port-set`, `racheck.py` |
-| 6 | Review, combine, compile | `process/07-review-combine-compile.md` | `p6-*` | `fix-batch`, `combine-area`, `racheck-gate`, `gate-classify.py`, `compile-gate`, `split-errors.py` |
+| 6 | Review, combine, compile | `process/07-review-combine-compile.md` | `p6-*`, `p-rulings` | `fix-batch`, `combine-area`, `racheck-gate`, `gate-classify.py`, `compile-gate`, `split-errors.py` |
 | 7 | Tests and red rounds | `process/08-tests-and-red-rounds.md` | `p7-*` | `test-run`, `compare-runs.py`, `split-failures.py`, `diag-cut.py` |
 | 8 | Look and behaviour | `process/09-look-and-behaviour.md` | `p8-task-brief` | `look` |
 | 9 | Land | `process/10-land.md` | `p9-production-merge` | `land/scan-range.py`, `land/land-framework.sh`, `land/land-app.sh`, `land/pin-framework.py` |
@@ -67,8 +67,8 @@ The dashboard is the developer's view of the port. Keep it current mechanically,
 - **In phase 0, before any agent starts,** ask the developer how they want to view the page (their own server or tunnel pointed at `track.out_dir`, the file opened directly, `track serve`, or no page with `track show` in a terminal) and record the answer as `track.how_served` (`prompts/lead.md`). With no developer to ask (an unattended start), record the terminal option: `init-workspace --how-served "terminal only (track show, track alerts)"`.
 - **Before launching an agent, put its task on the board** (`track import sheets`, `track import tracks FILE`, or `track status TASK todo`) and give the agent that task id.
 - **At each phase change:** `track phase N "<name>"`.
-- **Every question for the developer goes on the board and in chat:** `track ask TASK "..." --for developer --option A --option B`, and the same question in chat, in full, with your recommendation. Record every answer with `track answer QID "..."` and in `STATE.md` "Developer answers", in the same step, wherever it came from.
-- **Run `track alerts` in your monitor loop** while agents run, and act on every stale, blocked and question line.
+- **Every question for the developer goes on the board and in chat:** `track ask TASK "..." --for developer --blocking --option A --option B --recommend A`, and the same question in chat, in full, with your recommendation. Record every answer with `track answer QID "..."` and in `STATE.md` "Developer answers", in the same step, wherever it came from.
+- **Keep `track watch` running as a background task** while agents run. It exits with a digest when a blocking question, an answer, or a stale, blocked or failed task appears: act on every line, then start it again. Questions that proceed on their recommendation wait for the batch's rulings (`prompts/p-rulings.md`).
 - **Record merges, landings and decisions** with `track event merge|landing|decision "..." --task ID`.
 - **`track pause` before a shared-branch move** that agents must not start steps across, `track resume` after it.
 - **Every brief you write includes the agent's `track` calls** (`rules/agent-common.md`, "Tracking") and its task id.

@@ -79,8 +79,8 @@ The dashboard (`tools/track.md`) shows every task's state. Agents keep it curren
 **The stale rule.** A task is stale when it is `running` or in `review` and no event has named it for `track.stale_min` minutes (default 20). Any event that names the task counts, tool events included, so a writer whose `port-set` calls keep posting is not stale. A stale task shows red on the page and as a line in `track alerts`.
 
 - An agent that starts a step it expects to outlast the limit (a full build, a long run) says so in the step's note: `track step TASK compile "cl test all, about 15 min"`. Shell commands it runs through `track run KIND --task TASK -- CMD` post an event when they end.
-- The lead runs `track alerts` in its monitor loop. On a stale line, it reads the agent's output first, then resumes the agent or stops it and starts a fresh one with a corrected brief.
-- A question shows in `track alerts` at the next poll. The lead never relies on the stale timer to notice a question.
+- The lead keeps `track watch` running as a background task and starts it again after each exit (`tools/track.md`, "For the lead and the developer"). On a stale line, it reads the agent's output first, then resumes the agent or stops it and starts a fresh one with a corrected brief.
+- A blocking question wakes `track watch` at its next poll. Questions that proceed on their recommendation wait for the batch's rulings. The lead never relies on the stale timer to notice a question.
 
 ## Resuming agents
 
@@ -101,7 +101,7 @@ A lead session's context grows with every turn, and every turn re-reads all of i
 
 1. Write the current state into `STATE.md`: phase, step, next action, running agents with their task ids, open questions, and pointers to reports. Pointers, not copies of earlier hand-offs.
 2. Run `track md`, so STATUS.md on the port branch matches the board.
-3. Stop the monitor loop.
-4. Start the next session with the kit's skill. A session that starts without context reads `STATE.md` and `track show` before anything else, then restarts the monitor loop.
+3. Stop `track watch`.
+4. Start the next session with the kit's skill. A session that starts without context reads `STATE.md` and `track show` before anything else, then starts `track watch` again.
 
 Background tasks belong to the session that started them. Hand off when none is running, or record each one in `STATE.md` with its output file, so the next session can find its result. Tasks on the board show their last state either way (`track show`).

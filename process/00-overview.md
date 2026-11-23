@@ -71,7 +71,7 @@ A port has hundreds of agent jobs. The dashboard shows the whole port on one loc
 
 - Kit tools post their own events: every long command (gates, test runs, combines, `port-set`, `swarm.py`, landing) posts one event when it ends, with its duration, log and key numbers. `port-set` moves a set's task through its states, `swarm.py` creates one task per job, and `test-run` posts each round's counts.
 - Agents report through `tools/track`: state changes, blockers, questions, and their tool-call count when they hand back.
-- The lead creates a task on the board before it launches an agent, records each phase change, and watches `track alerts`.
+- The lead creates a task on the board before it launches an agent, records each phase change, and keeps `track watch` running.
 
 The calls agents and the lead use (`tools/track.md` has the full reference):
 
@@ -79,12 +79,12 @@ The calls agents and the lead use (`tools/track.md` has the full reference):
 |---|---|
 | `track step TASK STEP [NOTE]` | At the start of each step of a task (`plan`, `write`, `compile`, `test`, `fix`, `merge`, or the step a prompt names) |
 | `track status TASK STATE [NOTE] [--on WHAT] [--calls N]` | On every state change; `--on` names what a blocked or waiting task waits for; `--calls` on hand-back |
-| `track ask TASK "QUESTION" [--option A]... [--for developer\|lead]` | For every question; the lead also asks the developer in chat |
+| `track ask TASK "QUESTION" --recommend R [--option A]... [--blocking] [--for developer\|lead]` | For every question; only `--blocking` makes the task wait. The lead also asks the developer in chat |
 | `track answer QID "ANSWER"` | When a question is answered, wherever the answer came from |
 | `track round N --pass P --fail F [--log PATH]` | After every full test run that a tool did not record itself |
 | `track event KIND TEXT [--task ID]` | For merges, landings and decisions |
 | `track phase N [NOTE]` | At each phase change (the numbering on this page) |
-| `track alerts` | In the lead's monitor loop: stale tasks, unanswered questions, blocked tasks |
+| `track watch` | The lead's monitor, a background task: exits with a digest of new alerts (stale tasks, blocking questions, blocked tasks) or at its timeout |
 
 The dashboard is self-contained: the store lives in the workspace (`track.dir`), and `track publish` writes a static page plus `state.json` to `track.out_dir` after every write. The kit never chooses a host or exposes anything. Phase 0 asks the developer how they want to view it ([01-setup.md](01-setup.md), step 3).
 

@@ -5,8 +5,9 @@ Agents (judgement):
   track status TASK STATE [NOTE] [--on WHAT] [--link NAME=PATH|URL] [--model M] [--calls N]
         STATE: todo | running | review | waiting | blocked | failed | done
   track step TASK STEP [NOTE]        plan, write, compile, test, fix, merge; exits 3 without recording while paused
-  track ask TASK "QUESTION" [--option A]... [--for developer|lead]     prints the question id (q1, q2, ...)
-  track answer QID "ANSWER" [--by NAME]
+  track ask TASK "QUESTION" --recommend R [--option A]... [--blocking] [--for developer|lead]
+        prints the question id (q1, q2, ...); only --blocking sets the task waiting
+  track answer QID "ANSWER" [--by NAME] | track answer --file TSV [--by NAME]
   track round N --pass P --fail F [--log PATH] [--data KEY=VALUE]...
   track event KIND TEXT [--task ID] [--link NAME=URL]... [--data KEY=VALUE]...
   track phase N [NOTE] [--batch B] [--area A] [--force REASON]
@@ -14,6 +15,7 @@ Agents (judgement):
 The lead and the developer:
   track show [TASK] [--json]          text view
   track alerts [--stale-min N]        stale, blocked and failed tasks, open questions, answers waiting; exit 0 always
+  track watch [--timeout MIN] [--poll SEC]   wait for a new alert (then print the digest) or the timeout; exit 0
   track md [--out PATH]               STATUS.md for the app's port branch (default: in the app integration tree)
   track publish                       fold the events and rewrite out_dir (every write does this)
   track serve [--port P] [--host H]   serve out_dir and accept answers from the page
@@ -122,16 +124,49 @@ def cmd_step(a):
 
 def cmd_ask(a):
     T.check_task(a.task)
+    if not a.recommend.strip():
+        die("--recommend: give the option you recommend (rules/agent-common.md, \"Questions\")")
     s = store(a)
-    rec = T.new_event("ask", task=a.task, text=" ".join(a.question), options=a.option or None, **{"for": a.for_})
+    rec = T.new_event("ask", task=a.task, text=" ".join(a.question), options=a.option or None, recommend=a.recommend,
+                      blocking=a.blocking, **{"for": a.for_})
     st = s.write([rec], need_state=True)
     q = next(q for q in reversed(st["questions"]) if q.get("event") == rec["id"])
-    print(f"{q['id']} for {q['for']}: {q['text']}")
+    print(f"{q['id']} for {q['for']}: {q['text']}"
+          + (" (blocking: the task waits for the answer)" if a.blocking else f" (proceed on: {a.recommend})"))
+
+
+def answer_rows(path: str, qs: dict) -> list[tuple[str, str]]:
+    """`qid<TAB>answer[<TAB>...]` lines; blank lines, # comments and a `qid` header line are skipped."""
+    try:
+        lines = Path(path).read_text().splitlines()
+    except OSError as e:
+        die(f"--file {path}: {e.strerror or e}")
+    rows, bad = [], []
+    for n, line in enumerate(lines, 1):
+        cells = line.split("\t")
+        if not line.strip() or line.startswith("#") or cells[0].strip().lower() == "qid":
+            continue
+        qid, text = cells[0].strip(), (cells[1].strip() if len(cells) > 1 else "")
+        if qid not in qs or not text:
+            bad.append(f"{path}:{n}: " + (f"no question {qid}" if qid not in qs else "no answer"))
+        rows.append((qid, text))
+    if bad:
+        die("nothing recorded:\n  " + "\n  ".join(bad))
+    return rows
 
 
 def cmd_answer(a):
     s = store(a)
     qs = {q["id"]: q for q in s.state().get("questions", [])}
+    if a.file:
+        if a.qid or a.answer:
+            die("track answer QID ANSWER, or track answer --file TSV, not both")
+        rows = answer_rows(a.file, qs)
+        s.write([T.new_event("answer", qid=q, text=t, by=a.by) for q, t in rows], need_state=True)
+        print(f"{len(rows)} answers recorded from {a.file}")
+        return
+    if not a.qid or not a.answer:
+        die("track answer QID ANSWER, or track answer --file TSV")
     if a.qid not in qs:
         die(f"no question {a.qid} (open: {', '.join(q for q, v in qs.items() if not v.get('answer')) or 'none'})")
     s.write([T.new_event("answer", qid=a.qid, text=" ".join(a.answer), by=a.by)], need_state=True)
@@ -238,6 +273,41 @@ def cmd_alerts(a):
     for ln in lines:
         print(ln)
     sys.exit(0)
+
+
+WATCHES = "blocking questions, answers to waiting tasks, stale, blocked or failed tasks, the pause switch"
+
+
+def cmd_watch(a):
+    s = store(a)
+    seen_path = s.dir / "watch-seen.json"
+    try:
+        seen = set(json.loads(seen_path.read_text()))
+    except (OSError, ValueError, TypeError):
+        seen = set()
+    stale_min = a.stale_min if a.stale_min is not None else s.stale_min
+    until = time.time() + a.timeout * 60
+    print(f"track watch: waiting until {time.strftime('%H:%M', time.gmtime(until))} UTC ({a.timeout:g} min) for a "
+          f"new alert: {WATCHES}; polling every {a.poll:g} s", flush=True)
+    while True:
+        try:
+            items = T.alert_items(s.state(), T.now_utc(), stale_min)
+        except Exception as e:   # a store being rewritten or a bad line: report it, keep watching
+            print(f"track watch: reading the store failed: {e}", flush=True)
+            items = None
+        if items is not None:
+            new = {k for k, _, wakes in items if wakes and k not in seen}
+            if new:
+                print(f"track watch: {len(new)} new alert(s); * marks them:")
+                for k, line, _ in items:
+                    print(("* " if k in new else "  ") + line)
+                T._write_atomic(seen_path, json.dumps(sorted(k for k, _, _ in items)))
+                return
+        left = until - time.time()
+        if left <= 0:
+            print(f"track watch: nothing new in {a.timeout:g} min (waited for: {WATCHES}); start it again")
+            return
+        time.sleep(min(a.poll, left))
 
 
 def cmd_md(a):
@@ -476,10 +546,14 @@ def main(argv=None):
     c = sub.add_parser("ask", help="ask a question")
     c.add_argument("task"); c.add_argument("question", nargs="+")
     c.add_argument("--option", action="append"); c.add_argument("--for", dest="for_", choices=T.ASK_FOR, default="lead")
+    c.add_argument("--recommend", required=True, metavar="OPTION", help="the option you recommend and proceed on")
+    c.add_argument("--blocking", action="store_true",
+                   help="the question is on the always-DECIDE list: the task waits for the answer")
     c.set_defaults(fn=cmd_ask)
 
-    c = sub.add_parser("answer", help="record an answer")
-    c.add_argument("qid"); c.add_argument("answer", nargs="+"); c.add_argument("--by", default="lead")
+    c = sub.add_parser("answer", help="record an answer, or every answer of a rulings file")
+    c.add_argument("qid", nargs="?"); c.add_argument("answer", nargs="*"); c.add_argument("--by", default="lead")
+    c.add_argument("--file", metavar="TSV", help="qid<TAB>answer lines, such as the rulings file of prompts/p-rulings.md")
     c.set_defaults(fn=cmd_answer)
 
     c = sub.add_parser("round", help="record a full test run")
@@ -506,6 +580,11 @@ def main(argv=None):
     c = sub.add_parser("alerts", help="lines for a poll loop")
     c.add_argument("--stale-min", type=int)
     c.set_defaults(fn=cmd_alerts)
+
+    c = sub.add_parser("watch", help="wait for the next new alert or a timeout, as a background task")
+    c.add_argument("--timeout", type=float, default=30, metavar="MIN"); c.add_argument("--poll", type=float, default=20, metavar="SEC")
+    c.add_argument("--stale-min", type=int)
+    c.set_defaults(fn=cmd_watch)
 
     c = sub.add_parser("md", help="write STATUS.md")
     c.add_argument("--out", help="output path, or - for stdout")

@@ -39,7 +39,7 @@ You report under the board task `{{TASK}}`. These calls are rules, not suggestio
 
 - `track step {{TASK}} <step>` when each step starts. If it exits 3, the port is paused: stop and report. Your steps: `read`, `decide`, `report`.
 - `track status {{TASK}} <state> [--on WHAT]` on every state change: `running`, `review`, `waiting`, `blocked` (name the blocker with `--on`), `done`.
-- `track ask {{TASK}} "question" --option A --option B` for every question you cannot settle from the rules and the code. Then go on with the work that does not depend on the answer.
+- `track ask {{TASK}} "question" --recommend A --option A --option B` for every question that the rules, the recorded decisions and the code do not settle. Proceed on your recommendation; add `--blocking` and hold the work that depends on it only for the always-DECIDE list ({{RULES}}/agent-common.md, "Questions").
 - `track status {{TASK}} review "<one-line summary>" --calls N` as your last action, where N is the number of tool calls you used.
 
 Kit tools record their own runs. Do not report those.

@@ -120,7 +120,7 @@ expect(2, True)
 (W / "plan/sheets").mkdir(parents=True, exist_ok=True)
 (W / "plan/sheets/core-w1.md").write_text("# core-w1: scratch set\n")
 expect(3, False, "not on the board (track import sheets): core-w1")
-track("ask", "core-w1", "Which?", "--for", "developer")
+track("ask", "core-w1", "Which?", "--recommend", "A", "--for", "developer")
 out = expect(3, False, "coverage.py exit")
 for needle in ("sizing.md", "open developer questions: q1"):
     if needle not in out:
@@ -166,7 +166,7 @@ if "batch b1" not in out:
 track("run", "combine-lost", "--", "true")
 track("run", "racheck-gate", "--", "true")
 track("run", "compile-gate", "--", "false")
-track("ask", "core-w1", "Name?")
+track("ask", "core-w1", "Name?", "--recommend", "Foo")
 out = expect(7, False, "the last compile-gate failed")
 if "unanswered" not in out:
     fail(f"an open proceeding question passed the phase 6 exit:\n{out}")

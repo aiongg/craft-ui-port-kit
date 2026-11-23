@@ -92,6 +92,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from portkit import config, track  # noqa: E402
+from portkit.schema import schema_errors  # noqa: E402
 
 KIT = config.KIT_ROOT
 SETTINGS = KIT / "templates" / "claude-settings.json"
@@ -110,44 +111,6 @@ ROLE_TOOLS = {
     "sheet_fix": ["Bash(python3 -I {kit}/tools/coverage.py:*)", "Bash({kit}/tools/port-set:*)"],
 }
 TASK_IN_PROMPT = re.compile(r"\btrack\s+(?:step|status|ask)\s+([A-Za-z0-9][A-Za-z0-9._/-]{0,79})\b")
-
-
-# ---------------------------------------------------------------- schema check (the subset the kit's schemas use)
-
-def schema_errors(v, s: dict, path: str = "$", out: list | None = None) -> list[str]:
-    out = [] if out is None else out
-    if len(out) >= 20 or not isinstance(s, dict):
-        return out
-    t = s.get("type")
-    types = t if isinstance(t, list) else ([t] if t else [])
-    ok = {"object": lambda x: isinstance(x, dict), "array": lambda x: isinstance(x, list),
-          "string": lambda x: isinstance(x, str), "boolean": lambda x: isinstance(x, bool),
-          "integer": lambda x: isinstance(x, int) and not isinstance(x, bool),
-          "number": lambda x: isinstance(x, (int, float)) and not isinstance(x, bool), "null": lambda x: x is None}
-    if types and not any(ok.get(ty, lambda x: True)(v) for ty in types):
-        out.append(f"{path}: expected {'/'.join(types)}, got {type(v).__name__}")
-        return out
-    if "enum" in s and v not in s["enum"]:
-        out.append(f"{path}: {v!r} is not one of {s['enum']}")
-    if isinstance(v, dict):
-        for k in s.get("required", []):
-            if k not in v:
-                out.append(f"{path}: missing key {k!r}")
-        props = s.get("properties", {})
-        for k, sub in props.items():
-            if k in v:
-                schema_errors(v[k], sub, f"{path}.{k}", out)
-        if s.get("additionalProperties") is False:
-            for k in v:
-                if k not in props:
-                    out.append(f"{path}: unexpected key {k!r}")
-    if isinstance(v, list):
-        if len(v) < s.get("minItems", 0):
-            out.append(f"{path}: fewer than {s['minItems']} items")
-        if isinstance(s.get("items"), dict):
-            for i, x in enumerate(v):
-                schema_errors(x, s["items"], f"{path}[{i}]", out)
-    return out
 
 
 def json_from_text(text: str):

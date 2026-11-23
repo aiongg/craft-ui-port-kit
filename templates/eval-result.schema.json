@@ -1,0 +1,54 @@
+{
+  "title": "Plan evaluation result",
+  "description": "What a phase 2 evaluator returns and writes to <plan>/eval-<area>.json (first evaluation) or eval-<area>-r<round>.json (re-evaluations), beside its report eval-<area>[-r<round>].md (process/03-plan.md, steps 4 and 6). tools/swarm.py checks the returned object, and tools/plan-collate.py checks each must-fix item of the file, with this schema. Each must-fix item is one change to one file of the plan, addressed like a request between parts.",
+  "type": "object",
+  "required": ["error_rate", "checked", "by_kind", "must_fix"],
+  "properties": {
+    "error_rate": {
+      "type": "number",
+      "description": "Items that are `needs change` or `wrong`, over items checked: a fraction between 0 and 1."
+    },
+    "checked": {
+      "type": "integer",
+      "description": "Items checked in all."
+    },
+    "by_kind": {
+      "type": "object",
+      "description": "Error rate per kind of item checked, as fractions: contract, file, reader, verdict, rule."
+    },
+    "must_fix": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["to", "path", "kind", "what", "evidence"],
+        "additionalProperties": false,
+        "properties": {
+          "to": {
+            "type": "string",
+            "pattern": "^([a-z][a-z0-9-]*-w[0-9]+[a-z]?|contract [a-z]{2}\\.[A-Z]+[0-9]+[a-z]?|unowned)$",
+            "description": "Who changes the plan: the set id whose sheet changes, `contract <id>` for a contract row, or `unowned` for a file no set owns."
+          },
+          "path": {
+            "type": "string",
+            "description": "The file of the code the item is about, relative to its repo; empty for a contract row with no file."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["contract", "file", "reader", "verdict", "rule"],
+            "description": "The kind of item that is wrong: a contract row, a file action, a reader row, a test verdict, a rule break."
+          },
+          "what": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The change to make to the plan, in one or two sentences."
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 1,
+            "description": "path:line at the plan base (or a grep command and its result) that shows the item is wrong."
+          }
+        }
+      }
+    }
+  }
+}

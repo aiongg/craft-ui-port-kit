@@ -45,6 +45,8 @@ Each phase has one runbook. Read it in full when the phase starts, and follow it
 
 Phases 5 to 7 repeat per build batch: the pilot, then the framework-side sets as one batch (two above about 60 sets), then the app sets.
 
+`port.toml` decides how many agents run at once (`pipeline.parallel`) and which model each step uses (`[models]`). A note in your own memory never overrides it: change the key, or pass the number on the command line and say why in `STATE.md`. `swarm.py`, `run-batch` and `run-area` print their effective parallelism and models when they start; check that line against what you meant to run.
+
 Read these when the situation comes up, not up front:
 
 | When | Read |

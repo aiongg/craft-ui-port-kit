@@ -50,5 +50,8 @@ one() {
 export -f one wait_for_quota
 
 mkdir -p "$sets"
+mkey=models.write; [ $mode = plancheck ] && mkey=models.plancheck
+# The effective parallelism and model, stated once at the start: port.toml decides them, nothing else.
+echo "$(date -u +%H:%M) run-batch $mode: $(sed '/^[[:space:]]*$/d' "$list" | wc -l | tr -d ' ') sets, $n at a time ($([ -n "${2:-}" ] && echo "command line; pipeline.parallel is $(cfgr pipeline.parallel)" || echo pipeline.parallel)), model $model ($([ -n "${3:-}" ] && echo "command line; $mkey is $(cfgr $mkey)" || echo $mkey))" | tee -a "$log"
 sed '/^[[:space:]]*$/d' "$list" | xargs -P "$n" -I{} bash -c 'one {}'
 echo "$(date -u +%H:%M) batch done" | tee -a "$log"

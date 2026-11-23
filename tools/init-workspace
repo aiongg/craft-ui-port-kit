@@ -19,7 +19,8 @@ or STATE.md (unless --force), creates only what is missing, and repeats the chec
   5. Prerequisites: Python 3.11+, git (both checkouts must answer `git rev-list -1 HEAD` and
      `git cat-file -e HEAD^{tree}`; a failure means a damaged or shallow clone), a Rust toolchain (cargo), rust-analyzer, the claude CLI, gh, git-filter-repo (landing), a git commit identity in the app checkout, node (only for
      workflow scripts), systemd-run (only when build.memory_cap uses tools/capped), the framework's cl
-     (build.cl), and the required config keys.
+     (build.cl), and the required config keys. It warns when the workspace or a checkout is on a network
+     filesystem, or when the builds run over ssh: the lead runs on the machine that holds the trees.
   6. The dashboard: how the developer wants to view the page (tools/track.md, "Viewing the page"). --how-served
      TEXT records the answer in port.toml as track.how_served. Without it, on a terminal, it asks; otherwise it
      prints the question for the lead to ask the developer, then run again with --how-served. For an unattended
@@ -148,6 +149,47 @@ def repo_problems(cfg: config.Config) -> list[str]:
     return bad
 
 
+NETWORK_FS = {"nfs", "nfs4", "cifs", "smb3", "smbfs", "sshfs", "fuse.sshfs", "fuse.rclone", "afpfs", "webdav",
+              "davfs", "9p", "macfuse", "osxfuse", "fuse.osxfuse"}
+
+
+def fs_type(path: Path) -> str | None:
+    """The filesystem type of the mount holding path: /proc/self/mountinfo on Linux, `mount` elsewhere."""
+    p, best, kind = str(path.resolve()), "", None
+    info = Path("/proc/self/mountinfo")
+    if info.is_file():
+        rows = []
+        for line in info.read_text().splitlines():
+            left, _, right = line.partition(" - ")
+            f = left.split()
+            if len(f) > 4 and right:
+                rows.append((f[4].replace("\\040", " "), right.split()[0]))
+    else:
+        r = subprocess.run(["mount"], capture_output=True, text=True)
+        rows = [(m.group(1), m.group(2)) for m in re.finditer(r" on (.+?) \(([^,)]+)", r.stdout)]
+    for mnt, t in rows:
+        if (p == mnt or p.startswith(mnt.rstrip("/") + "/")) and len(mnt) >= len(best):
+            best, kind = mnt, t
+    return kind
+
+
+def remote_trees(cfg: config.Config) -> list[str]:
+    """The lead, the trees and the builds belong on one machine (process/01-setup.md, step 1)."""
+    out = []
+    for key in ("work.dir", "framework.checkout", "app.checkout"):
+        d = cfg.get(key)
+        if d and Path(d).exists():
+            t = fs_type(Path(d))
+            if t in NETWORK_FS:
+                out.append(f"{key} ({d}) is on a network filesystem ({t}): run the lead and the builds on the machine "
+                           "that holds the trees (process/01-setup.md, step 1)")
+    for key in ("build.launcher", "build.runner"):
+        v = (cfg.get(key) or "").strip()
+        if v.split()[:1] == ["ssh"]:
+            out.append(f"{key} runs over ssh: run the lead on the build machine instead (process/01-setup.md, step 1)")
+    return out
+
+
 def ask_how_served(cfg: config.Config) -> str | None:
     out = cfg.get("track.out_dir")
     print(f"\nHow do you want to view the progress dashboard? The page is written to {out}.")
@@ -257,6 +299,8 @@ def main(argv=None) -> int:
         print("found: " + ", ".join(ok))
         for m in missing:
             print(f"missing: {m}")
+        for w in remote_trees(cfg):
+            print(f"warning: {w}")
         unset = [k.path for k in config.KEYS if k.required and not cfg.get(k.path)]
         for k in unset:
             print(f"set in port.toml: {k} ({config.BY_PATH[k].doc})")

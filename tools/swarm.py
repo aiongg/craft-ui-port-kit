@@ -65,6 +65,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import Counter
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -586,6 +587,7 @@ def main(argv=None) -> int:
         return 2
     if a.config:
         os.environ[config.ENV_CONFIG] = str(Path(a.config).resolve())   # the dashboard store follows it
+    par_src = (f"--parallel; pipeline.parallel is {cfg.get('pipeline.parallel')}" if a.parallel else "pipeline.parallel")
     a.parallel = a.parallel or int(cfg.get("pipeline.parallel"))
     a.max_turns = a.max_turns or int(cfg.get("pipeline.job_max_turns"))
     src = Path(a.source)
@@ -617,12 +619,16 @@ def main(argv=None) -> int:
 
     code = 0
     with track.recorded("swarm") as rec:
-        sw.say(f"swarm {label}: {a.parallel} at a time, run dir {run_dir}{' (dry run)' if a.dry_run else ''}")
+        # The effective parallelism and models, stated once at the start: port.toml decides them, nothing else.
+        sw.say(f"swarm {label}: {a.parallel} at a time ({par_src}), run dir {run_dir}{' (dry run)' if a.dry_run else ''}"
+               + (f"; models per agent() call from [models], default {cfg.get('models.default')}" if is_workflow else ""))
         try:
             if is_workflow:
                 outcome = run_workflow(sw, src.resolve(), Path(a.args).resolve(), name)
             else:
                 jobs = load_jobs(cfg, src)
+                models = Counter(j.model for j in jobs).most_common()
+                sw.say(f"{len(jobs)} jobs; models: " + ", ".join(f"{n} {m}" for m, n in models))
                 futs = {j.task: sw.submit(j) for j in jobs}
                 outcome = {"op": "return", "value": {t: f.result() for t, f in futs.items()}}
         except KeyboardInterrupt:

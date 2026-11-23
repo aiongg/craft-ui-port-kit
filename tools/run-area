@@ -78,6 +78,10 @@ one() {
 export -f one
 
 mkdir -p "$sets"
+par=$(cfgr pipeline.parallel)
+count() { sed '/^[[:space:]]*$/d' "$1" | wc -l | tr -d ' '; }
+# The effective parallelism and models, stated once at the start: port.toml decides them, nothing else.
+echo "$(date -u +%H:%M) run-area $name: $(count "$shared") sets with $m_shared (models.write_shared), $(count "$default") with $m_default (models.write); $n at a time ($([ -n "${4:-}" ] && echo "command line; pipeline.parallel is $par" || echo pipeline.parallel))" | tee -a "$log"
 { sed "/^[[:space:]]*\$/d; s/\$/ $m_shared/" "$shared"; sed "/^[[:space:]]*\$/d; s/\$/ $m_default/" "$default"; } |
   xargs -P "$n" -L1 bash -c 'grep -q "^[0-9:]* $0 (" "$log" 2>/dev/null && exit 0; mkdir -p "$sets/$0"; one "$0" "$1" | tee -a "$log"'
 echo "$(date -u +%H:%M) area $name done" | tee -a "$log"

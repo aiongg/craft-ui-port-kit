@@ -15,6 +15,8 @@ Steps 7, 8 and 9 take minutes to tens of minutes each. Start each as a backgroun
 
 `tools/README.md` lists them: Python 3.11 or newer, git, a Rust toolchain, rust-analyzer, the claude CLI, Node 18 or newer (`swarm.py` runs the phase 1 and 2 workflow scripts under it), and gh and git-filter-repo for landing. The framework checkout must contain `tools/cl` (configured as `build.cl`). Both clones must be whole: `init-workspace` checks that `git rev-list -1 HEAD` and `git cat-file -e HEAD^{tree}` work in each and reports a damaged or shallow clone.
 
+**Where the lead runs.** Run the lead session on the machine that holds the workspace, both checkouts and the build target dirs: the machine that builds. Every tool call, build and agent then runs on local disk, with no network filesystem and no ssh between the lead and its trees. When you work from another computer, connect to that machine over SSH and start the lead there inside tmux or screen, so a dropped connection does not end the session. `init-workspace` warns when the workspace or a checkout is on a network filesystem, or when `build.launcher` or `build.runner` runs over ssh.
+
 ## 2. Create the workspace
 
 ```sh

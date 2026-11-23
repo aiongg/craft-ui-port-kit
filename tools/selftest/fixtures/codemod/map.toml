@@ -1,0 +1,10 @@
+[[argument]]
+type = "&mut Ctx"
+expr = "ctx"
+param = "ctx: &mut Ctx<'_>"
+
+[fields]
+"Doc.pages" = "model.pages"
+
+[methods]
+"View.zoom" = { set = "set_zoom", mut = "zoom_mut" }

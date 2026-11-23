@@ -103,6 +103,14 @@ When the batch compiles, the same cycle formats the changed crates, runs clippy 
 
 Compile errors come in groups: one wrong signature or one missing import gives many errors in many files. Never give one error to one agent.
 
+**Codemod first.** Before any compile fixer starts, run `tools/codemod` on the batch's first compile. It fixes four mechanical classes at rustc's own spans: a missing argument, cascaded into the callers' signatures round by round (E0061), a moved field (E0609), a field that became a method (E0615) and a borrow inside a call's arguments (E0502). Every other error it lists by code. Write the map file (`<work.plan>/codemod.toml`, format in `tools/codemod --help`) from the causes the errors show: the new context parameter, the field moves, the setters. Then:
+
+```sh
+tools/codemod <batch>-codemod --gate <batch>-run-1-compile --map <work.plan>/codemod.toml --apply --rounds 20
+```
+
+It commits its edits as one commit on the integration branch. Read its `codemod.diff` and `unhandled.md`, and revert what is wrong. To try new map rows without another compile, run it with `--json <work.runs>/<batch>-codemod/check-1.json --tree fw|app` and no `--apply`: that prints the diff only. The steps below start from its `remaining.errors`.
+
 1. Group the errors by crate, then by cause (a changed signature, a moved item, a missing re-export or trait import, a type that changed). For a long list, `tools/split-errors.py <errors> <N> <prefix>` splits it into N groups of whole files, balanced by count, keeping directories together.
 2. Small slips that rustc alone reports (a borrow, a move, a missing clone) in a framework batch: fix them yourself; they take minutes.
 3. For the rest, one compile fixer per crate group, on a branch cut from the integration branch (`prompts/p6-compile-fix.md`, task `cfix-<group>`), started through `tools/swarm.py` so the cycles can resume it. Fixers work by cause, lower crates first, never touch another group's crates, and build only in the fixer mode `build` (`pipeline.fixer_mode`, [11-build-loop.md](11-build-loop.md), rule 3).

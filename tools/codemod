@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""codemod: fix whole classes of compile errors at rustc's own spans, before any compile fixer starts.
+
+usage: codemod LABEL (--gate COMPILE-LABEL | --fw CRATE... | --app | --json FILE --tree fw|app|PATH)
+               [--map FILE] [--only CODE,...] [--apply [--rounds N]] [--config PORT.TOML]
+
+Input is rustc's JSON diagnostics: `cl check <crate> --keep-going --message-format json` for each framework crate
+named, in the order given, in framework.integration (--fw), or `cl check all --keep-going --message-format json` in
+app.integration (--app). --gate reads that compile-gate run's summary.json and takes its failed and failed-through
+framework crates, or the app when only the app half failed. --json reads a saved stream instead and runs no cl.
+
+Recipes (each at the spans rustc gives; a site a recipe cannot fix is listed with the reason):
+  E0061  a call misses an argument: each `/* Type */` placeholder of rustc's "provide the argument" suggestion gets
+         the `expr` of the map's [[argument]] row for that type (compared without paths and lifetimes). When the
+         row has a `param` and its name is not bound in the calling fn, the param is added to that fn's parameters
+         (`position` last or first, after a self parameter), so the next round fills the fn's own callers: with
+         --apply --rounds N the whole cascade runs, one compile per level. A caller that is a trait method, `main`
+         or a test is listed. E0425 "cannot find value `<name>`" for a row's param name adds the param the same way.
+  E0609  a field moved: `no field f on type T` becomes the map's [fields] path for "T.f", else for "*.f".
+  E0615  a field became a method: a read gets rustc's `()`; `x.f = v` becomes `x.<set>(v)`, `&mut x.f` and
+         `x.f op= v` use `<mut>()`, from the map's [methods] row for "T.f" (or "*.f").
+  E0502  a borrow inside a call's arguments conflicts with the call's receiver: the argument holding it moves into
+         `let <name> = <argument>;` on its own line before the statement.
+
+Map file (TOML; E0615 reads and E0502 need none):
+  [[argument]]
+  type = "&mut Ctx"            expr = "ctx"            param = "ctx: &mut Ctx<'_>"            position = "last"
+  [fields]
+  "Doc.pages" = "model.pages"
+  [methods]
+  "View.zoom" = { set = "set_zoom", mut = "zoom_mut" }
+
+Without --apply it prints the diff and changes nothing. --apply refuses a tree with uncommitted changes, writes the
+edits, checks again, and repeats while a round still edits, up to --rounds (default 1); then it commits once, with
+the message `codemod LABEL: <n> fixed (<code> <n>, ...)`. With --json it applies one round and does not check again.
+
+Output in <work.runs>/LABEL/: `check-<round>.json` (the cl output), `codemod.diff` (every applied round, or the
+proposed edits), `unhandled.md` (the errors no recipe handled, by code with counts and each decline's reason; edits
+left by the round limit), `remaining.errors` (those errors as `file:line:col: error[CODE]: message` lines, the format
+split-errors.py takes), summary.json {"tool": "codemod", "label", "tree", "applied", "rounds" (rounds applied), "fixed": {code: n},
+"unhandled": {code: n}, "pending", "commit", "exit"}, and the last stdout line
+  codemod LABEL: <n> fixed (E0061 n, ...); <n> unhandled (E0308 n, ...)
+A fixed error is one diagnostic whose edits were applied (or proposed, without --apply); errors are counted after
+deduplication, since a crate's lib and test targets repeat them.
+
+Exit status: 0 when no error is left unhandled, 1 when some are, 2 on a usage or tool failure (cl printed no
+diagnostic and exited nonzero, a dirty tree with --apply, a bad map file).
+"""
+import argparse
+import json
+import subprocess
+import sys
+import tomllib
+from collections import Counter
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from portkit import codemod as cm
+from portkit import config, gates, track
+
+
+def fail(msg: str):
+    print(f"codemod: {msg}", file=sys.stderr)
+    sys.exit(2)
+
+
+def targets(cfg, a) -> tuple[Path, list[list[str]]]:
+    """The tree and the cl calls that produce its diagnostics."""
+    flags = ["--keep-going", "--message-format", "json"]
+    if a.gate:
+        f = cfg.path("work.runs") / a.gate / "summary.json"
+        if not f.is_file():
+            fail(f"no compile-gate summary {f}")
+        sm = json.loads(f.read_text())
+        fw = [c["crate"] for c in (sm.get("framework") or {}).get("crates", []) if c["status"] in ("failed", "failed-through")]
+        if fw:
+            return cfg.path("framework.integration"), [["check", c, *flags] for c in fw]
+        if (sm.get("app") or {}).get("status") == "failed":
+            return cfg.path("app.integration"), [["check", "all", *flags]]
+        return cfg.path("app.integration"), []
+    if a.fw:
+        return cfg.path("framework.integration"), [["check", c, *flags] for c in a.fw]
+    if a.app:
+        return cfg.path("app.integration"), [["check", "all", *flags]]
+    tree = {"fw": "framework.integration", "app": "app.integration"}.get(a.tree)
+    return (cfg.path(tree) if tree else Path(a.tree)), []
+
+
+def check(cfg, tree: Path, calls: list[list[str]], out: Path) -> list[cm.Diag]:
+    out.write_bytes(b"")
+    for args in calls:
+        rc = gates.run_logged(gates.cl(cfg, args), tree, out, gates.cl_env(cfg))
+        if rc != 0 and '"reason":"compiler-message"' not in out.read_text(errors="replace").replace(" ", ""):
+            fail(f"cl {' '.join(args)} exited {rc} with no diagnostic (setup fault): {out}")
+    return cm.parse(out.read_text(errors="replace").splitlines())
+
+
+def git(tree: Path, *args: str) -> str:
+    return subprocess.run(["git", "-C", str(tree), *args], capture_output=True, text=True, check=True).stdout
+
+
+def counts_text(c: Counter) -> str:
+    """` (E0061 3, E0609 1)`, or nothing for no counts."""
+    text = ", ".join(f"{k} {n}" for k, n in sorted(c.items(), key=lambda kv: (-kv[1], kv[0])))
+    return f" ({text})" if text else ""
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("label")
+    src = ap.add_mutually_exclusive_group(required=True)
+    src.add_argument("--gate", metavar="COMPILE-LABEL")
+    src.add_argument("--fw", nargs="+", metavar="CRATE")
+    src.add_argument("--app", action="store_true")
+    src.add_argument("--json", type=Path)
+    ap.add_argument("--tree")
+    ap.add_argument("--map", type=Path)
+    ap.add_argument("--only")
+    ap.add_argument("--apply", action="store_true")
+    ap.add_argument("--rounds", type=int, default=1)
+    ap.add_argument("--config")
+    a = ap.parse_args()
+    if a.json and not a.tree:
+        fail("--json needs --tree fw|app|PATH")
+    cfg = config.load(a.config)
+    rd = gates.run_dir(cfg, a.label)
+    try:
+        mapping = cm.Mapping.load(tomllib.loads(a.map.read_text()) if a.map else {})
+    except (OSError, ValueError, tomllib.TOMLDecodeError) as e:
+        fail(f"map file: {e}")
+    only = {c.strip() for c in a.only.split(",")} if a.only else None
+    tree, calls = targets(cfg, a)
+    if a.apply and git(tree, "status", "--porcelain", "--untracked-files=no").strip():
+        fail(f"{tree} has uncommitted changes; --apply commits its edits alone")
+
+    with track.recorded("codemod") as rec:
+        def load(r: int) -> list[cm.Diag]:
+            if a.json:
+                return cm.parse(a.json.read_text(errors="replace").splitlines())
+            return check(cfg, tree, calls, rd / f"check-{r}.json")
+
+        r, diags = 1, load(1) if (calls or a.json) else []
+        total, diffs, pending, changed, applied = Counter(), [], [], set(), 0
+        while True:
+            plan = cm.Planner(tree, mapping).plan(diags, only)
+            if not a.apply:
+                diffs.append(cm.diff(cm.apply(tree, plan.edits)))
+                total = plan.counts()
+                break
+            if not plan.edits:
+                break
+            if r > a.rounds:
+                pending = [d for d, _ in plan.handled]
+                break
+            changes = cm.apply(tree, plan.edits)
+            for f, (_, new) in changes.items():
+                (tree / f).write_bytes(new.encode("utf-8"))
+            changed |= changes.keys()
+            diffs.append(cm.diff(changes))
+            total += plan.counts()
+            applied += 1
+            print(f"round {r}: {len(plan.handled)} fixed{counts_text(plan.counts())}, {len(plan.edits)} edits", flush=True)
+            if a.json:
+                break
+            r += 1
+            diags = load(r)
+
+        commit = None
+        if a.apply and changed:
+            msg = f"codemod {a.label}: {sum(total.values())} fixed{counts_text(total)}"
+            git(tree, "add", "--", *sorted(changed))
+            subprocess.run(["git", "-C", str(tree), "commit", "-q", "-m", msg], check=True)
+            commit = git(tree, "rev-parse", "HEAD").strip()
+        text = "".join(diffs)
+        (rd / "codemod.diff").write_text(text)
+        if not a.apply:
+            sys.stdout.write(text)
+        left = plan.unhandled + [(d, "edit not applied: round limit") for d in pending]
+        (rd / "unhandled.md").write_text(cm.unhandled_report(plan.unhandled, pending))
+        (rd / "remaining.errors").write_text("".join(d.error_line() + "\n" for d, _ in left))
+        by_code = Counter(d.code for d, _ in left)
+        code = 1 if left else 0
+        gates.write_summary(rd, {"tool": "codemod", "label": a.label, "tree": str(tree), "applied": a.apply,
+                                 "rounds": applied, "fixed": dict(total), "unhandled": dict(by_code),
+                                 "pending": len(pending), "commit": commit, "exit": code})
+        for d, why in left[:20]:
+            print(f"  unhandled {d.code} {d.where()}" + (f": {why}" if why else ""))
+        line = (f"codemod {a.label}: {sum(total.values())} fixed{counts_text(total)}; "
+                f"{len(left)} unhandled{counts_text(by_code)}")
+        print(line)
+        rec.result(line, log=str(rd), data={"label": a.label, "fixed": sum(total.values()), "unhandled": len(left)},
+                   ok=True)
+    sys.exit(code)
+
+
+if __name__ == "__main__":
+    main()

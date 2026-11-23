@@ -9,7 +9,9 @@ The packages come from the lock file as committed at HEAD in the app tree (the w
 not tracked; a lock passed by path is read as given): a local build rewrites the working lock with path sources, so
 only the committed lock still names the framework's git sources, and a rerun computes the same patch.
 
-The app's own lines stay where they are. The tool only adds overrides:
+The app's own lines stay where they are; crates named in framework.keep_app_patches get no override, so the app's
+own [patch.crates-io] entry for them stays active.
+ The tool only adds overrides:
   - inside the app's [patch.crates-io] table, a marked region (`# BEGIN/END port-kit framework overrides`) with the
     framework's own [patch.crates-io] entries (paths made absolute) and a path patch for every app entry that names a
     framework URL; an app entry whose key an override replaces is commented out as `# port-kit overridden: <line>`;
@@ -135,11 +137,15 @@ def main():
             if k in dirs:
                 overrides[k] = inline({"path": str(dirs[k])})
 
+    keep = set(cfg.get("framework.keep_app_patches") or [])
+    for k in keep:
+        overrides.pop(k, None)   # the app's own entry for this crate stays active
+
     lock = tomllib.loads(Path(args[1]).read_text()) if args else gates.committed_lock(app)
     per_url = {u: sorted({p["name"] for p in lock.get("package", []) if p.get("source", "").startswith("git+" + u)}) for u in URLS}
     needed = sorted({n for ns in per_url.values() for n in ns})
     missing = [n for n in needed if n not in dirs]
-    tables = {u: [f'{n} = {{ path = "{dirs[n]}" }}' for n in ns if n in dirs and n not in overrides] for u, ns in per_url.items()}
+    tables = {u: [f'{n} = {{ path = "{dirs[n]}" }}' for n in ns if n in dirs and n not in overrides and n not in keep] for u, ns in per_url.items()}
 
     if cargo_config:
         added = ["# port-kit framework patch: written by tools/patch-framework --cargo-config", "[patch.crates-io]",

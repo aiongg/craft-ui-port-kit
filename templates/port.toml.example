@@ -24,6 +24,7 @@ checkout = "../craft-libs"                    # REQUIRED: local framework clone
 # facade = "craft"
 # facade_manifest = "crates/craft/Cargo.toml"
 # patch_urls = ["{framework.repo}"]           # add your fork's URL when the app's manifests name it
+# keep_app_patches = []                       # app [patch.crates-io] entries patch-framework must not override
 # lints_file = "{kit}/rules/lints.toml"       # [[lints]] tables below add to it
 
 [app]

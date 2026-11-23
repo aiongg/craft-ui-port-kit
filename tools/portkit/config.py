@@ -136,6 +136,10 @@ KEYS: list[Key] = [
     K("framework.patch_urls", ["{framework.repo}"], "list", "patch-framework land/pin-framework.py test-run",
       "Framework URLs the app's Cargo manifests may name (upstream and forks); patch-framework and pin-framework "
       "rewrite each."),
+    K("framework.keep_app_patches", [], "list", "patch-framework",
+      "Crates whose `[patch.crates-io]` entry in the app's manifest stays active (a vendored copy the app maintains): "
+      "patch-framework adds no override for them, even when the framework patches the same crate.",
+      default_doc="`[]`"),
 
     # ---- app: the app being ported
     K("app.name", None, "str", "port-set prompts", "Display name of the app.", required=True, placeholder="APP"),

@@ -69,3 +69,19 @@ def case_cargo_config_leaves_the_manifest(s):
     text = cfg.read_text()
     check(f'craft-x = {{ path = "{s.root}/fw/crates/x" }}' in text
           and f'[patch."{URL}"]\ncraft-ui = {{ path = "{s.root}/fw/crates/ui" }}' in text, f"config tables: {text}", p)
+
+
+def case_keep_app_patches(s):
+    app = setup(s)
+    manifest = MANIFEST.replace("foo = ", 'egui = { path = "vendor/egui" }\nfoo = ')
+    (app / "Cargo.toml").write_text(manifest)
+    s.run("patch-framework")
+    text = (app / "Cargo.toml").read_text()
+    check("# port-kit overridden: egui = " in text, "without the key the app's egui entry is replaced", s.last)
+    (app / "Cargo.toml").write_text(manifest)
+    s.config({"framework.patch_urls": [URL], "framework.integration": str(s.root / "fw"),
+              "framework.keep_app_patches": ["egui"]})
+    p = s.run("patch-framework")
+    text = (app / "Cargo.toml").read_text()
+    check(p.returncode == 0 and '\negui = { path = "vendor/egui" }\n' in text and "overridden: egui" not in text
+          and f'egui = {{ path = "{s.root}/fw/vendor/egui" }}' not in text, f"the app's egui entry stays active:\n{text}", p)

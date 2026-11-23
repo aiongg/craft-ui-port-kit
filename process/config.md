@@ -117,6 +117,7 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `facade_manifest` | str | `crates/craft/Cargo.toml` | port-set, racheck.py | Facade manifest, relative to the framework tree; its dependencies give the member crates. Env: `PORT_KIT_FRAMEWORK_FACADE_MANIFEST`. |
 | `lints_file` | path | `{kit}/rules/lints.toml` | port-set | Framework lints, labelled by the framework revision they were written for. `[[lints]]` tables in port.toml add to them. Env: `PORT_KIT_FRAMEWORK_LINTS_FILE`. |
 | `patch_urls` | list | `["{framework.repo}"]` | patch-framework, land/pin-framework.py, test-run | Framework URLs the app's Cargo manifests may name (upstream and forks); patch-framework and pin-framework rewrite each. Env: `PORT_KIT_FRAMEWORK_PATCH_URLS`. |
+| `keep_app_patches` | list | `[]` | patch-framework | Crates whose `[patch.crates-io]` entry in the app's manifest stays active (a vendored copy the app maintains): patch-framework adds no override for them, even when the framework patches the same crate. Env: `PORT_KIT_FRAMEWORK_KEEP_APP_PATCHES`. |
 
 ### [app]
 

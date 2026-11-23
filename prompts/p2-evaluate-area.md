@@ -27,17 +27,20 @@ Write {{PLAN}}/eval-{{AREA}}.md:
 1. A table of every item checked: item, verdict (`right`, `needs change`, `wrong`), one-line reason.
 2. The must-fix list for the plan: one row per change, addressed like a request between parts.
 3. The error rate: items that are `needs change` or `wrong`, over items checked, overall and by kind (contract, file, reader, verdict, rule).
+4. The error classes: group the `needs change` and `wrong` items by cause. A class is a cause that would recur in items you did not sample (reader lists that miss tests, actions copied across a row, a settled decision that never arrived). For each class: a short name, its kind, how many sampled items it covers, what the error looks like, and how to find every instance across all sheets and contract parts (a `git grep`, or the check to run on each row). The fix round sweeps each class over the whole plan, so a class with a precise `find` fixes far more than its must-fix items.
 
 Write the same result as JSON to {{PLAN}}/eval-{{AREA}}.json, and return that object. Its format is {{KIT}}/templates/eval-result.schema.json; the batch runner rejects a result that does not match it, and `tools/plan-collate.py` rejects each must-fix item that does not:
 
 ```json
 {"error_rate": 0.12, "checked": 75, "by_kind": {"contract": 0.1, "file": 0.15, "reader": 0.2, "verdict": 0.05, "rule": 0.0},
+ "classes": [{"name": "<short name>", "kind": "contract | file | reader | verdict | rule", "count": 4,
+              "pattern": "<what the error looks like>", "find": "<grep or per-row check that finds every instance>"}],
  "must_fix": [{"to": "<set id> | contract <id> | unowned", "path": "<file, or empty for a contract row>",
                "kind": "contract | file | reader | verdict | rule", "what": "<the change to the plan>",
                "evidence": "<path:line at the plan base>"}]}
 ```
 
-Address each must-fix item to whoever changes the plan: the set whose sheet changes (find it in {{OWNERSHIP}} or the sheets), `contract <id>` for a contract row, `unowned` for a file no set owns. The plan passes when the error rate is at most `plan.max_error_rate` (see {{KIT}}/process/03-plan.md).
+Address each must-fix item to whoever changes the plan: the set whose sheet changes (find it in {{OWNERSHIP}} or the sheets), `contract <id>` for a contract row, `unowned` for a file no set owns. The error rate is reported, not a pass mark: the plan gets at most two evaluations, and an area above `plan.max_error_rate` after the second goes to the lead's own read of its classes ({{KIT}}/process/03-plan.md, steps 4 and 8). Judge every item on its own; the rate does not change what you write.
 
 ## Tracking
 

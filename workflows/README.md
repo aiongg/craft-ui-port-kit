@@ -31,7 +31,7 @@ All five scripts get the common arguments from `render-prompt`: `workflow`, `sta
 | `phase2-final.js` | `stage`: `all` (default) or `evaluate` (the evaluations alone). |
 | `phase2-fix.js` | `fixDir` (`<plan>/fix`); `contract`: one job per contract part; `sheets`: the sets of the ownership file, four to a job; `coverage`: one job per gap list of `eval-coverage.md`. When `<parts>/NN.md` do not exist yet, the builder cuts `<plan>/contract.md` at its `### <crate>` headings into parts of about 120 rows and writes them. |
 | `phase2-final.js` (also) | `evalSchema`: `templates/eval-result.schema.json`, what each area evaluation returns. |
-| `phase2-reconcile.js` | `--stage contract`, `sheets` or `evaluate` (required). `fixDir`; `partList` (the contract parts on disk). Stages `contract` and `sheets`: `collated`, the summary of the collation the builder runs first (`tools/plan-collate.py`: groups, routes, parts). Stage `evaluate`: `rebuild`, the summary of the rebuild the builder runs first (`tools/plan-rebuild.py`), `evalSchema`, and `round` (2 for the first re-evaluation, then the next unused number). `tools/reconcile` runs the three stages in order under swarm. |
+| `phase2-reconcile.js` | `--stage contract`, `sheets` or `evaluate` (required). `fixDir`; `partList` (the contract parts on disk). Stages `contract` and `sheets`: `collated`, the summary of the collation the builder runs first (`tools/plan-collate.py`: groups, routes, parts). Stage `evaluate`: `rebuild`, the summary of the rebuild the builder runs first (`tools/plan-rebuild.py`), `evalSchema`, `round` (always 2: the confirming evaluation) and `only` (the areas without `eval-<area>-r2.json`; the builder refuses when none is left, and while the rebuild has findings). `tools/reconcile` runs the three stages in order under swarm. |
 
 `--only ID` limits a run: chunk ids for `phase2-part`, area ids for `phase2-final` and `phase2-reconcile`, job ids for `phase2-fix`.
 
@@ -48,5 +48,6 @@ Models come from `[models]` in `port.toml`.
 
 ## Judgement the scripts leave to the lead
 
-- `phase2-final.js` returns each area's error rate and whether it is at most `plan.max_error_rate`, and the wrong-answer share against `plan.max_wrong_answers`. The lead decides what to fix, and whether to rerun the answers of the chunks concerned at one group per agent.
+- `phase2-final.js` returns each area's error rate, its error classes and whether it is above `plan.max_error_rate` (`over`, reported only: `phase2-fix.js` runs next whatever the rates), and the wrong-answer share against `plan.max_wrong_answers`. The lead decides whether to rerun the answers of the chunks concerned at one group per agent.
+- `phase2-reconcile.js` stage `evaluate` returns the same per area, the pooled rate of the run and `lead_read`: the areas above `plan.max_error_rate` with their classes. Those go to the lead's own read (process/03-plan.md, step 8); there is no third evaluation.
 - `phase2-fix.js` and `phase2-reconcile.js` return open questions as counts. The questions themselves are in the requests and log files; the lead settles them (process/03-plan.md, step 7).

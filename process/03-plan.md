@@ -5,7 +5,7 @@ Phase 2 turns the port map into a plan that writers can follow with no build and
 | | |
 |---|---|
 | Starts when | The lead accepted the maps ([02-inventory-and-map.md](02-inventory-and-map.md)). |
-| Ends when | Coverage reports 0 gaps; the re-evaluated plan error rate is at most `plan.max_error_rate`; at most `plan.max_wrong_answers` of the sampled fact answers are wrong; every open question is decided; the sizing report is written. |
+| Ends when | Coverage and `tools/plan-rebuild.py` report 0; the plan had one evaluation, one sweep per named error class and one confirming evaluation, whose pooled error rate is recorded; every area still above `plan.max_error_rate` had the lead's own read; at most `plan.max_wrong_answers` of the sampled fact answers are wrong; every open question is decided; the sizing report is written. |
 | Agents | Opus splits questions, plans chunks, merges areas, checks conflicts and evaluates (`models.questions`, `chunk_plan`, `area_merge`, `evaluate`); Haiku answers facts (`models.answers`); Sonnet fixes sheets (`models.sheet_fix`). |
 | Builds | None. Agents read the snapshots at the plan base; scripts check coverage and sizes. |
 | Runs | `workflows/phase2-part.js`, `phase2-final.js`, `phase2-fix.js`, `phase2-reconcile.js` (`workflows/README.md` gives each one's args). |
@@ -63,12 +63,14 @@ One Opus agent per area (`prompts/p2-area-merge.md`) merges the area's chunk pla
 
 **Evaluation**, by agents that wrote none of the plan:
 
-- **Per area** (Opus, `prompts/p2-evaluate-area.md`): a random sample of at least 15 contract items, 15 file plans and 15 test verdicts, each checked against the code. A contract item: does the framework already have it or something it duplicates; does the signature fit the code it extends; does it remove what it replaces. A file plan: does `git grep` find every reader; is the action right. A verdict: is it right under the testing rule. Output: `eval-<area>.md` with every checked item, the must-fix list, and the **error rate** (wrong or needs-change items over items checked).
+- **Per area** (Opus, `prompts/p2-evaluate-area.md`): a random sample of at least 15 contract items, 15 file plans and 15 test verdicts, each checked against the code. A contract item: does the framework already have it or something it duplicates; does the signature fit the code it extends; does it remove what it replaces. A file plan: does `git grep` find every reader; is the action right. A verdict: is it right under the testing rule. Output: `eval-<area>.md` with every checked item, the must-fix list, the **error rate**, and the error classes behind the wrong items (wrong or needs-change items over items checked).
 - **Answer accuracy** (Opus, `prompts/p2-answer-accuracy.md`): a random sample of Haiku answers, fixed before any answer is read, checked against the code. It reports the wrong rate for answers given one group per agent and for batched answers, and by position in the batch. Above `plan.max_wrong_answers`, the chunks concerned are answered again at one group per agent and their plans redone.
 - **Size audit** (`prompts/p2-size-audit.md`): the lines to write split into framework additions, code moved between crates (counted once), app production code, rewritten tests and new tests. A port onto framework components should mostly delete: every app set that writes more than about half of what it deletes is checked, and either the rewrite is justified or a smaller plan is named (a call-site swap, a deletion, a test deleted instead of rewritten).
 - **Coverage** (script, `tools/coverage.py`): every map section is covered by a set; every `.rs` file under `app.ui_dirs` has an action or a reason it is untouched; every `#[test]` function in those files has a verdict; no file is in two sets. It also runs two audits for the error classes that otherwise survive every evaluation round: every settled decision (`S-…`, `L-…` in `settled.md`) that names a set is cited by its id in that set's sheet or `decisions.md` (before the sheets exist: in its `ownership.md` section), and no set's text keeps an open-question marker (TBD, TODO, "open question", `??`, or an unfilled template field). Run it before the evaluators, so they confirm the plan instead of finding these.
 
-Expect the first evaluation to fail. Plans made from maps carry errors in a few repeating classes, and the fix round exists for them (`costs.md` has the measured rates).
+Expect the first evaluation to find errors. Plans made from maps carry errors in a few repeating classes, so each evaluator also names the **error classes** behind its wrong items: what the error looks like and how to find every instance outside the sample (the `classes` list of `templates/eval-result.schema.json`). The fix round sweeps each named class once over the whole plan.
+
+The plan gets at most two evaluations: this one and the confirming one of step 6. Evaluation rounds that fix the sampled items leave the classes in place: in measured ports the worst area's rate stayed flat over six and eight rounds (`costs.md`, phase 2). `plan.max_error_rate` is therefore a reported number: an area above it after the confirming evaluation goes to the lead's own read (step 8), never to a third round.
 
 ## Step 5: fix round
 
@@ -78,7 +80,7 @@ Expect the first evaluation to fail. Plans made from maps carry errors in a few 
 - **Sheets**, one per set (`work.sheets/<set>.md`), in exactly the format `port-set` parses.
 - **Coverage gaps**: each unowned file gets an owner set or a grep-backed "no edit" reason.
 
-Each job fixes the **error class** in everything it owns, not only the sampled items (`prompts/p2-fix-round.md` gives the classes to every job):
+Each job runs one sweep per error class over everything it owns, not only the sampled items: the six standing classes below (`prompts/p2-fix-round.md`) and every class the evaluators named (`render-prompt` passes them to each job). Each job logs per class how many instances it found and fixed in `fix/logs/<job>.md`. The standing classes:
 
 1. **Row-level actions copied to every file.** A group row's single action (for example `delete`) applied to each file in it. Re-derive each file's action from the chunk plan and the code.
 2. **Stale reads.** Plans that read the code at an older commit than the plan base. Re-read everything at the base.
@@ -99,8 +101,8 @@ Jobs never edit a file another job owns. What another part must change goes into
 2. **Contract and routing** (stage `contract`): each contract part applies its inbox, after checking each row against the code (a request can be wrong); routing jobs give every "unowned" path an owner set.
 3. **Inbox again**, so the sets also get the parts' Reconcile logs and the routing decisions.
 4. **Sheets** (stage `sheets`): each group of sets with inbox rows applies its inbox, then checks that every reader row of the set appears in its Files table, every `#[test]` function of each owned file has one verdict, and the header's line totals match the Files table.
-5. **Rebuild** (`tools/plan-rebuild.py`): `ownership.md`, the joined contract, coverage and sizing from the sheets, with the consistency checks it lists.
-6. **Re-evaluate** (stage `evaluate`): fresh Opus evaluators sample each area again (at least 20 contract items, file rows, reader rows and test verdicts each) and return the error rate by kind and the must-fix items (`templates/eval-result.schema.json`), also written to `eval-<area>-r<n>.json`.
+5. **Rebuild** (`tools/plan-rebuild.py`): `ownership.md`, the joined contract, coverage and sizing from the sheets, with the consistency checks it lists. It also guards the test verdicts: it keeps every sheet's Tests rows in `verdicts.tsv`, names each sheet whose rows fell since the last rebuild with the job that owns it, and restores each dropped row unless that job's log names the test with `delete` or `move`.
+6. **Confirming evaluation** (stage `evaluate`, round 2): fresh Opus evaluators sample each area again (at least 20 contract items, file rows, reader rows and test verdicts each) and return the error rate by kind, the error classes and the must-fix items (`templates/eval-result.schema.json`), also written to `eval-<area>-r2.json`. It starts only when the rebuild reports no check finding and no coverage gap: clear those first, by hand or with a rerun of stage `sheets`, so the one confirming evaluation is not spent on errors a script finds.
 
 `render-prompt --workflow-args phase2-reconcile --stage <stage>` runs the script of steps 1, 3 and 5 before it builds the stage's args. Under swarm, one command runs all of it as a background task:
 
@@ -110,17 +112,19 @@ tools/reconcile                     # contract, sheets, evaluate; --only <area> 
 
 Under the Workflow tool, run the stages one by one: for each of `contract`, `sheets` and `evaluate`, `tools/render-prompt --workflow-args phase2-reconcile --stage <stage> --out <args file>`, then the workflow with that file.
 
-If an area is still above `plan.max_error_rate`, run the reconcile again (`tools/reconcile --only <area>`): the collation routes the area's must-fix items into the inboxes, and every job lists its inbox as an input, so under swarm only the jobs whose inbox changed run again.
+Record the confirming evaluation's pooled error rate (wrong items over checked items, all areas together) on the dashboard. `tools/reconcile` posts it as a `plan-eval` event; under the Workflow tool, post it yourself: `tools/track event plan-eval "pooled <rate>; over plan.max_error_rate: <areas>" --data pooled=<rate>`. The stage's result lists the areas above `plan.max_error_rate` with their classes (`lead_read`): they go to your own read in step 8. `render-prompt` refuses a third evaluation: it runs stage `evaluate` only for areas without `eval-<area>-r2.json` (an evaluator that failed), and the first evaluation (`phase2-final --stage evaluate`) only before any confirming one.
 
 ## Step 7: decide the open questions
 
 The lead decides every open question the rules, the code or production behaviour settle, and records each in `settled.md` with its reason (`L-1`, `L-2`, ...). Record a batch of decisions on the dashboard: `tools/track event decision "settled L-<from>..L-<to>"`.
 
-The developer gets only questions about goals, design principles and architecture, never layout or product detail. Ask each one with `tools/track ask plan "<question>" --option "<A>" --option "<B>" --recommend "<A>" --blocking --for developer`, and in chat at the same time; record the answer with `tools/track answer <qid> "<answer>"` wherever it came from. A decision that changes the plan goes through the same contract and sheet fix as a request.
+The developer gets only questions about goals, design principles and architecture, never layout or product detail. Ask each one with `tools/track ask plan "<question>" --option "<A>" --option "<B>" --recommend "<A>" --for developer`, and in chat at the same time, and proceed on your recommendation; add `--blocking` only for the always-DECIDE list ([rules/lead-rules.md](../rules/lead-rules.md), the rule on questions to the developer). Record the answer with `tools/track answer <qid> "<answer>"` wherever it came from. A decision that changes the plan goes through the same contract and sheet fix as a request.
 
 ## Step 8: the lead's own check
 
 Before phase 3, read the contract in full and a sample of sheets yourself: at least one framework sheet, one app sheet and the sheet with the most decisions. Check their line references and reader rows against the code. An agent's evaluation or a score is not a substitute.
+
+For every area above `plan.max_error_rate` after the confirming evaluation, also read its sheets for each class the evaluation named (`lead_read` in the stage's result, `classes` in `eval-<area>-r2.json`), fix what you find in the sheets or contract parts, and run `tools/plan-rebuild.py` again. Record each such area in `STATE.md` with its rate, its classes and what you changed.
 
 Then put the sets on the board, so phases 4 to 7 have a task per set from the start: `tools/track import sheets`.
 
@@ -130,8 +134,9 @@ Then put the sets on the board, so phases 4 to 7 have a task per set from the st
 
 ## Exit
 
-- [ ] `tools/coverage.py` reports 0 gaps, its settled-decision and open-marker audits included.
-- [ ] Every area's re-evaluated error rate is at most `plan.max_error_rate`.
+- [ ] `tools/coverage.py` reports 0 gaps, its settled-decision and open-marker audits included; the last `tools/plan-rebuild.py` run reports no check finding.
+- [ ] Every area has its confirming evaluation (`eval-<area>-r2.json`), and its pooled error rate is on the dashboard (`plan-eval`).
+- [ ] Every area above `plan.max_error_rate` had the lead's read of its classes, recorded in `STATE.md`.
 - [ ] The sampled wrong-answer rate is at most `plan.max_wrong_answers`.
 - [ ] `developer-questions.md` has no open question; `settled.md` holds every decision.
 - [ ] The lead's check is recorded in `STATE.md`; every set is on the board.

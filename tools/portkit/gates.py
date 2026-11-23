@@ -280,6 +280,14 @@ def x_coverage(ctx):
     return None if rc == 0 else f"coverage.py exit {rc}: {last}"
 
 
+def x_confirmed(ctx):
+    from .planfix import confirmed
+    missing = sorted({a["id"] for a in ctx.cfg.areas} - set(confirmed(ctx.cfg)))
+    if missing:
+        return f"no confirming evaluation (eval-<area>-r2.json, tools/reconcile): {_ids(missing)}"
+    return None if ctx.last_event("plan-eval") else "no plan-eval event since the phase began (process/03-plan.md, step 6)"
+
+
 def x_sheets_on_board(ctx):
     ids = _sheet_ids(ctx)
     if ids is None:
@@ -569,6 +577,8 @@ PHASE_EXITS: list[ExitCheck] = [
     ExitCheck(1, "Every map section has a states file", x_look_states),
     ExitCheck(1, "Production reaches every state", x_look_production),
     ExitCheck(2, "tools/coverage.py reports 0 gaps", x_coverage),
+    ExitCheck(2, "The last tools/plan-rebuild.py run reports no check finding and no coverage gap", _ok_since("plan-rebuild")),
+    ExitCheck(2, "Every area has its confirming evaluation and the pooled rate is recorded", x_confirmed),
     ExitCheck(2, "Every set is on the board", x_sheets_on_board),
     ExitCheck(2, "sizing.md exists", x_sizing),
     ExitCheck(2, "No developer question is open", x_developer_answered),

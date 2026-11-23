@@ -26,7 +26,7 @@ The lead's phase state file. The lead keeps it current at every phase change and
 |---|---|---|---|
 | 0 setup | workspace, pins, baseline test run | baseline failures recorded | <todo / running / done> |
 | 1 inventory and map | app UI dirs split into chunks | maps and index; coverage check passes | |
-| 2 plan | maps and index | evaluation under `plan.max_error_rate`; sheets and contract parts; answer accuracy under `plan.max_wrong_answers` | |
+| 2 plan | maps and index | confirming evaluation's pooled rate recorded, areas above `plan.max_error_rate` read by the lead; sheets and contract parts; answer accuracy under `plan.max_wrong_answers` | |
 | 3 contract stubs | contract parts | every stage compiles; plan errors fed back | |
 | 4 plan check and decisions | sheets, stubs | decisions written; consistency pass done; audits pass | |
 | 5 write | decisions, stubs | every set written, checked, racheck clean | |

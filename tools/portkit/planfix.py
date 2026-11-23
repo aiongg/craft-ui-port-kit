@@ -9,7 +9,15 @@ Collation reads, in <plan>/fix:
                       is a contract id
 and the must-fix items of each area's newest re-evaluation (<plan>/eval-<area>-r<n>.json, checked with
 templates/eval-result.schema.json). It writes inbox/<set>.md, inbox/contract-NN.md, inbox/route-1.md and route-2.md,
-inbox/unrouted.md (rows no inbox takes, and rejected must-fix items, with the reason) and groups.json.
+inbox/unrouted.md (rows no inbox takes, and rejected must-fix items, with the reason) and groups.json. When
+<plan>/verdicts.tsv does not exist yet, it also writes it, so the first sheets stage has a baseline.
+
+The rebuild guards the test verdicts: verdicts.tsv holds every sheet's Tests rows as of the last rebuild. A row that
+is gone since then is put back into its sheet, unless the log of the job that owns the sheet (the group of
+fix/groups.json, fix/logs/<group>.md) has a line that names the test with `delete` or `move`.
+
+It also holds the evaluation helpers render-prompt and tools/reconcile use: the error classes of the first
+evaluation, which areas have their confirming evaluation, and the pooled rate.
 """
 from __future__ import annotations
 
@@ -28,6 +36,9 @@ SET_ID = re.compile(r"\b[a-z][a-z0-9-]*-w\d+[a-z]?\b")
 PART_FILE = re.compile(r"^\d\d\.md$")
 ROW_ID = re.compile(rf"^\|\s*`?({ID})`?\s*\|")
 EVAL_ROUND = re.compile(r"^eval-(.+)-r(\d+)\.json$")
+CONFIRM_ROUND = 2       # the confirming evaluation; there is no later one (process/03-plan.md, step 6)
+VERDICTS = "verdicts.tsv"
+CLASS_KEYS = ("name", "kind", "count", "pattern", "find")
 SETS_PER_GROUP = 4
 ROUTES = ("route-1", "route-2")
 ROUTE_WORDS = ("unowned", "lead", "ownership")
@@ -240,11 +251,163 @@ def collate(cfg: config.Config) -> dict:
     c = Collation(cfg)
     if not (c.fix / "requests").is_dir() and not (c.fix / "logs").is_dir():
         raise FileNotFoundError(f"{c.fix} has no requests/ or logs/: run phase2-fix first")
+    if not (cfg.path("work.plan") / VERDICTS).is_file():
+        save_verdicts(cfg, c.sheets)
     counts = {"requests": c.requests(), "contract_logs": c.contract_logs(), "must_fix": c.must_fix()}
     c.routes()
     out = c.write()
     out["counts"] = counts
     return out
+
+
+# ---------------------------------------------------------------- evaluations
+
+def _read_json(f: Path):
+    try:
+        return json.loads(f.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def first_classes(cfg: config.Config) -> list[dict]:
+    """The error classes of every area's first evaluation (<plan>/eval-<area>.json), each with its area."""
+    out = []
+    for a in cfg.areas:
+        data = _read_json(cfg.path("work.plan") / f"eval-{a['id']}.json")
+        for c in (data or {}).get("classes") or []:
+            if isinstance(c, dict):
+                out.append({"area": a["id"], **{k: c.get(k, "") for k in CLASS_KEYS}})
+    return out
+
+
+def confirm_file(cfg: config.Config, area: str) -> Path:
+    return cfg.path("work.plan") / f"eval-{area}-r{CONFIRM_ROUND}.json"
+
+
+def confirmed(cfg: config.Config) -> list[str]:
+    """The areas that have their confirming evaluation."""
+    return [a["id"] for a in cfg.areas if confirm_file(cfg, a["id"]).is_file()]
+
+
+def pooled(cfg: config.Config) -> dict:
+    """The confirming evaluation over all areas: wrong items over checked items, the areas above
+    plan.max_error_rate with their classes, and the areas still without one."""
+    limit = float(cfg.get("plan.max_error_rate"))
+    rates, over, missing, wrong, checked = {}, [], [], 0.0, 0
+    for a in cfg.areas:
+        data = _read_json(confirm_file(cfg, a["id"]))
+        if not isinstance(data, dict) or not isinstance(data.get("checked"), int):
+            missing.append(a["id"])
+            continue
+        rate = float(data.get("error_rate") or 0)
+        rates[a["id"]] = rate
+        wrong += rate * data["checked"]
+        checked += data["checked"]
+        if rate > limit:
+            over.append({"area": a["id"], "error_rate": rate,
+                         "classes": [c.get("name", "") for c in data.get("classes") or [] if isinstance(c, dict)]})
+    return {"pooled": round(wrong / checked, 4) if checked else None, "checked": checked, "rates": rates,
+            "over": over, "missing": missing, "max_error_rate": limit}
+
+
+# ---------------------------------------------------------------- verdict guard
+
+def test_rows(text: str) -> list[tuple[str, str, str]]:
+    """(file, test, table line) of each body row of a sheet's `## Tests` table."""
+    m = re.search(r"^## Tests.*?$(.*?)(?=^## |\Z)", text, re.M | re.S)
+    out, head = [], True
+    for line in (m.group(1) if m else "").splitlines():
+        if not line.startswith("|") or RULE.match(line):
+            continue
+        if head:            # the first table line is the header
+            head = False
+            continue
+        cs = cells(line)
+        if len(cs) >= 2:
+            out.append((cs[0].strip("` "), cs[1].strip("` "), line.rstrip().replace("\t", " ")))
+    return out
+
+
+def save_verdicts(cfg: config.Config, sheets: dict[str, Sheet]) -> None:
+    """Write verdicts.tsv from the sheets. A sheet that exists but does not parse keeps its previous rows."""
+    f = cfg.path("work.plan") / VERDICTS
+    kept = [l for l in f.read_text().splitlines()[1:] if l.split("\t", 1)[0] not in sheets
+            and (cfg.path("work.sheets") / f"{l.split(chr(9), 1)[0]}.md").is_file()] if f.is_file() else []
+    rows = ["set\tfile\ttest\trow"] + [f"{sid}\t{fi}\t{te}\t{line}" for sid, s in sorted(sheets.items())
+                                     for fi, te, line in test_rows(s.text)] + kept
+    f.write_text("\n".join(rows) + "\n")
+
+
+def _job_of(plan: Path) -> dict[str, str]:
+    data = _read_json(plan / "fix" / "groups.json") or {}
+    return {s: g["id"] for g in data.get("groups", []) for s in g.get("sets", [])}
+
+
+def _logged(log: Path, test: str) -> bool:
+    """True when a line of the log names the test with the word delete or move."""
+    if not log.is_file():
+        return False
+    name = re.compile(rf"(?<![\w:]){re.escape(test)}(?!\w)")
+    return any(name.search(l) and re.search(r"\b(delete|move)\b", l, re.I) for l in log.read_text().splitlines())
+
+
+def _restore(path: Path, lines: list[str]) -> None:
+    text = path.read_text()
+    m = re.search(r"^## Tests.*?$(.*?)(?=^## |\Z)", text, re.M | re.S)
+    if m is None:
+        text = text.rstrip() + ("\n\n## Tests\n\n| File | Test | Verdict | Reason |\n|---|---|---|---|\n"
+                                + "\n".join(lines) + "\n")
+    else:
+        body = m.group(1).split("\n")
+        last = max((i for i, l in enumerate(body) if l.startswith("|")), default=None)
+        if last is None:
+            body[1:1] = ["", "| File | Test | Verdict | Reason |", "|---|---|---|---|", *lines]
+        else:
+            body[last + 1:last + 1] = lines
+        text = text[:m.start(1)] + "\n".join(body) + text[m.end(1):]
+    path.write_text(text)
+
+
+def verdict_guard(cfg: config.Config, sheets: dict[str, Sheet]) -> list[dict]:
+    """Compare the sheets' Tests rows with verdicts.tsv and put back the rows dropped without a log line. One entry
+    per set whose rows fell: {set, job, dropped, restored, accepted, gone}. gone: the sheet itself no longer exists."""
+    plan = cfg.path("work.plan")
+    f = plan / VERDICTS
+    if not f.is_file():
+        return []
+    old: dict[str, dict[tuple[str, str], str]] = defaultdict(dict)
+    for line in f.read_text().splitlines()[1:]:
+        parts = line.split("\t", 3)
+        if len(parts) == 4:
+            old[parts[0]][(parts[1], parts[2])] = parts[3]
+    jobs = _job_of(plan)
+    out = []
+    for sid, rows in sorted(old.items()):
+        job = jobs.get(sid)
+        s = sheets.get(sid)
+        if s is None and (cfg.path("work.sheets") / f"{sid}.md").is_file():
+            continue        # it does not parse: a check finding of its own
+        if s is None:
+            out.append({"set": sid, "job": job, "dropped": len(rows), "restored": 0, "accepted": 0, "gone": True})
+            continue
+        now = {(fi, te) for fi, te, _ in test_rows(s.text)}
+        dropped = [k for k in rows if k not in now]
+        if not dropped:
+            continue
+        log = plan / "fix" / "logs" / f"{job}.md" if job else None
+        back = [rows[k] for k in dropped if not (log and _logged(log, k[1]))]
+        if back:
+            _restore(s.path, back)
+        out.append({"set": sid, "job": job, "dropped": len(dropped), "restored": len(back),
+                    "accepted": len(dropped) - len(back), "gone": False})
+    return out
+
+
+def drop_line(d: dict) -> str:
+    who = f"{d['set']} (job {d['job'] or 'unknown: not in fix/groups.json'})"
+    if d["gone"]:
+        return f"{who}: the sheet is gone with its {d['dropped']} Tests rows"
+    return f"{who}: {d['dropped']} Tests rows dropped, {d['restored']} restored, {d['accepted']} logged as delete or move"
 
 
 # ---------------------------------------------------------------- rebuild
@@ -277,6 +440,10 @@ def _keep_before(f: Path) -> None:
 def rebuild(cfg: config.Config, run_coverage: bool = True) -> dict:
     plan = cfg.path("work.plan")
     sheets, bad = sheets_of(cfg)
+    drops = verdict_guard(cfg, sheets)
+    if any(d["restored"] for d in drops):
+        sheets, bad = sheets_of(cfg)
+    save_verdicts(cfg, sheets)
     checks: list[str] = [f"sheet does not parse: {b}" for b in bad]
     owner: dict[str, list[str]] = defaultdict(list)
     for sid, s in sheets.items():
@@ -369,5 +536,5 @@ def rebuild(cfg: config.Config, run_coverage: bool = True) -> dict:
           "", "Sets named in developer-questions.md: " + (", ".join(waiting) or "none") + "."]
     sizing.write_text("\n".join(S) + "\n")
     return {"written": [str(own), str(contract), str(sizing)] + ([str(plan / "eval-coverage.md")] if cov and "failed" not in cov else []),
-            "parse_failures": bad, "gaps": cov.get("gaps"), "coverage": cov, "checks": checks,
+            "parse_failures": bad, "gaps": cov.get("gaps"), "coverage": cov, "checks": checks, "verdict_drops": drops,
             "totals": {"sets": len(sheets), "write": tw, "delete": td, "tests": dict(verdicts)}}

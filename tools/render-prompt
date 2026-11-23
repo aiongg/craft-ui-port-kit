@@ -32,20 +32,25 @@ Workflow args
                           plan.chunk_map_lines lines, with the map's preamble; also written to <plan>/chunks.json,
                           which the phase 2 prompts read.
     phase2-*              all four also get answerGroupsPerAgent, maxErrorRate and maxWrongAnswers (the plan.* keys).
-    phase2-final          stage all (default) or evaluate (the evaluations alone, after a fix round); evalSchema
+    phase2-final          stage all (default) or evaluate (the first evaluation alone, when stage all stopped before
+                          it or an evaluator failed; refused once any eval-<area>-r2.json exists); evalSchema
                           (templates/eval-result.schema.json).
     phase2-fix            contract: one job per part of the contract ({id, file, crates, items}); the parts are
                           <parts>/NN.md when they exist, else <plan>/contract.md is cut at its `### <crate>` headings
                           into parts of about 120 rows (app crates, `### <crate> (app)`, in parts of their own) and
                           written there; sheets: the sets of the ownership file in
                           jobs of four per area ({id, area, sets}); coverage: one job per gap list of
-                          <plan>/eval-coverage.md ({id, scope}); fixDir: <plan>/fix.
+                          <plan>/eval-coverage.md ({id, scope}); classes: the error classes of every
+                          <plan>/eval-<area>.json ({area, name, kind, count, pattern, find}); fixDir: <plan>/fix.
     phase2-reconcile      --stage contract, sheets or evaluate (required). Every stage: partList (the NN.md files of
                           <parts>, with their crates) and fixDir. Stages contract and sheets first run the collation
                           of tools/plan-collate.py and pass its summary as collated (groups, routes, parts); stage
                           evaluate first runs the rebuild of tools/plan-rebuild.py and passes its summary as rebuild,
-                          with evalSchema and round (2, or the next unused eval round).
-  Exit 1 when an input is missing (the message names it), 2 for a usage or config error.
+                          with evalSchema and round 2, the confirming evaluation. It refuses while the rebuild reports
+                          a check finding or a coverage gap, and runs only the areas (of --only, or all) that have no
+                          eval-<area>-r2.json yet: when none is left, it refuses, since there is no third evaluation.
+  Exit 1 when an input is missing or a phase 2 stage is refused (the message names it), 2 for a usage or config
+  error.
 """
 from __future__ import annotations
 
@@ -447,6 +452,11 @@ def phase2_final_args(cfg: config.Config, a, base: dict) -> dict:
     if a.stage not in (None, "all", "evaluate"):
         raise Missing(f"phase2-final: --stage must be all or evaluate, got {a.stage!r}")
     base["stage"] = a.stage or "all"
+    done = planfix.confirmed(cfg)
+    if base["stage"] == "evaluate" and done:
+        raise Missing(f"phase2-final: the confirming evaluation ran ({', '.join(done)}): the first evaluation does not "
+                      "run again. An area above plan.max_error_rate goes to the lead's own read (process/03-plan.md, "
+                      "step 8)")
     base["evalSchema"] = schema.load("eval-result.schema.json")
     return phase2_common(cfg, base)
 
@@ -529,6 +539,7 @@ def phase2_fix_args(cfg: config.Config, a, base: dict) -> dict:
     base["contract"] = contract_parts(cfg)
     base["sheets"] = sheet_jobs(cfg)
     base["coverage"] = coverage_jobs(cfg)
+    base["classes"] = planfix.first_classes(cfg)
     if a.only:
         for k in ("contract", "sheets", "coverage"):
             base[k] = [j for j in base[k] if j["id"] in a.only]
@@ -563,10 +574,22 @@ def phase2_reconcile_args(cfg: config.Config, a, base: dict) -> dict:
         r = base["rebuild"]
         print(f"render-prompt: rebuilt the plan files: {len(r['checks'])} check findings, coverage gaps {r['gaps']}",
               file=sys.stderr)
+        for d in r["verdict_drops"]:
+            print(f"render-prompt: verdicts: {planfix.drop_line(d)}", file=sys.stderr)
+        if r["checks"] or r["gaps"] or "failed" in r["coverage"]:
+            listed = r["checks"][:10] + ([r["coverage"]["failed"]] if "failed" in r["coverage"] else [])
+            raise Missing("phase2-reconcile: the confirming evaluation waits until the rebuild is clean (coverage gaps "
+                          f"{r['gaps']}, {len(r['checks'])} check findings; <plan>/eval-coverage.md has the gaps). Clear "
+                          "them by hand or with a rerun of stage sheets:\n  " + "\n  ".join(listed))
+        wanted = a.only or [x["id"] for x in cfg.areas]
+        done = set(planfix.confirmed(cfg))
+        base["only"] = [x for x in wanted if x not in done]
+        if not base["only"]:
+            raise Missing("phase2-reconcile: every area asked for has its confirming evaluation (eval-<area>-r2.json); "
+                          "there is no third evaluation. An area above plan.max_error_rate goes to the lead's own read "
+                          "(process/03-plan.md, step 8)")
         base["evalSchema"] = schema.load("eval-result.schema.json")
-        first = cfg.areas[0]["id"] if cfg.areas else None
-        done = len(list(cfg.path("work.plan").glob(f"eval-{first}-r*.md"))) if first else 0
-        base["round"] = done + 2
+        base["round"] = planfix.CONFIRM_ROUND
     return phase2_common(cfg, base)
 
 

@@ -9,8 +9,10 @@ Runs the three stages of workflows/phase2-reconcile.js in order, contract, sheet
 render-prompt runs the collation (tools/plan-collate.py) before contract and sheets, and the rebuild
 (tools/plan-rebuild.py) before evaluate. A stage whose result lists failed jobs, or whose script stopped, ends the run:
 rerun the same command, and swarm runs only the jobs that failed or whose inbox changed. --from starts at a later
-stage. --only limits the evaluations to those areas. Options after `--` go to every swarm.py call (--parallel,
---dry-run, ...).
+stage. --only limits the evaluations to those areas. Stage evaluate is the confirming evaluation: render-prompt
+refuses it while the rebuild has findings and runs only the areas without one yet. After it, reconcile records the
+pooled error rate over every area's eval-<area>-r2.json as a `plan-eval` event (data: pooled, checked, over, missing).
+Options after `--` go to every swarm.py call (--parallel, --dry-run, ...).
 
 It only sequences: the stages and the scripts are the mechanism. Under the Workflow tool, run the same render-prompt
 lines and each stage yourself.
@@ -26,7 +28,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from portkit import config, track  # noqa: E402
+from portkit import config, planfix, track  # noqa: E402
 
 TOOLS = Path(__file__).resolve().parent
 STAGES = ("contract", "sheets", "evaluate")
@@ -35,6 +37,17 @@ SCRIPT = config.KIT_ROOT / "workflows" / "phase2-reconcile.js"
 
 def area_line(e: dict) -> str:
     return f"{e['area']} failed" if e.get("failed") else f"{e['area']} {e['error_rate']} ({e['must_fix']} must-fix)"
+
+
+def record_pooled(cfg) -> str:
+    """Post the confirming evaluation's pooled rate as a plan-eval event; the line that says so."""
+    p = planfix.pooled(cfg)
+    over = ", ".join(f"{o['area']} {o['error_rate']} ({'; '.join(o['classes']) or 'no class named'})" for o in p["over"])
+    text = (f"pooled {p['pooled']} over {p['checked']} items; above plan.max_error_rate {p['max_error_rate']}: "
+            f"{over or 'none'}" + (f"; not evaluated: {', '.join(p['missing'])}" if p["missing"] else ""))
+    track.event("plan-eval", text, data={"pooled": p["pooled"], "checked": p["checked"],
+                                         "over": [o["area"] for o in p["over"]], "missing": p["missing"]})
+    return "plan-eval: " + text + (" -> lead's read, process/03-plan.md step 8" if p["over"] else "")
 
 
 def main(argv=None) -> int:
@@ -79,6 +92,7 @@ def main(argv=None) -> int:
             failed = out.get("failed") or [e["area"] for e in out.get("evaluate", []) if e.get("failed")]
             if stage == "evaluate":
                 lines.append("reconcile: evaluate: " + ", ".join(area_line(e) for e in out.get("evaluate", [])))
+                lines.append("reconcile: " + record_pooled(cfg))
             else:
                 lines.append(f"reconcile: {stage}: {len(out.get('jobs', []))} jobs, failed: {', '.join(failed) or 'none'}; "
                              f"{out.get('open_questions', 0)} open questions")

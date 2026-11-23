@@ -1,7 +1,7 @@
 export const meta = {
   name: 'phase2-final',
   description: 'Phase 2, consolidation: merge the chunk plans per area, check conflicts, write the one contract, then evaluate the plan with fresh agents',
-  whenToUse: 'Phase 2 of a port (process/03-plan.md, step 3 and 4), after phase2-part finished for every chunk. Stage "evaluate" reruns only the evaluations, after a fix round.',
+  whenToUse: 'Phase 2 of a port (process/03-plan.md, step 3 and 4), after phase2-part finished for every chunk. Stage "evaluate" runs the first evaluation alone, when stage all stopped before it or an evaluator failed; render-prompt refuses it once a confirming evaluation (phase2-reconcile) exists.',
   phases: [
     { title: 'Area merge', detail: 'one agent per area merges its chunk plans into areas/<area>.md', model: 'opus' },
     { title: 'Conflict check', detail: 'one agent over all area plans', model: 'opus' },
@@ -11,11 +11,13 @@ export const meta = {
 }
 
 // Stage "all" (default): Area merge -> Conflict check -> Consolidate -> Evaluate.
-// Stage "evaluate": Evaluate alone, on the plan files as they are (after a fix round or a reconcile).
+// Stage "evaluate": Evaluate alone, on the plan files as they are (the first evaluation, when stage all stopped
+// before it or an evaluator failed).
 //
-// The evaluation agents wrote none of the plan, and each rates a random sample against the code. The script compares
-// their error rates with the thresholds and returns the verdict; the lead decides what to do with a failing area
-// (process/03-plan.md, step 4 and 5).
+// The evaluation agents wrote none of the plan, and each rates a random sample against the code and names the error
+// classes behind its wrong items. This is the first of at most two evaluations: whatever the rates, phase2-fix sweeps
+// each named class over the whole plan, and phase2-reconcile's stage evaluate confirms (process/03-plan.md, steps 4
+// to 6). plan.max_error_rate is reported (`over`), not a gate.
 //
 // The script reads no files; `tools/render-prompt --workflow-args phase2-final [--stage evaluate]` builds every input
 // from port.toml. tools/swarm.py runs the same script with the same args when pipeline.batch_runner is "swarm".
@@ -107,18 +109,23 @@ const evals = await parallel([
 ])
 
 const perArea = areas.map((a, i) => (evals[i] ? { area: a.id, error_rate: evals[i].error_rate, checked: evals[i].checked,
-  must_fix: evals[i].must_fix.length, file: `${args.plan}/eval-${a.id}.json` } : { area: a.id, failed: true }))
+  must_fix: evals[i].must_fix.length, classes: evals[i].classes.map(c => c.name), file: `${args.plan}/eval-${a.id}.json` }
+  : { area: a.id, failed: true }))
 const n = areas.length
 const accuracy = evals[n + 1]
 const maxErr = need(args.maxErrorRate, 'maxErrorRate')
 const maxWrong = need(args.maxWrongAnswers, 'maxWrongAnswers')
 out.evaluate = {
-  areas: perArea.map(r => ({ ...r, passes: r.error_rate !== undefined && r.error_rate <= maxErr })),
+  areas: perArea.map(r => (r.failed ? r : { ...r, over: r.error_rate > maxErr })),
   size: evals[n] ? 'eval-size.md written' : { failed: true },
   answers: accuracy ? { ...accuracy, passes: accuracy.wrong_share <= maxWrong } : { failed: true },
   coverage: evals[n + 2] || { failed: true },
   thresholds: { maxErrorRate: maxErr, maxWrongAnswers: maxWrong },
 }
-const failing = out.evaluate.areas.filter(r => !r.passes).map(r => r.area)
-log(`Evaluation: areas above ${maxErr}: ${failing.join(', ') || 'none'}; answers ${accuracy ? (out.evaluate.answers.passes ? 'pass' : 'fail') : 'not checked'}`)
+const over = out.evaluate.areas.filter(r => r.over).map(r => r.area)
+const failedEvals = out.evaluate.areas.filter(r => r.failed).map(r => r.area)
+const named = out.evaluate.areas.reduce((n, r) => n + (r.classes ? r.classes.length : 0), 0)
+out.next = failedEvals.length ? `Rerun stage evaluate with only: ${JSON.stringify(failedEvals)}`
+  : `Run phase2-fix: every job sweeps the ${named} named classes and the six standing ones over everything it owns`
+log(`Evaluation: ${named} error classes named; areas above ${maxErr}: ${over.join(', ') || 'none'}; failed: ${failedEvals.join(', ') || 'none'}; answers ${accuracy ? (out.evaluate.answers.passes ? 'pass' : 'fail') : 'not checked'}`)
 return out

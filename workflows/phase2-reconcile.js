@@ -1,11 +1,11 @@
 export const meta = {
   name: 'phase2-reconcile',
-  description: 'Phase 2 fix round, second stage: apply the requests between parts, then evaluate the reconciled plan again',
+  description: 'Phase 2 fix round, second stage: apply the requests between parts, then run the one confirming evaluation',
   whenToUse: 'Phase 2 of a port (process/03-plan.md, step 6), after phase2-fix. Run the stages contract, sheets and evaluate in that order (tools/reconcile does under swarm).',
   phases: [
     { title: 'Contract and routing', detail: 'stage contract: each contract part applies its inbox; unowned paths get owners', model: 'opus (contract parts), sonnet (routing)' },
     { title: 'Sheets', detail: 'stage sheets: sheet groups apply their inbox', model: 'sonnet' },
-    { title: 'Re-evaluate', detail: 'stage evaluate: fresh reviewers per area', model: 'opus' },
+    { title: 'Re-evaluate', detail: 'stage evaluate: the confirming evaluation, fresh reviewers per area', model: 'opus' },
   ],
 }
 
@@ -17,7 +17,11 @@ export const meta = {
 //   plan-collate          again, so the sheets also see the parts' Reconcile logs and the routing decisions
 //   stage sheets          each group applies inbox/<set>.md to its sheets
 //   plan-rebuild          ownership file, joined contract, coverage report, sizing
-//   stage evaluate        fresh reviewers sample each area again; error rates by kind and must-fix items
+//   stage evaluate        the confirming evaluation (round 2, the last): fresh reviewers sample each area again;
+//                         error rates by kind, error classes and must-fix items. render-prompt starts it only when
+//                         the rebuild is clean, and only for areas without eval-<area>-r2.json. An area above
+//                         plan.max_error_rate goes to the lead's own read (process/03-plan.md, step 8), never to a
+//                         third round.
 // `tools/render-prompt --workflow-args phase2-reconcile --stage S` runs the script before stage S and passes its
 // result in (collated, rebuild). The script reads no files. tools/reconcile runs the whole sequence under swarm.py.
 // Every job lists its inbox in `inputs`, so under swarm a rerun runs only the jobs whose inbox changed.
@@ -36,9 +40,9 @@ export const meta = {
 //   rebuild            stage evaluate: the rebuild summary (checks, gaps, totals)
 //   evalSchema         stage evaluate: templates/eval-result.schema.json
 //   areas              [{ id, code, ... }] from port.toml [[areas]]
-//   round              stage evaluate: this evaluation's number (2 for the first re-evaluation): reports go to
-//                      eval-<area>-r<round>.md and .json
-//   only               optional list of area ids for the evaluations
+//   round              stage evaluate: always 2 (the confirming evaluation): reports go to eval-<area>-r2.md and .json
+//   only               optional list of area ids for the evaluations (render-prompt sets it to the areas still
+//                      without a confirming evaluation)
 
 const fill = (text, vars) => text.replace(/\{\{([A-Z_]+)\}\}/g, (m, k) => (k in vars ? vars[k] : m))
 const need = (value, name) => {
@@ -103,11 +107,21 @@ const evals = await parallel(areas.map(a => () => agent(
   `\n\n## Round ${round}\n\nThe plan was fixed and reconciled since the first evaluation: it is now the sheets (${args.sheets}/${a.id}-w*.md) and the contract parts (${args.parts}/*.md). Judge those, not ${args.plan}/areas/${a.id}.md. You did not write any of it. Sample at least 20 contract items, 20 file rows, 20 reader rows and 20 test verdicts across the area's sets at random.\nWrite the report to ${args.plan}/eval-${a.id}-r${round}.md and the result object to ${args.plan}/eval-${a.id}-r${round}.json instead of the paths above.`,
   { label: `eval:${a.id}-r${round}`, phase: 'Re-evaluate', schema: evalSchema, model: need(args.models, 'models').evaluate, task: `eval-${a.id}-r${round}` })))
 
+const maxErr = need(args.maxErrorRate, 'maxErrorRate')
 out.evaluate = areas.map((a, i) => {
   const e = evals[i]
   return e ? { area: a.id, round, error_rate: e.error_rate, checked: e.checked, must_fix: e.must_fix.length,
-    passes: e.error_rate <= need(args.maxErrorRate, 'maxErrorRate'), file: `${args.plan}/eval-${a.id}-r${round}.json` } : { area: a.id, round, failed: true }
+    classes: e.classes.map(c => c.name), over: e.error_rate > maxErr, file: `${args.plan}/eval-${a.id}-r${round}.json` }
+    : { area: a.id, round, failed: true }
 })
-out.next = 'Areas above plan.max_error_rate: run the three stages again (plan-collate routes their must-fix items), with --only <area> for the evaluation'
-log(`Re-evaluation round ${round}: ${out.evaluate.map(r => `${r.area} ${r.failed ? 'failed' : `${r.error_rate} (${r.must_fix} must-fix)`}`).join(', ')}`)
+const done = out.evaluate.filter(r => !r.failed)
+const checked = done.reduce((n, r) => n + r.checked, 0)
+// Pooled over the areas of this run; tools/reconcile records the pooled rate over every eval-<area>-r2.json.
+out.pooled = checked ? done.reduce((n, r) => n + r.error_rate * r.checked, 0) / checked : null
+out.lead_read = done.filter(r => r.over).map(r => ({ area: r.area, error_rate: r.error_rate, classes: r.classes }))
+const failedEvals = out.evaluate.filter(r => r.failed).map(r => r.area)
+out.next = failedEvals.length ? `Rerun stage evaluate for the failed areas: ${failedEvals.join(', ')}`
+  : out.lead_read.length ? `Record the pooled rate; read the sheets of ${out.lead_read.map(r => r.area).join(', ')} for their classes yourself (process/03-plan.md, step 8). No further evaluation.`
+  : 'Record the pooled rate; go on to step 7. No further evaluation.'
+log(`Confirming evaluation: ${out.evaluate.map(r => `${r.area} ${r.failed ? 'failed' : `${r.error_rate} (${r.must_fix} must-fix)`}`).join(', ')}; pooled ${out.pooled === null ? '-' : out.pooled.toFixed(3)}`)
 return out

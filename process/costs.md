@@ -25,6 +25,8 @@ What each phase cost on the one app ported with this process so far (PhotoCraft)
 | 8 | Look and behaviour | One warm old/new capture round about 20 s. |
 | 9 | Land | Not measured. |
 
+**Phase 2 evaluation rounds in two later ports.** Both ran repeated evaluate-and-fix rounds, each fixing the sampled items, before phase 2 had its fixed exit: one ran 6 rounds while its worst area went from 14.4 % to 14.1 %, about 5 h and $570; the other ran 8 rounds, about 2 to 3 h and $150. The same error classes returned every round. The exit of [03-plan.md](03-plan.md) caps this at one evaluation, one sweep per named class and one confirming evaluation.
+
 ## Writing, per set (phases 4-6)
 
 From the usage log over all 251 sets: $970 API-equivalent in all, for plan checks, writes, repairs and review fixes.
@@ -58,7 +60,7 @@ The panels area ran end to end first: 18 sets (13 framework, 5 app), 7,000 frame
 ## Projecting a new port
 
 1. **Phase 1.** Chunks = UI lines / `plan.chunk_lines`. Agents = chunks (Haiku) + 1 (areas) + one per area + 1 (index), all Opus except the readers. Expect about 11 entries per chunk and 2 to 3 entries per map section.
-2. **Phase 2.** Sets scale with map sections: PhotoCraft had about 0.6 sets per map section and about 520 lines to write per set. Phase 2 is the most quota-heavy phase per line: budget most of a subscription week for an app of PhotoCraft's size, and expect one fix round and one re-evaluation.
+2. **Phase 2.** Sets scale with map sections: PhotoCraft had about 0.6 sets per map section and about 520 lines to write per set. Phase 2 is the most quota-heavy phase per line: budget most of a subscription week for an app of PhotoCraft's size, and expect one evaluation, one fix round of class sweeps and one confirming evaluation; there is no further round.
 3. **Phases 4-6, per set.** Plan check about $0.65; write about $1.70 for a Sonnet set (one-shot or agent mode); $3 to $9 for an Opus set; review fix about $0.85 including the test-failure round. Count the Opus sets from the sheets: framework sets that change a shared mechanism (pass, input routing, focus, layout, paint), plus retries.
 4. **Wall time of writing.** Sets / `pipeline.parallel` x 5 to 10 min per set. At 6 in parallel, about 35 to 70 sets per hour; the pilot wrote 13 sets in 15 min.
 5. **Cycles.** Wall time in phases 6 and 7 follows the number of cycles, not the number of sets: a warm incremental build costs about the same for 20 sets as for 60. Price them with "The cycle model" below, the lead's own calls included ("Pricing the lead").

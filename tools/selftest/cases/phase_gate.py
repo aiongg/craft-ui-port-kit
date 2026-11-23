@@ -148,9 +148,21 @@ expect(2, True)
 expect(3, False, "not on the board (track import sheets): core-w1")
 track("ask", "core-w1", "Which?", "--recommend", "A", "--for", "developer")
 out = expect(3, False, "coverage.py exit")
-for needle in ("sizing.md", "open developer questions: q1"):
+for needle in ("sizing.md", "open developer questions: q1", "no plan-rebuild run since the phase began",
+               "no confirming evaluation (eval-<area>-r2.json, tools/reconcile): core"):
     if needle not in out:
         fail(f"phase 3 refusal lacks {needle!r}:\n{out}")
+# the gate reads plan-rebuild's own event (the scratch sheet does not parse) and the confirming evaluation
+env = dict(os.environ, PORT_KIT_CONFIG=str(CFG))
+subprocess.run([str(KIT / "tools" / "plan-rebuild.py")], capture_output=True, text=True, env=env, cwd=W)
+(W / "plan/eval-core-r2.json").write_text('{"error_rate": 0.2, "checked": 20, "by_kind": {}, "classes": [], "must_fix": []}')
+out = expect(3, False, "the last plan-rebuild failed")
+if "no plan-eval event since the phase began" not in out:
+    fail(f"phase 3 refusal lacks the plan-eval row:\n{out}")
+track("event", "plan-eval", "pooled 0.2", "--data", "pooled=0.2")
+out = expect(3, False, "the last plan-rebuild failed")
+if "confirming evaluation" in out or "plan-eval" in out:
+    fail(f"a confirmed plan with a plan-eval event still fails its row:\n{out}")
 expect(3, True, extra=("--force", "scratch plan"))
 st = json.loads((W / "track/state.json").read_text())
 if not any(e["kind"] == "decision" and "forced past" in e["text"] for e in st["log"]):

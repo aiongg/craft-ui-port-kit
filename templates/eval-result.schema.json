@@ -1,8 +1,8 @@
 {
   "title": "Plan evaluation result",
-  "description": "What a phase 2 evaluator returns and writes to <plan>/eval-<area>.json (first evaluation) or eval-<area>-r<round>.json (re-evaluations), beside its report eval-<area>[-r<round>].md (process/03-plan.md, steps 4 and 6). tools/swarm.py checks the returned object, and tools/plan-collate.py checks each must-fix item of the file, with this schema. Each must-fix item is one change to one file of the plan, addressed like a request between parts.",
+  "description": "What a phase 2 evaluator returns and writes to <plan>/eval-<area>.json (first evaluation) or eval-<area>-r2.json (the confirming evaluation), beside its report eval-<area>[-r<round>].md (process/03-plan.md, steps 4 and 6). tools/swarm.py checks the returned object, and tools/plan-collate.py checks each must-fix item of the file, with this schema. Each must-fix item is one change to one file of the plan, addressed like a request between parts.",
   "type": "object",
-  "required": ["error_rate", "checked", "by_kind", "must_fix"],
+  "required": ["error_rate", "checked", "by_kind", "classes", "must_fix"],
   "properties": {
     "error_rate": {
       "type": "number",
@@ -15,6 +15,22 @@
     "by_kind": {
       "type": "object",
       "description": "Error rate per kind of item checked, as fractions: contract, file, reader, verdict, rule."
+    },
+    "classes": {
+      "type": "array",
+      "description": "The error classes behind the items that are `needs change` or `wrong`: one entry per cause that recurs beyond the sample. The fix round sweeps each class over every sheet and part; after the confirming evaluation, the lead reads the sheets of an area above plan.max_error_rate for each of its classes.",
+      "items": {
+        "type": "object",
+        "required": ["name", "kind", "count", "pattern", "find"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string", "minLength": 1, "description": "A short name for the class."},
+          "kind": {"type": "string", "enum": ["contract", "file", "reader", "verdict", "rule"], "description": "The kind of item the class is found in."},
+          "count": {"type": "integer", "description": "Sampled items in this class."},
+          "pattern": {"type": "string", "minLength": 1, "description": "What the error looks like, in one or two sentences."},
+          "find": {"type": "string", "minLength": 1, "description": "How to find every instance outside the sample: a grep over the sheets or the code, or the check to run on each row."}
+        }
+      }
     },
     "must_fix": {
       "type": "array",

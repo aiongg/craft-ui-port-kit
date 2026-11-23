@@ -145,7 +145,7 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `chunk_lines` | int | `3000` | workflows/phase1-inventory-map.js, render-prompt | Target size of one inventory chunk, in lines. Env: `PORT_KIT_PLAN_CHUNK_LINES`. |
 | `chunk_map_lines` | int | `250` | render-prompt | Target size of one plan chunk, in area-map lines. Plan chunks hold whole map sections. Env: `PORT_KIT_PLAN_CHUNK_MAP_LINES`. |
 | `answer_groups_per_agent` | int | `3` | workflows/phase2-part.js | Question groups one answering agent takes. Env: `PORT_KIT_PLAN_ANSWER_GROUPS_PER_AGENT`. |
-| `max_error_rate` | float | `0.1` | workflows/phase2-final.js, prompts | Highest sampled plan error rate that passes the evaluation. Env: `PORT_KIT_PLAN_MAX_ERROR_RATE`. |
+| `max_error_rate` | float | `0.1` | workflows/phase2-final.js, workflows/phase2-reconcile.js, tools/reconcile, prompts | Sampled plan error rate above which an area is reported as over: after the confirming evaluation it goes to the lead's own read of its error classes. Reported, not a gate: no third evaluation runs. Env: `PORT_KIT_PLAN_MAX_ERROR_RATE`. |
 | `max_wrong_answers` | float | `0.1` | workflows/phase2-final.js, prompts | Highest share of wrong fact answers that passes the accuracy check. Env: `PORT_KIT_PLAN_MAX_WRONG_ANSWERS`. |
 | `build_batches` | int | unset | track | How many build batches the write order has (pilot included), set when the order is fixed (process/06-write.md). `track eta` counts the batches still to come from it. Unset: the projection counts the current batch only. Env: `PORT_KIT_PLAN_BUILD_BATCHES`. |
 

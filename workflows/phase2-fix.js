@@ -1,15 +1,15 @@
 export const meta = {
   name: 'phase2-fix',
   description: 'Phase 2 fix round: re-check every contract part, write one verified sheet per writer set, assign unowned files',
-  whenToUse: 'Phase 2 of a port (process/03-plan.md, step 5), after phase2-final when an evaluation found errors above the threshold. Followed by phase2-reconcile.',
+  whenToUse: 'Phase 2 of a port (process/03-plan.md, step 5), after the first evaluation (phase2-final), whatever its error rate: one sweep per error class. Followed by phase2-reconcile.',
   phases: [
     { title: 'Fix', detail: 'contract parts, set sheets and coverage gaps, in parallel jobs that each own their files', model: 'opus (contract parts) and sonnet (sheets, coverage)' },
   ],
 }
 
-// The fix round exists because a plan made from maps carries errors in a few repeating classes. Every job gets the
-// same six (prompts/p2-fix-round.md lists them, with the evaluation findings to apply) and fixes the class in
-// everything it owns, not only the sampled items:
+// The fix round exists because a plan made from maps carries errors in a few repeating classes. Every job runs one
+// sweep per class over everything it owns, not only the sampled items: the classes the first evaluation named
+// (args.classes) and the six standing ones (prompts/p2-fix-round.md lists them, with the evaluation findings to apply):
 //   1. file actions copied from one row to every file in it        4. duplicate or unfounded framework items
 //   2. code read at an older revision than the plan base           5. settled decisions that never reached the plan
 //   3. incomplete reader lists (tests, examples, re-exports,       6. "rewrite" sized as the whole file
@@ -31,6 +31,7 @@ export const meta = {
 //   contract         [{ id: "contract-NN", file: "NN.md", crates: [...], items: N }]   one job per contract part
 //   sheets           [{ id: "sheets-<area>-<n>", area, sets: [set ids] }]               one job per group of sets
 //   coverage         [{ id: "coverage-NN", scope }]   one job per gap list of eval-coverage.md
+//   classes          [{ area, name, kind, count, pattern, find }]   the error classes of every eval-<area>.json
 //   only             optional list of job ids
 
 const fill = (text, vars) => text.replace(/\{\{([A-Z_]+)\}\}/g, (m, k) => (k in vars ? vars[k] : m))
@@ -38,6 +39,10 @@ const need = (value, name) => {
   if (value === undefined || value === null) throw new Error(`args.${name} is missing: build args with tools/render-prompt --workflow-args phase2-fix`)
   return value
 }
+const classes = need(args.classes, 'classes')
+const classText = classes.length
+  ? `\n\n## Classes the evaluation named\n\nSweep each over every file you own, besides the six standing classes:\n${classes.map(c => `- **${c.name}** (${c.kind}; ${c.count} sampled in area ${c.area}): ${c.pattern} Find: ${c.find}`).join('\n')}\n`
+  : '\n\n## Classes the evaluation named\n\nNone beyond the six standing classes.\n'
 const prompt = id => fill(need(args.prompts, 'prompts').fix_round, { OUT: need(args.fixDir, 'fixDir'), TASK: id })
 
 const RESULT = { type: 'object', required: ['done', 'changed', 'requests', 'open_questions', 'note'], properties: {
@@ -62,12 +67,13 @@ const todo = args.only && args.only.length ? jobs.filter(j => args.only.includes
 if (!todo.length) throw new Error('no fix jobs (args.contract, args.sheets and args.coverage are empty, or "only" names none)')
 
 phase('Fix')
-const results = await parallel(todo.map(j => () => agent(prompt(j.id) + j.text,
+const results = await parallel(todo.map(j => () => agent(prompt(j.id) + j.text + classText,
   { label: j.id, phase: 'Fix', schema: RESULT, model: j.model, role: 'sheet_fix', task: j.id })))
 
 const failed = todo.filter((j, i) => !results[i]).map(j => j.id)
-log(`Fix round: ${todo.length - failed.length} of ${todo.length} jobs done; failed: ${failed.join(', ') || 'none'}`)
+log(`Fix round: ${todo.length - failed.length} of ${todo.length} jobs done, ${classes.length} named classes swept; failed: ${failed.join(', ') || 'none'}`)
 return {
+  classes: classes.length,
   jobs: todo.map((j, i) => ({ id: j.id, result: results[i] })),
   failed,
   requests: results.filter(Boolean).reduce((n, r) => n + r.requests, 0),

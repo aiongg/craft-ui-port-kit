@@ -1,5 +1,6 @@
 """plan-collate.py and plan-rebuild.py on a fixture plan: requests, change logs and must-fix items reach their
-inboxes, a malformed must-fix item is rejected, and the rebuild reports a path in two sheets."""
+inboxes, a malformed must-fix item is rejected, the rebuild reports a path in two sheets and puts back dropped Tests
+rows, and render-prompt allows one confirming evaluation, only on a clean rebuild."""
 import json
 import shutil
 import sys
@@ -24,6 +25,8 @@ def case_collate_routes_rows(s):
     p = plan(s)
     r = s.run("plan-collate.py")
     check(r.returncode == 0, "plan-collate exits 0", r)
+    check("shell-w1\tcrates/ui/tests/chrome.rs\ttitle_shows" in (p / "verdicts.tsv").read_text(),
+          "the first collation writes the verdict baseline", r)
     out = json.loads(r.stdout.strip().splitlines()[-1])
     check(out["parts"] == ["contract-01"], f"contract part inbox: {out['parts']}", r)
     check(out["routes"] == ["route-1", "route-2"], f"two routing inboxes, alternating by path: {out['routes']}", r)
@@ -82,3 +85,60 @@ def case_coverage_audits(s):
     check(out["open_markers"] == 1, f"one marker (TBD), and the prose with angle brackets passes: {out}", r)
     rep = (p / "eval-coverage.md").read_text()
     check("L-4 (settled :6) names shell-w2" in rep and "Height TBD" in rep, f"both listed in the report:\n{rep}", r)
+
+
+TESTS_HEAD = "## Tests\n\n| File | Test | Verdict | Reason |\n|---|---|---|---|\n"
+
+
+def row(name, verdict="keep"):
+    return f"| `crates/ui/tests/chrome.rs` | `{name}` | {verdict} | Behaviour. |\n"
+
+
+def case_verdict_guard_restores_rows(s):
+    p = plan(s)
+    sheet = p / "sheets" / "shell-w1.md"
+    head = sheet.read_text().split("## Tests")[0]
+    names = ["title_shows", "title_wraps", "close_hides", "drag_moves", "size_exact"]
+    sheet.write_text(head + TESTS_HEAD + "".join(row(n) for n in names))
+    s.run("plan-rebuild.py")
+    check((p / "verdicts.tsv").read_text().count("shell-w1\t") == 5, "the first rebuild keeps 5 rows of shell-w1")
+    (p / "fix" / "groups.json").write_text('{"groups": [{"id": "shell-g1", "area": "shell", "sets": ["shell-w1"]}]}')
+    (p / "fix" / "logs" / "shell-g1.md").write_text("## shell-w1\n\n- delete `size_exact`: asserts an exact size.\n"
+                                                    "- kept `drag_moves` as is.\n")
+    sheet.write_text(head + TESTS_HEAD + row("title_shows"))
+    r = s.run("plan-rebuild.py")
+    check("shell-w1 (job shell-g1): 4 Tests rows dropped, 3 restored, 1 logged as delete or move" in r.stderr,
+          "the sheet and its job are named", r)
+    text = sheet.read_text()
+    check(all(f"`{n}`" in text for n in names[:4]) and "size_exact" not in text,
+          f"three rows are back, the logged delete stays out:\n{text}", r)
+    check(text.index("title_wraps") > text.index("title_shows") and text.count("| File | Test |") == 1,
+          "restored rows join the existing Tests table", r)
+    r = s.run("plan-rebuild.py")
+    check("verdicts:" not in r.stderr, "a second rebuild finds nothing to restore", r)
+
+
+def case_one_confirming_evaluation(s):
+    p = plan(s)
+    s.config({"app.snapshot": str(s.root / "snap")})
+    with open(s.root / "port.toml", "a") as f:
+        f.write('[[areas]]\nid = "shell"\ncode = "sh"\n[[areas]]\nid = "dock"\ncode = "dk"\n')
+    r = s.run("render-prompt", "--workflow-args", "phase2-reconcile", "--stage", "evaluate")
+    check(r.returncode == 1 and "waits until the rebuild is clean" in r.stderr and "path in two sheets" in r.stderr,
+          "a rebuild with findings refuses the confirming evaluation", r)
+    for f in ("shell-w1", "shell-w2"):
+        sh = p / "sheets" / f"{f}.md"
+        sh.write_text(sh.read_text().replace("| `crates/ui/src/chrome.rs` (fw) | edit | 5 | 0 | Also edits the chrome. |\n", "")
+                      .replace(", sh.C9", ""))
+    (s.root / "snap" / "src").mkdir(parents=True)
+    (s.root / "snap" / "src" / "window.rs").write_text("fn opens() {}\n")
+    r = s.run("render-prompt", "--workflow-args", "phase2-reconcile", "--stage", "evaluate")
+    check(r.returncode == 0, "a clean rebuild allows it", r)
+    args = json.loads(r.stdout)
+    check(args["round"] == 2 and args["only"] == ["dock"],
+          f"round 2, only for the area without one (the fixture has eval-shell-r2.json): {args['round']}, {args['only']}", r)
+    (p / "eval-dock-r2.json").write_text('{"error_rate": 0.2, "checked": 20, "by_kind": {}, "classes": [], "must_fix": []}')
+    r = s.run("render-prompt", "--workflow-args", "phase2-reconcile", "--stage", "evaluate")
+    check(r.returncode == 1 and "no third evaluation" in r.stderr, "a third evaluation is refused", r)
+    r = s.run("render-prompt", "--workflow-args", "phase2-final", "--stage", "evaluate")
+    check(r.returncode == 1 and "does not run again" in r.stderr, "so is a rerun of the first evaluation", r)

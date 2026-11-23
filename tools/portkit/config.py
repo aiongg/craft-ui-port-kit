@@ -177,8 +177,9 @@ KEYS: list[Key] = [
     K("plan.chunk_map_lines", 250, "int", "render-prompt",
       "Target size of one plan chunk, in area-map lines. Plan chunks hold whole map sections."),
     K("plan.answer_groups_per_agent", 3, "int", "workflows/phase2-part.js", "Question groups one answering agent takes."),
-    K("plan.max_error_rate", 0.10, "float", "workflows/phase2-final.js prompts",
-      "Highest sampled plan error rate that passes the evaluation."),
+    K("plan.max_error_rate", 0.10, "float", "workflows/phase2-final.js workflows/phase2-reconcile.js tools/reconcile prompts",
+      "Sampled plan error rate above which an area is reported as over: after the confirming evaluation it goes to the "
+      "lead's own read of its error classes. Reported, not a gate: no third evaluation runs."),
     K("plan.max_wrong_answers", 0.10, "float", "workflows/phase2-final.js prompts",
       "Highest share of wrong fact answers that passes the accuracy check."),
     K("plan.build_batches", None, "int", "track",

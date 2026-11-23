@@ -2,11 +2,13 @@
 
 Opus: one job of the plan fix round: re-check a contract part, write verified set sheets, or assign unowned files. Fill the placeholders with `tools/render-prompt`.
 
-You work on the fix round of the planning phase of the port of {{APP}} to the {{FACADE}} framework. The consolidated plan failed its independent evaluation ({{PLAN}}/eval-*.md): the sampled error rate was above `plan.max_error_rate`. Read {{RULES}}/agent-common.md, {{RULES}}/porting-rules.md and {{RULES}}/testing-rule.md in full first.
+You work on the fix round of the planning phase of the port of {{APP}} to the {{FACADE}} framework. The consolidated plan had its independent evaluation ({{PLAN}}/eval-*.md). Sampled items are only evidence: the plan gets one more evaluation, so this round must remove each error class from everything it owns, not fix the sampled items one by one. Read {{RULES}}/agent-common.md, {{RULES}}/porting-rules.md and {{RULES}}/testing-rule.md in full first.
 
-## The six error classes
+## Error classes
 
-These appear in every area. Fix the class in everything you own, not only in the sampled items.
+A fix-round job runs one sweep per class over every file it owns: the six standing classes below, which appear in every area, and each class the evaluators named, listed after your job section with what it looks like and how to find it. (A reconcile job applies its inbox instead, and checks each row it applies against the same classes.) For each class, check every sheet, row or contract item you own, not only the sampled ones, and fix every instance. Log one line per class in {{OUT}}/logs/<your job id>.md: `class <name>: <n> found, <n> fixed`, then the ids or paths you changed.
+
+The six standing classes:
 
 1. **File actions copied across a row.** One action written for an area-plan row (for example "delete") was applied to every file in the row. Derive each file's action again from the chunk plans and the code: `delete` only when every function goes and its readers move; `edit` when kept functions stay; `rewrite` only when most of the file changes.
 2. **Old snapshots.** The plans read the code at older revisions. Re-read everything at the current bases: framework {{FW}} and app {{APP_SRC}} (read only), at the revisions {{STATE}} names.
@@ -52,6 +54,7 @@ A sheet is the whole plan for its writer: the phase 5 writer gets only its sheet
 - Stories: a set that adds a framework component or variant gets a `- Stories:` head line naming each type, its stories and the stories file ({{KIT}}/templates/sheet.md), and that file in its Files table. Check the UI gallery first: a component that already does the job is reused, not added.
 - Readers: for every mechanism the set removes or changes, `git grep` the whole repo at the base. Each reader gets a row. A reader in a file this set does not own also goes to the requests file, addressed to the owning set (find it in {{OWNERSHIP}}) or "unowned".
 - Tests: list every test function of every file the set owns, including files it deletes, and give each a verdict and a reason under {{RULES}}/testing-rule.md. A test in a deleted file that checks behaviour which must survive is rewritten into a named file.
+- Never drop a Tests row silently. A test the port deletes keeps its row with the verdict `delete`. Remove a row only when the test leaves the set or never existed, and name it in {{OUT}}/logs/<your job id>.md: `move <test> to <set>` (with a request to that set) or `delete <test>: <reason>`. `tools/plan-rebuild.py` puts back every row that disappears without such a line.
 - Contract items it writes or calls: by id. If a row is wrong for this set, say so in the requests file, addressed to "contract <id>". Do not copy signatures into the sheet.
 - Writer notes: what the writer must know that the tables do not say, with path:line evidence at the base.
 - Apply the size audit's cut for the set when {{PLAN}}/eval-size.md names one and the code supports it.

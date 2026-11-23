@@ -172,8 +172,21 @@ def plan_check(sheet: Sheet, model: str, max_turns: int) -> tuple[str, Reply]:
     return (m.group(1).strip() if m else ""), reply
 
 
-def tags_of(items: str) -> dict[str, int]:
-    return {t: len(re.findall(rf"^- \[{t}\]", items, re.M)) for t in ("STUB", "RULE", "DECIDE")}
+def tags_of(items: str, own: str | None = None) -> dict[str, int]:
+    """Item counts per tag. A RULE item that rests on another set (it names that set's id, or carries a
+    `PLAN: assumed` marker) counts as DECIDE: a reader cannot settle it from the rules alone."""
+    ids = {p.stem for p in ctx.sheets.glob("*.md")} - {own}
+    counts = dict.fromkeys(("STUB", "RULE", "DECIDE"), 0)
+    for block in re.split(r"^(?=- \[(?:STUB|RULE|DECIDE)\])", items, flags=re.M):
+        m = re.match(r"- \[(STUB|RULE|DECIDE)\]", block)
+        if not m:
+            continue
+        tag = m.group(1)
+        if tag == "RULE" and ("PLAN: assumed" in block
+                              or any(re.search(rf"(?<![\w-]){re.escape(i)}(?![\w-])", block) for i in ids)):
+            tag = "DECIDE"
+        counts[tag] += 1
+    return counts
 
 
 # ---------------------------------------------------------------- agent mode

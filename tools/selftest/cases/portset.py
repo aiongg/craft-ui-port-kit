@@ -257,3 +257,17 @@ def case_mod_lines_lists_unlinked_files(s):
           f"only the orphans are listed: {out}", p)
     p = s.run("mod-lines.py", "--unlinked", "crates/x/src/a.rs", stdin="\n".join(files) + "\n", cwd=s.root)
     check(p.stdout == "", "PATH limits the report", p)
+
+
+def case_rule_resting_on_another_set_is_decide(s):
+    portset(s)
+    from portkit.portset.model import tags_of
+    (s.work / "plan" / "sheets").mkdir(parents=True, exist_ok=True)
+    for sid in ("set-a", "set-b"):
+        (s.work / "plan" / "sheets" / f"{sid}.md").write_text(f"# {sid}\n")
+    items = ("- [RULE] use the facade, as the code rules say\n"
+             "- [RULE] call set-b's `Thing::new` with a guessed signature\n  more text\n"
+             "- [RULE] write it with `// PLAN: assumed fn f()`\n"
+             "- [STUB] already there (set-a's own row)\n- [DECIDE] pick one\n")
+    t = tags_of(items, "set-a")
+    check(t == {"STUB": 1, "RULE": 1, "DECIDE": 3}, f"promotion: {t}")

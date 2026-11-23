@@ -189,7 +189,7 @@ def cmd_plancheck(a) -> Outcome:
     turns = a.max_turns or ctx.pipeline("plancheck_max_turns")
     track.status(sheet.id, "running", f"plan check ({model})")
     items, _ = plan_check(sheet, model, turns)
-    tags = tags_of(items)
+    tags = tags_of(items, sheet.id)
     print(f"plancheck {sheet.id}: " + (", ".join(f"{k} {v}" for k, v in tags.items()) if items else "clear"))
     log = ctx.sets / sheet.id / "plancheck.md"
     if tags["DECIDE"]:
@@ -215,7 +215,7 @@ def cmd_run(a) -> Outcome:
     lookup = lookup_extra()
     if not a.skip_plancheck:
         items, pc = plan_check(sheet, model, ctx.pipeline("plancheck_max_turns"))
-        n = tags_of(items)["DECIDE"]
+        n = tags_of(items, sheet.id)["DECIDE"]
         if n:
             (od / "open.md").write_text(f"# {sheet.id}: open before writing\n\n{items}\n")
             print(f"OPEN: not written; decide the items in {od / 'open.md'}, fix the sheet, then run again "

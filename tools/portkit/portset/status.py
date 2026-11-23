@@ -25,6 +25,7 @@ import re
 from portkit import track
 
 from .context import ctx
+from .model import tags_of
 from .plan import all_sheets, area_of
 
 STAGES = ("planned", "decide", "ready", "open", "blocked", "written", "reviewed", "combined")
@@ -67,10 +68,10 @@ def stage_of(set_id: str) -> tuple[str, str]:
         e, ra = check_counts(d)
         return "written", f"{e} check errors, {ra} rust-analyzer errors"
     if newer(d / "open.md", dec):
-        n = len(re.findall(r"^- \[DECIDE\]", (d / "open.md").read_text(), re.M))
+        n = tags_of((d / "open.md").read_text(), set_id)["DECIDE"]
         return "open", f"{n} DECIDE items (open.md)"
     if (d / "plancheck.md").exists():
-        n = len(re.findall(r"^- \[DECIDE\]", (d / "plancheck.md").read_text(), re.M))
+        n = tags_of((d / "plancheck.md").read_text(), set_id)["DECIDE"]
         if n and not newer(dec, d / "plancheck.md"):
             return "decide", f"{n} DECIDE items (plancheck.md)"
         return "ready", "decided (decisions.md)" if dec.exists() else "plan check clear"

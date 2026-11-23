@@ -224,6 +224,7 @@ One model call (`models.plancheck`, `pipeline.plancheck_max_turns` turns) on the
 |---|---|
 | `[STUB]` | The base already has what a row asks (the stubs wrote it). Nothing to decide. |
 | `[RULE]` | One option follows from the code rules, the contract or the sheet; the item names the rule and the option. |
+A `[RULE]` item that names another set's id or carries a `PLAN: assumed` marker rests on something the rules do not settle: port-set counts it as DECIDE.
 | `[DECIDE]` | The options are all defensible, or one changes another set's files or the contract. |
 
 Always DECIDE, whatever the model would pick: a fallback or second path beside an existing mechanism; a hash, cache, guard or flag standing in for a missing signal; a visibility or API change made only for a test; a choice that depends on another set's item beyond the given signature.

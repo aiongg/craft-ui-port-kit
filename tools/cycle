@@ -24,7 +24,9 @@ usage: cycle LABEL [--fixers FILE] [--tracks SRC] [--groups DIR] [--batch B] [--
 Steps:
   1. merge   Refuses (exit 2) when an integration tree has uncommitted changes. `git merge --no-ff --no-edit` of
              each fixer branch into framework.integration (fw:) or app.integration (app:). On a conflict it aborts
-             that merge, merges nothing more and stops (exit 3), naming the branch and the files.
+             that merge, merges nothing more and stops (exit 3), naming the branch and the files. A branch whose
+             merge an earlier cycle's guard reverted (cycle.json `reverted`) is skipped while it has no new commits;
+             with new commits, the cycle first reverts that revert, so the earlier commits come back with the new.
   2. compile `compile-gate LABEL-compile`. Its exit 2 stops the cycle.
   3. lint    Only after a clean compile, on the crates that own files changed since framework.writing_base and
              app.writing_base (crates under a `vendor/` directory left out): `cl cargo fmt -p <crate>...`, committed
@@ -34,7 +36,12 @@ Steps:
              `[workspace.metadata.cl] selection`), so no second feature set builds. A finding in a crate that did not
              change is listed and not counted.
   4. tests   Only after a clean compile: the framework trials, `test-run LABEL --app`, then
-             `compare-runs.py LABEL --tracks SRC --out <run>/tracks.md` and `diag-cut.py LABEL --tracks SRC`.
+             `compare-runs.py LABEL --tracks SRC --out <run>/tracks.md --json <run>/attribution.json` with a
+             `--branch TASK=TREE:PRE..MERGE` per new merge, and `diag-cut.py LABEL --tracks SRC`.
+             Merge guard, in a red round: a fixer that compare-runs marks `likely` for more newly failing tests
+             (passing in the previous run) than its track fixed gets each of its merges of this cycle reverted
+             (`git revert -m 1`, one commit per tree), recorded in cycle.json `reverted` with the revert sha, before
+             the cycle records. Its packet lists those tests. A revert that conflicts is aborted and noted.
              Framework trials: in a red round (tracks and fixers given), `test-run LABEL-fw --fw C ...` over each
              red fixer's own crates (the packages owning the framework files its merged commits changed, in this
              and earlier cycles) plus the crates whose trials failed in the previous cycle; when those and the app
@@ -63,12 +70,15 @@ Steps:
              `land/early-ci.sh` command; it never runs it. A failed fetch is a note. Also in --dry-run.
 
 Result: cycle.json, and the last stdout line
-  cycle LABEL: exit N; merged k/n; compile: ...; lint: ...; app: ...; look: ...; packets: ...; mode M; T s
+  cycle LABEL: exit N; merged k/n; compile: ...; lint: ...; app: ...; reverted: ...; look: ...; packets: ...; mode M; T s
+cycle.json `red` (a red round): the fixer mode, the fixers' models, the pass delta against the previous cycle and the
+follow-ups' cost, also in report.md and the cycle event (process/costs.md, "Red rounds by fixer model").
 cycles.tsv columns: label, start (UTC), phase, batch, area, mode, merge_s, compile_s, lint_s, test_s, look_s,
 send_s, total_s, gap_s (start minus the previous cycle's end), errors (compile errors plus counted lint findings),
 failing (app tests failing outside work.baseline_failures), exit.
 
-Exit status: 0 green (compiles, lint clean, no failing test outside the baseline, no stalled fixer), 1 work left,
+Exit status: 0 green (compiles, lint clean, no failing test outside the baseline, no stalled fixer, no merge
+reverted), 1 work left,
 2 a tool failure or a dirty integration tree, 3 a merge conflict.
 """
 from __future__ import annotations
@@ -130,6 +140,10 @@ class Cycle:
         self.secs: dict[str, float] = {}
         self.prev = self.previous()
         self.out: dict = {"label": a.label, "start": utc(self.t0), "mode": self.mode, "notes": []}
+        # {task: {repo: {"revert", "branch", "tip", "merge"}}}: merges the guard reverted and that stay reverted.
+        self.reverted: dict[str, dict[str, dict]] = {
+            t: dict(rs) for t, rs in ((self.prev or {}).get("reverted") or {}).items()}
+        self.regressions: dict[str, list[dict]] = {}
 
     # ------------------------------------------------------------ inputs
     def previous(self) -> dict | None:
@@ -225,11 +239,34 @@ class Cycle:
             if git(tree, "status", "--porcelain", "-uno").stdout.strip():
                 raise Stop(EXIT_TOOL, f"{REPOS[repo]} ({tree}) has uncommitted changes; commit or remove them first")
         done = []
+        earlier = {t: dict(rs) for t, rs in self.reverted.items()}
         for fx in fixers:
             for repo, br in fx["branches"].items():
                 tree = self.trees[repo]
                 pre = git(tree, "rev-parse", "HEAD").stdout.strip()
-                files = git(tree, "diff", "--name-only", f"{pre}...{br}").stdout.split()
+                restore = None
+                rv = (earlier.get(fx["task"]) or {}).get(repo)
+                if rv and rv.get("branch") == br:
+                    tip = git(tree, "rev-parse", br).stdout.strip()
+                    if tip == rv.get("tip"):   # nothing new since the revert: it stays reverted
+                        done.append({"task": fx["task"], "repo": repo, "branch": br, "sha": pre, "pre": pre,
+                                     "files": [], "new": False, "skipped": "reverted, no new commits"})
+                        continue
+                    # The reverted commits are reachable already: a plain merge would bring only the new ones.
+                    r = git(tree, "revert", "--no-edit", rv["revert"], check=False)
+                    if r.returncode != 0:
+                        git(tree, "revert", "--abort", check=False)
+                        done.append({"task": fx["task"], "repo": repo, "branch": br, "conflict": ["(restoring "
+                                     f"the reverted merge {rv['revert'][:10]})"]})
+                        self.out["merged"] = done
+                        raise Stop(EXIT_CONFLICT, f"restoring the reverted merge of {br} in {REPOS[repo]} "
+                                                  f"(git revert {rv['revert'][:10]}) conflicts; resolve it on the "
+                                                  "integration branch, then run the cycle again")
+                    restore = git(tree, "rev-parse", "HEAD").stdout.strip()
+                    self.reverted[fx["task"]].pop(repo)
+                    if not self.reverted[fx["task"]]:
+                        del self.reverted[fx["task"]]
+                files = git(tree, "diff", "--name-only", f"{restore or pre}...{br}").stdout.split()
                 r = git(tree, "merge", "--no-ff", "--no-edit", "-m", f"cycle {self.a.label}: merge {br}", br, check=False)
                 if r.returncode != 0:
                     conflicted = git(tree, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split()
@@ -240,8 +277,8 @@ class Cycle:
                                               f"{', '.join(conflicted) or r.stderr.strip()[:200]}; resolve it on the "
                                               f"integration branch, then run the cycle again")
                 head = git(tree, "rev-parse", "HEAD").stdout.strip()
-                done.append({"task": fx["task"], "repo": repo, "branch": br, "sha": head, "files": files,
-                             "new": head != pre})
+                done.append({"task": fx["task"], "repo": repo, "branch": br, "sha": head, "pre": pre, "files": files,
+                             "new": head != pre, **({"restore": restore} if restore else {})})
             track.event("merge", f"cycle {self.a.label}: merged {', '.join(fx['branches'].values()) or 'nothing'}",
                         task=fx["task"])
         return done
@@ -396,10 +433,60 @@ class Cycle:
                           failed_crates=r["failed_crates"], passed=fw["passed"] + r["passed"],
                           statuses=sorted(set(fw["statuses"]) | set(r["statuses"])))
         if tracks and "app" in self.trees:
+            branches = [x for m in getattr(self, "merged", []) if m.get("new") and m.get("pre")
+                        for x in ("--branch", f"{m['task']}={self.trees[m['repo']]}:{m['pre']}..{m['sha']}")]
             self.tool("compare-runs.py", self.a.label, "--tracks", tracks, "--out", str(self.rd / "tracks.md"),
-                      log="compare.log")
+                      "--json", str(self.rd / "attribution.json"), *branches, log="compare.log")
             self.tool("diag-cut.py", self.a.label, "--tracks", tracks, log="diag-cut.log")
         return res
+
+    def red_record(self) -> dict | None:
+        """A red round's fixer models, pass delta (app tests passing now minus in the previous cycle) and the cost of
+        the follow-ups it sent, for process/costs.md ("Red rounds by fixer model")."""
+        sent = self.out.get("sent") or {}
+        app = (self.out.get("tests") or {}).get("app")
+        if not self.inherit("tracks") or not app:
+            return None
+        before = ((self.prev or {}).get("tests") or {}).get("app", {}).get("passed")
+        return {"mode": self.mode, "models": sorted({v["model"] for v in sent.values() if v.get("model")}),
+                "fixers": len(sent), "pass_delta": app["passed"] - before if before is not None else None,
+                "cost_usd": round(sum(v.get("cost_usd") or 0 for v in sent.values()), 2)}
+
+    def guard(self) -> list[str]:
+        """The merge guard of a red round: a fixer whose merges compare-runs.py marks `likely` for more newly failing
+        tests (that passed in the previous run) than its track fixed gets each of its merges reverted on the
+        integration branches. Returns the reverted tasks."""
+        try:
+            att = json.loads((self.rd / "attribution.json").read_text()).get("tracks") or {}
+        except (OSError, ValueError):
+            return []
+        out = []
+        for task, a in att.items():
+            bad, fixed = a.get("regressed") or [], a.get("fixed") or []
+            mine = [m for m in getattr(self, "merged", []) if m["task"] == task and m.get("new") and m.get("sha")]
+            if len(bad) <= len(fixed) or not mine:
+                continue
+            self.regressions[task] = bad
+            for m in reversed(mine):   # newest first, so each revert applies to the tree it was merged into
+                tree = self.trees[m["repo"]]
+                r = git(tree, "revert", "-m", "1", "--no-commit", m["sha"], check=False)
+                if r.returncode == 0 and m.get("restore"):   # the restored earlier commits go out with it
+                    r = git(tree, "revert", "--no-commit", m["restore"], check=False)
+                if r.returncode != 0:
+                    git(tree, "revert", "--abort", check=False)
+                    self.out["notes"].append(f"{task}: the revert of its merge {m['sha'][:10]} in {REPOS[m['repo']]} "
+                                             f"conflicts; it stays merged; revert it by hand")
+                    continue
+                git(tree, "commit", "-q", "-m", f"cycle {self.a.label}: revert merge of {m['branch']} "
+                                                f"({len(bad)} regressions, {len(fixed)} fixed)")
+                self.reverted.setdefault(task, {})[m["repo"]] = {
+                    "revert": git(tree, "rev-parse", "HEAD").stdout.strip(), "branch": m["branch"],
+                    "tip": git(tree, "rev-parse", m["branch"]).stdout.strip(), "merge": m["sha"]}
+            if task in self.reverted:
+                out.append(task)
+                track.event("revert", f"cycle {self.a.label}: merge reverted, {len(bad)} newly failing tests against "
+                                      f"{len(fixed)} fixed", task=task)
+        return out
 
     # ------------------------------------------------------------ 5. look
     def look(self, areas: list[str]) -> dict:
@@ -459,7 +546,8 @@ class Cycle:
                             for r, br in branches.get(task, {}).items()
                             if r in self.trees and touched.get(task, {}).get(r))
             mine = owned.get(task, [])
-            if not failing and not mine and not diag_left:
+            bad = self.regressions.get(task, [])
+            if not failing and not mine and not diag_left and not bad:
                 result[task] = {"packet": None, "failing": 0, "findings": 0}
                 track.status(task, "done", f"cycle {self.a.label}: nothing left on its list")
                 self.give_slot(task)
@@ -469,6 +557,12 @@ class Cycle:
                  f"Fixer mode for this round: `{mode}`. Follow your prompt's section for this mode, on the same "
                  f"branches as before, and hand back the same way. Budget: about "
                  f"{self.cfg.get('pipeline.fixer_calls')} tool calls for this round.", "", *trees]
+            if bad:
+                L += [f"## Your merge was reverted ({len(bad)} tests that passed before fail with it)", "",
+                      "The cycle reverted your merge on the integration branch: your change broke more passing tests "
+                      "than it fixed. Fix these on your branch, keep your earlier fixes, and hand back; the next "
+                      "cycle restores your reverted commits together with your new ones.", "",
+                      *(f"- `{b['test']}`: {b.get('panic') or '(no panic line)'} ({b.get('why')})" for b in bad), ""]
             if mine:
                 L += [f"## Compile errors and lint findings in files your commits changed ({len(mine)})", "", "```",
                       *mine, "```", ""]
@@ -478,7 +572,8 @@ class Cycle:
                 L += ["Every test of your list passes. Remove the `DIAG ` prints you left, in one commit."]
             f = out_dir / f"{task}.md"
             f.write_text("\n".join(L).rstrip() + "\n")
-            result[task] = {"packet": str(f), "failing": failing, "findings": len(mine), "mode": mode}
+            result[task] = {"packet": str(f), "failing": failing, "findings": len(mine), "mode": mode,
+                            "regressions": len(bad)}
         result["_unowned"] = unowned
         return result
 
@@ -545,7 +640,7 @@ class Cycle:
             except (ValueError, IndexError):
                 j = {"ok": False, "error": f"exit {r.returncode}: {(r.stderr or r.stdout).strip()[-300:]}"}
             return task, {"ok": bool(j.get("ok")), "error": j.get("error"), "cost_usd": j.get("cost_usd"),
-                          "fresh": bool(j.get("fresh"))}
+                          "fresh": bool(j.get("fresh")), "model": j.get("model")}
 
         with ThreadPoolExecutor(max(1, int(self.cfg.get("pipeline.parallel")))) as ex:
             sent = dict(ex.map(one, todo))
@@ -632,6 +727,8 @@ def summary_line(c: Cycle, code: int) -> str:
         t = o["tests"]["app"]
         parts.append(f"app: {t['passed']} passed, {len(t['failing'])} failing ({len(t['new_vs_baseline'])} outside the "
                      f"baseline; -{len(t['fixed'])} fixed, +{len(t['new'])} new)")
+    if o.get("guard"):
+        parts.append(f"reverted: {', '.join(o['guard'])}")
     if "look" in o:
         lk = o["look"]
         parts.append(f"look: {lk['status']}" + (f" ({lk['why']})" if lk.get("why") else
@@ -657,6 +754,7 @@ def report(c: Cycle, code: int) -> str:
     for m in o.get("merged", []):
         L.append(f"- {m['task']}: {m['repo']} `{m['branch']}` "
                  + (f"CONFLICT in {', '.join(m['conflict'])}" if "conflict" in m else
+                    f"skipped: {m['skipped']}" if m.get("skipped") else
                     f"-> {m['sha'][:10]}" + ("" if m.get("new") else " (nothing new)")))
     if not o.get("merged"):
         L.append("- none")
@@ -684,6 +782,17 @@ def report(c: Cycle, code: int) -> str:
                   f"- new since the last cycle: {', '.join(app['new']) or 'none'}"]
         if (c.rd / "tracks.md").is_file():
             L.append(f"- per track: {c.rd / 'tracks.md'}")
+    if o.get("guard"):
+        L += ["", "## Merge guard", ""]
+        for t in o["guard"]:
+            L.append(f"- {t}: merge reverted (" + ", ".join(f"{r} {v['revert'][:10]}" for r, v in o["reverted"][t].items())
+                     + f"); newly failing: {', '.join(b['test'] for b in c.regressions.get(t, []))}")
+    if o.get("red"):
+        r = o["red"]
+        L += ["", "## Red round record", "",
+              f"Mode {r['mode']}; models {', '.join(r['models']) or '-'}; {r['fixers']} fixers sent; pass delta "
+              f"{r['pass_delta'] if r['pass_delta'] is not None else '-'}; follow-up cost ${r['cost_usd']:.2f}. "
+              "Add it to process/costs.md, \"Red rounds by fixer model\", when the port's numbers are collected."]
     if "look" in o:
         L += ["", "## Look", "", f"{o['look']['status']}" + (f": {o['look'].get('why')}" if o["look"].get("why") else "")
               + (f"; panels {', '.join(o['look'].get('panels', []))}" if o["look"].get("panels") else "")]
@@ -785,7 +894,7 @@ def main() -> int:
     with track.recorded("cycle") as rec:
         try:
             merged = c.timed("merge", c.merge, fixers) if not a.no_merge else []
-            c.out["merged"] = merged
+            c.out["merged"] = c.merged = merged
             touched = c.touched(merged)
             c.out["touched"] = {t: {r: sorted(fs) for r, fs in rs.items()} for t, rs in touched.items()}
             comp = c.timed("compile", c.compile)
@@ -797,6 +906,8 @@ def main() -> int:
                 c.out["lint"] = lint
             if compiled and not a.no_tests:
                 c.out["tests"] = c.timed("test", c.tests, tracks, fixers, touched)
+                if tracks and "app" in c.out["tests"]:
+                    c.out["guard"] = c.guard()
             if comp["app_status"] == "ok" and not a.no_look and "app" in c.trees:
                 c.out["look"] = c.timed("look", c.look, areas)
             elif not a.no_look:
@@ -808,11 +919,13 @@ def main() -> int:
             fw = (c.out.get("tests") or {}).get("fw") or {}
             green = (compiled and not (lint or {}).get("count") and not t.get("new_vs_baseline")
                      and not t.get("bad_binaries") and not fw.get("failing") and not fw.get("bad_binaries")
-                     and not c.out.get("stalled") and not a.no_tests)
+                     and not c.out.get("stalled") and not a.no_tests and not c.out.get("guard"))
             code = EXIT_GREEN if green else EXIT_LEFT
         except Stop as e:
             code, c.out["stop"] = e.code, e.why
             print(f"cycle: {e.why}", file=sys.stderr)
+        c.out["reverted"] = c.reverted
+        c.out["red"] = c.red_record()
         c.out["notes"] += c.phase(st, a.batch, a.area, compiled)
         c.out["upstream"] = c.upstream(code == EXIT_GREEN)
         c.out["notes"] += c.out["upstream"]
@@ -833,7 +946,8 @@ def main() -> int:
                          "gap_s": c.out.get("gap_s"), "steps": c.out["seconds"],
                          "errors": (c.out.get("compile") or {}).get("fw_errors", 0)
                          + (c.out.get("compile") or {}).get("app_errors", 0),
-                         "failing": len(t.get("new_vs_baseline", [])), "weekly_pct": c.out["weekly_pct"]})
+                         "failing": len(t.get("new_vs_baseline", [])), "weekly_pct": c.out["weekly_pct"],
+                         "reverted": c.out.get("guard") or [], "red": c.out.get("red")})
     print(line)
     return code
 

@@ -2,7 +2,7 @@
 """compare-runs.py: compare a test run with the previous one, per red-round track, and attribute new failures.
 
 usage: compare-runs.py NEW [OLD] [--tracks SRC] [--baseline FILE] [--branch TRACK=REPO:RANGE]... [--out FILE]
-                       [--round N] [--task-prefix P] [--config PORT.TOML]
+                       [--json FILE] [--round N] [--task-prefix P] [--config PORT.TOML]
 
 NEW and OLD are run labels (directories under work.runs, as test-run writes them), run directories or log files
 (libtest or nextest output; see tools/portkit/testlog.py). OLD defaults to the run recorded before NEW in
@@ -22,6 +22,10 @@ The report (stdout, and --out FILE; default <NEW run dir>/compare.md when NEW is
     longest module path with it is `maybe`; else `unattributed`;
   - failures of OLD outside every track that pass or are gone now, and the tests that are new since OLD.
 
+--json FILE writes the attributions per track: {"tracks": {TRACK: {"fixed": [tests of the track that failed in OLD
+and pass now], "regressed": [new failures that passed in OLD, attributed `likely` to the track]}}, "old": OLD}.
+tools/cycle reverts a fixer's merge when its regressed list is longer than its fixed list.
+
 Dashboard: with --round N it posts round N (pass, fail, and in its data the new failures and the per-track
 counts). Without --round it posts a `compare` event with the same numbers: test-run already posted the round for
 a full run it recorded, and one round must not appear twice. Track tasks are `<P><track>` (--task-prefix); each
@@ -31,6 +35,7 @@ Exit 0; 2 when a log or the tracks cannot be read.
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -101,6 +106,7 @@ def main(argv=None) -> int:
     ap.add_argument("--baseline")
     ap.add_argument("--branch", action="append", default=[], metavar="TRACK=REPO:RANGE")
     ap.add_argument("--out")
+    ap.add_argument("--json")
     ap.add_argument("--round")
     ap.add_argument("--task-prefix", default="")
     ap.add_argument("--config")
@@ -156,8 +162,13 @@ def main(argv=None) -> int:
                     L.append("- fixed: " + ", ".join(f"`{short(n)}`" for n in fixed))
         L += ["", f"## New failures ({len(new_fail)})", ""]
         blame: dict[str, list[str]] = {}
+        regressed: dict[str, list[dict]] = {}
         for n in new_fail:
             t, why = attribute(n, new, tracks, changes)
+            if t and why.startswith("likely") and old.status.get(n) == "ok":
+                f = new.failures.get(n)
+                regressed.setdefault(t, []).append({"test": n, "why": why,
+                                                    "panic": f"{f.site} {f.message}".strip() if f else ""})
             f = new.failures.get(n)
             was = "absent before" if n not in old.status else "passed before"
             L.append(f"- `{n}` ({was}){': ' + f.site + ' ' + f.message if f and f.site else ''}. "
@@ -177,6 +188,12 @@ def main(argv=None) -> int:
             L += ["", f"## Tests new since {old_label} ({len(fresh)}): {sum(new.status[n] == 'ok' for n in fresh)} pass, "
                   f"{sum(n in nf for n in fresh)} fail"]
         report = "\n".join(L) + "\n"
+        if a.json:
+            att = {t: {"fixed": [n for n in ns if n in of and new.status.get(n) == "ok"],
+                       "regressed": regressed.get(t, [])} for t, ns in tracks.items()}
+            for t in regressed:
+                att.setdefault(t, {"fixed": [], "regressed": regressed[t]})
+            Path(a.json).write_text(json.dumps({"tracks": att, "old": old_label}, indent=1) + "\n")
 
         out = Path(a.out) if a.out else (new_log.parent / "compare.md" if new_log.parent.is_relative_to(runs) else None)
         if out:

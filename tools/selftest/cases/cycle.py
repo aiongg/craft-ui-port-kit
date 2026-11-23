@@ -220,3 +220,42 @@ def case_build_mode_packet_names_the_slot(s):
     p = s.run("cycle", "r2", "--no-lint", "--no-send")
     pk = (s.work / "runs" / "r2" / "followup" / "t1.md").read_text()
     check("Fixer mode for this round: `code-only`" in pk, "no free slot: code-only this round", p)
+
+
+def case_merge_guard_reverts_a_regressing_fixer(s):
+    fw, app = setup(s)
+    p = s.run("cycle", "r1", "--fixers", "fixers.txt", "--tracks", "groups.md", "--no-lint", "--no-send")
+    check(p.returncode == 1, "first cycle: tests::a passes, tests::b fails", p)
+    git(app, "switch", "-q", "red/t1")
+    s.commit(app, {"app/src/lib.rs": "fixed b\n"}, "t1 fixes tests::b")
+    git(app, "switch", "-q", "-c", "red/t2", "main")
+    s.commit(app, {"app/src/t2.rs": "breaks a\n"}, "t2 breaks tests::a")
+    git(app, "switch", "-q", "main")
+    (s.work / "fixers.txt").write_text("t1\nt2\n")
+    (s.work / "groups.md").write_text("## t1\n\n### tests::b\n\n## t2\n\n### tests::c\n")
+    log2 = (FAIL_LOG.replace("test tests::a ... ok\ntest tests::b ... FAILED", "test tests::a ... FAILED\ntest tests::b ... ok")
+            .replace("---- tests::b stdout ----\nDIAG b: value was 3\nthread 'tests::b' panicked at src/lib.rs:9:5:",
+                     "---- tests::a stdout ----\nthread 'tests::a' panicked at src/t2.rs:3:5:")
+            .replace("    tests::b\n", "    tests::a\n").replace("app lib tests::b", "app lib tests::a"))
+    s.cl_log("test-all", log2, 1)
+    p = s.run("cycle", "r2", "--fixers", "fixers.txt", "--tracks", "groups.md", "--no-lint", "--no-send")
+    j = json.loads((s.work / "runs" / "r2" / "cycle.json").read_text())
+    check(j.get("guard") == ["t2"] and "app" in j["reverted"]["t2"] and "reverted: t2" in p.stdout,
+          f"t2 is reverted: {j.get('guard')}, {j.get('reverted')}", p)
+    check(j["red"]["pass_delta"] == 0 and j["red"]["mode"] == "code-only" and "Red round record" in
+          (s.work / "runs" / "r2" / "report.md").read_text(), f"the red round is recorded: {j.get('red')}", p)
+    check(not (app / "app" / "src" / "t2.rs").exists() and (app / "app" / "src" / "lib.rs").read_text() == "fixed b\n",
+          "t2's change is gone from the integration tree, t1's stays", p)
+    pk = (s.work / "runs" / "r2" / "followup" / "t2.md").read_text()
+    check("Your merge was reverted" in pk and "tests::a" in pk, f"t2's packet lists its regression: {pk}", p)
+    s.cl_log("test-all", "  ok app lib: 2 passed, 0 failed, 0 s\ncl: 2 passed, 0 failed, 1 binaries, 0 overflowed stacks, 0 s\n")
+    p = s.run("cycle", "r3", "--no-lint", "--no-send", "--no-tests")
+    check(not (app / "app" / "src" / "t2.rs").exists() and "skipped: reverted" in (s.work / "runs" / "r3" / "report.md").read_text(),
+          "with no new commits the branch stays reverted", p)
+    git(app, "switch", "-q", "red/t2")
+    s.commit(app, {"app/src/t2.rs": "breaks a\n// and now fixed\n"}, "t2 fixes its regression")
+    git(app, "switch", "-q", "main")
+    p = s.run("cycle", "r4", "--no-lint", "--no-send", "--no-tests")
+    j = json.loads((s.work / "runs" / "r4" / "cycle.json").read_text())
+    check((app / "app" / "src" / "t2.rs").read_text().endswith("now fixed\n") and not j["reverted"],
+          "new commits bring the reverted change back with them", p)

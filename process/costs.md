@@ -94,3 +94,14 @@ Phases 6 and 7 run as cycles (`tools/cycle`, [11-build-loop.md](11-build-loop.md
 Lead cost of the rest of the port = cycles left x lead calls per cycle x cost per lead call, plus the planning phases' lead calls at the same price. Add it to the agents' projection before you give the developer the total.
 
 One measured run (a second port, phases 5 to 7): about $0.07 per lead call at about 230k context ($0.06 to $0.10 at median contexts of 177k to 293k); about 8 lead calls per cycle (1,164 calls over about 145 cycles); the lead was 61 % of the session's recorded cost. Keeping the lead's context small lowers every one of its calls: hand off at a stopping point once it is large (`rules/lead-rules.md`, "Records and hand-offs").
+
+## Red rounds by fixer model
+
+`models.red_fixer` follows the fixer mode: Opus in `build`, Sonnet in `code-only`. Fixers that build confirm their own fixes, and on Opus they cleared their tracks in fewer rounds; no Sonnet build round has been measured. Each red round's record decides whether that default holds.
+
+Every red cycle writes the record to `cycle.json` (`red`), to its `report.md` ("Red round record") and to its `cycle` event: the fixer mode, the fixers' models, how many fixers it sent, the pass delta (app tests passing now minus in the previous cycle) and the follow-ups' cost. Add each port's rounds here, labelled with the app and the batch:
+
+| App | Batch and round | Mode | Model | Fixers | Pass delta | Cost |
+|---|---|---|---|---|---|---|
+
+A round whose fixers ran on more than one model counts once per model only when the tracks can be separated; otherwise list both models in one row.

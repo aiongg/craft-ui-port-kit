@@ -58,6 +58,7 @@ Read these when the situation comes up, not up front:
 | To find a tool, or what a tool reads and writes | `tools/README.md`, then the tool's `--help`; `tools/port-set.md`, `tools/track.md`, `tools/look.md` for the three large ones |
 | When you start a workflow script | `workflows/README.md` |
 | When you write a one-off brief | `prompts/p8-task-brief.md`, `prompts/precheck.md`, `templates/task-report.md` |
+| When you brief a fix after landing (an issue, a CI leg, a PR conflict) | `prompts/p10-followup-fix.md`; every subagent brief comes from a kit prompt (`rules/lead-rules.md`, "Tasks and briefs") |
 | When you need a worked example of an artifact | `examples/photocraft/README.md` |
 
 Render every prompt with `tools/render-prompt <name> [NAME=VALUE]...`; it fills `{{...}}` from `port.toml` and names any placeholder it could not fill. Workflow args come from `tools/render-prompt --workflow-args <workflow>`.

@@ -125,11 +125,15 @@ It fetches only `<ref>` into a fresh repository under `work.landing`, runs the l
 The push starts the repositories' CI. Upstream CI may refuse things a local build accepts, for example a git dependency from outside the project's organisation, or a path dependency: the pin step exists for that.
 
 - Record the result for each repository: `tools/track event landing "CI <passed|failed> at <sha>" --task land-app`.
-- A failure is fixed on the port branch (a small red round when it is a test, a direct fix when it is a pin or a lint), then landed again through steps 2 to 4.
+- A failure is fixed on the port branch (a small red round when it is a test, a direct fix when it is a pin or a lint), then landed again through steps 2 to 4. An agent that fixes it gets its brief from `prompts/p10-followup-fix.md` ([After landing: follow-up fixes](#after-landing-follow-up-fixes)).
 
 ## Before the merge: run the app on each platform
 
 The developer runs the landed app once on each platform it ships on (a window opens, the main surface draws, one edit works) before the PRs merge. CI builds the legs; only a run shows a window that opens blank. Record each platform and the result in `STATE.md`.
+
+## After landing: follow-up fixes
+
+Work after landing (issues on the landed port, red CI legs, conflicts on the landing PRs) runs as one-off tasks, one fix per agent. Render every brief from `prompts/p10-followup-fix.md`, never write one freehand: it carries `rules/agent-common.md` and gives the agent one warm build tree from the pool or a seeded target dir, cargo in the background with a notice, no sleep loops, the call budget and when to stop. Answer its plan, look at its result yourself, and land the fix through steps 2 to 4.
 
 ## Exit
 

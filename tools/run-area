@@ -2,7 +2,8 @@
 # Write one area's sets, N at a time. A set with more Files rows than pipeline.agent_files_over goes to agent mode in
 # rounds of pipeline.agent_round_turns turns (each round a fresh context; `--continue` while its check.md names a
 # scripted error or the last round ran out of turns, at most pipeline.agent_continue_rounds rounds); smaller sets go
-# to the one-shot pipeline (`port-set run`). Every set is rachecked.
+# to the one-shot pipeline (`port-set run`). Every set is rachecked. Before any set starts, the writer canary
+# (`racheck.py canary`) must give 0 errors on an untouched file in each repo the sets write; else exit 2.
 # Resumes a killed run: sets already in the log are skipped; an agent-mode set whose trees hold uncommitted work gets
 # that work committed and checked, then goes straight to the --continue rounds.
 #
@@ -76,6 +77,10 @@ one() {
   echo "$(date -u +%H:%M) $s ($model, $files files): $(echo "$out" | cut -c1-400)"
 }
 export -f one
+
+# Writer canary: every repo these sets write must give 0 rust-analyzer errors on an untouched file, or every set's
+# racheck reports false errors (racheck.py canary).
+"$TOOLS/racheck.py" canary --sets "$shared" --sets "$default" || die "writer canary failed (above): fix the racheck daemons or the trees they load before writing"
 
 mkdir -p "$sets"
 par=$(cfgr pipeline.parallel)

@@ -5,6 +5,15 @@
   racheck.py check TREE --repo fw|app --changed P... [--also P...]   one request; prints JSON
   racheck.py stop fw|app                 ask the daemon to exit
   racheck.py status fw|app               rust-analyzer's last server status, or "not running"
+  racheck.py canary [fw|app ...] [--sets LIST ...]   the writer canary: 0 errors on an untouched file, per repo
+
+Canary: before a writer batch, each repo's daemon diagnoses one file of its loaded tree that no set has touched: the
+facade's src/lib.rs for fw (framework.facade_manifest), the first file under app.ui_dirs that names the facade for
+app. That file compiles on the writing base, so any error there means the daemon's view is wrong (a dependency it
+cannot resolve, a missing framework patch), and every set's racheck would report false errors. The repos are the
+ones named, or those the sets in each LIST (one set id per line) write. Prints `canary <repo>: <file>: <n> errors` per
+repo and the first errors. Exit 0 when every canary has 0 errors, 1 when one has errors, 2 when a daemon is not
+running or a repo has no canary file.
 
 Every path comes from port.toml (racheck.*, framework.*, app.*, build.memory_cap); process/config.md lists the keys.
 
@@ -280,12 +289,61 @@ def check(cfg, tree, repo, changed, also=(), fw_tree=None, fw_changed=(), every=
                              "overlay": overlay})
 
 
+def canary_file(cfg, repo):
+    """The canary's path relative to the daemon's loaded tree, or None."""
+    root = repos(cfg)[repo]["root"]
+    if repo == "fw":
+        rel = str(Path(cfg.require("framework.facade_manifest")).parent / "src" / "lib.rs")
+        return rel if (root / rel).is_file() else None
+    facade = cfg.require("framework.facade").replace("-", "_")
+    for d in cfg.get("app.ui_dirs") or []:
+        for f in sorted((root / d).rglob("*.rs")):
+            text = f.read_text(errors="replace")
+            if f"{facade}::" in text or f"use {facade}" in text:
+                return str(f.relative_to(root))
+    return None
+
+
+def canary(cfg, names, set_lists):
+    """Exit status of the canary over the repos named or written by the sets in the lists."""
+    wanted = list(names)
+    if set_lists:
+        from portkit.portset.context import ctx
+        from portkit.portset.sheet import Sheet
+        ctx.load(cfg)
+        for lst in set_lists:
+            for sid in Path(lst).read_text().split():
+                wanted += Sheet(sid).repos()
+    code = 0
+    for repo in dict.fromkeys(wanted):
+        rel = canary_file(cfg, repo)
+        if rel is None:
+            print(f"canary {repo}: no canary file in {repos(cfg)[repo]['root']}")
+            code = 2
+            continue
+        r = query(cfg, repo, {"tree": str(repos(cfg)[repo]["root"]), "changed": [rel], "also": []})
+        if r is None or not r.get("ok"):
+            why = "daemon not running" if r is None else r.get("error")
+            print(f"canary {repo}: {why} (start it: racheck.py serve {repo})")
+            code = 2
+            continue
+        errs = [d for d in r["diagnostics"] if d["severity"] == "error"]
+        print(f"canary {repo}: {rel}: {len(errs)} errors")
+        for d in errs[:5]:
+            print(f"  :{d['line']} {d.get('code') or ''} {d['message'][:160]}")
+        if errs and code == 0:
+            code = 1
+    return code
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--config", help="port.toml (default: PORT_KIT_CONFIG, ./port.toml, the nearest one above)")
     sub = p.add_subparsers(dest="cmd", required=True)
     for name in ("serve", "stop", "status"):
         s = sub.add_parser(name); s.add_argument("repo", choices=REPO_NAMES)
+    s = sub.add_parser("canary"); s.add_argument("repo", nargs="*")
+    s.add_argument("--sets", action="append", default=[], help="a list of set ids; canary every repo they write")
     s = sub.add_parser("check"); s.add_argument("tree"); s.add_argument("--repo", required=True, choices=REPO_NAMES)
     s.add_argument("--all", action="store_true", help="include hints and information"); s.add_argument("--changed", nargs="*", default=[]); s.add_argument("--also", nargs="*", default=[])
     s.add_argument("--fw-tree", help="app only: overlay this framework tree's --fw-changed files on the loaded framework")
@@ -301,6 +359,14 @@ def main():
             rec.result("daemon stopped")
     elif a.cmd == "stop":
         print(query(cfg, a.repo, {"op": "stop"}))
+    elif a.cmd == "canary":
+        bad = [r for r in a.repo if r not in REPO_NAMES]
+        if bad:
+            sys.exit(f"racheck canary: not a repo: {', '.join(bad)} (fw or app)")
+        with track.recorded("racheck canary") as rec:
+            code = canary(cfg, a.repo, a.sets)
+            rec.result(f"canary exit {code}", ok=code == 0)
+        sys.exit(code)
     elif a.cmd == "status":
         print(query(cfg, a.repo, {"op": "status"}) or "not running")
     else:

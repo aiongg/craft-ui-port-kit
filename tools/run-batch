@@ -4,7 +4,8 @@
 #                                            decisions done); MODEL default models.write
 #   run-batch --plancheck LIST [N] [MODEL]   plan-check each set with `port-set plancheck --shared`; MODEL default
 #                                            models.plancheck; a set whose plancheck.md exists is skipped
-# LIST holds one set id per line. N defaults to pipeline.parallel.
+# LIST holds one set id per line. N defaults to pipeline.parallel. In write mode the writer canary (`racheck.py canary`)
+# must give 0 errors on an untouched file in each repo the sets write before any set starts; else exit 2.
 # When pipeline.quota_command is set, a job waits while the command reports a percent of the plan's 5-hour window at
 # or above pipeline.quota_cap (the lead's own session shares the window). The check repeats every 5 minutes.
 # Log (appended): <work.sets>/run-batch.log; each set's output in <work.sets>/<set>/run.log or plancheck.log.
@@ -48,6 +49,12 @@ one() {
   fi
 }
 export -f one wait_for_quota
+
+# Writer canary (write mode): every repo these sets write must give 0 rust-analyzer errors on an untouched file
+# (racheck.py canary).
+if [ "$mode" = run ]; then
+  "$TOOLS/racheck.py" canary --sets "$list" || die "writer canary failed (above): fix the racheck daemons or the trees they load before writing"
+fi
 
 mkdir -p "$sets"
 mkey=models.write; [ $mode = plancheck ] && mkey=models.plancheck

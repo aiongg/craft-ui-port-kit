@@ -16,7 +16,9 @@ Agents (judgement):
 The lead and the developer:
   track show [TASK] [--json]          text view
   track eta [--json]                  projection: cycles left times the median cycle, sets left over the measured
-                                      rate, the weekly quota at the finish
+                                      rate, the spend (agents and lead) and the weekly quota at the finish
+  track usage [--json]                record the calling lead session's cost (its Claude Code session file),
+                                      then print the spend: agents (work.usage_log) plus lead, per hour, at the finish
   track alerts [--stale-min N]        stale, blocked and failed tasks, open questions, answers waiting; exit 0 always
   track watch [--timeout MIN] [--poll SEC]   wait for a new alert (then print the digest) or the timeout; exit 0
   track md [--out PATH]               STATUS.md in the workspace (default: <work.dir>/STATUS.md; - prints it)
@@ -265,11 +267,25 @@ def cmd_show(a):
 
 
 def cmd_eta(a):
-    st = store(a).state()
+    s = store(a)
+    st = s.state()
     if a.json:
         print(json.dumps((st.get("eta") or {}).get("cycles") or {}, indent=1, ensure_ascii=False))
         return
-    print(T.eta_text(st))
+    print(T.eta_text(st, T.spend(st, s.cfg.path("work.usage_log"))))
+
+
+def cmd_usage(a):
+    s = store(a)
+    sample = T.lead_sample()
+    st = s.state()
+    sp = T.spend(st, s.cfg.path("work.usage_log"))
+    if a.json:
+        print(json.dumps({**sp, "sampled": sample}, indent=1, ensure_ascii=False))
+        return
+    print(("lead session " + sample["session"][:8] + f": ${sample['cost_usd']:.2f} recorded") if sample else
+          "lead session: not recorded (no CLAUDE_CODE_SESSION_ID, an agent's shell, or no cost record in its file)")
+    print(T.spend_text(sp))
 
 
 def cmd_alerts(a):
@@ -591,6 +607,9 @@ def main(argv=None):
     c = sub.add_parser("eta", help="projection from the measured cycles and sets")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_eta)
+    c = sub.add_parser("usage", help="record the lead's own cost and print the spend")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_usage)
     c = sub.add_parser("alerts", help="lines for a poll loop")
     c.add_argument("--stale-min", type=int)
     c.set_defaults(fn=cmd_alerts)

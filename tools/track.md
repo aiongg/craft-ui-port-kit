@@ -56,6 +56,7 @@ Run `tools/track --help` for the summary. `--config PATH` before the command pic
 |---|---|
 | `track show [TASK] [--json]` | Text view: phase, counts, tasks by state with age, open questions. With TASK: its history, links, questions and last tool event. |
 | `track eta [--json]` | The cycle projection: cycles run, median cycle period, cycles per finished batch, cycles left, sets left over the measured rate, the finish, and the weekly quota at the finish (`process/costs.md`, "The cycle model"). `--json` prints `eta.cycles`. |
+| `track usage [--json]` | Records the calling lead session's cost so far (the last `cost-state` record of its Claude Code session file, found from `CLAUDE_CODE_SESSION_ID`; nothing from an agent's shell) as a `lead-cost` event, then prints the spend: the agents' calls from `work.usage_log` plus every recorded lead session (the newest cost of each, so sessions before a clear or a handoff stay counted), per hour since the first event, and at the projected finish. `tools/cycle` records the same sample each cycle. `track eta` prints the spend line too. |
 | `track alerts [--stale-min N]` | One line per item that needs action (below). Always exits 0, so a poll loop never stops on it. |
 | `track watch [--timeout MIN] [--poll SEC]` | Waits for the next new alert line or the timeout (below). Always exits 0. |
 | `track md [--out PATH]` | Writes STATUS.md (phase, tasks by state, questions, rounds) in the workspace. Default path: `<work.dir>/STATUS.md`; a path outside `work.dir` is refused; `--out -` prints it. |

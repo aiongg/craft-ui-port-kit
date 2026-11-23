@@ -97,7 +97,7 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `runs` | path | `{work.dir}/runs` | compile-gate, test-run, racheck-gate, compare-runs.py, diag-cut.py, split-failures.py | Compile and test run logs, one dir per run label. Placeholder `{{RUNS}}`. Env: `PORT_KIT_WORK_RUNS`. |
 | `scip` | path | `{work.dir}/scip` | port-set, scip/scipdb.py, init-workspace | SCIP sqlite indexes (`fw.sqlite`, `app.sqlite`). Env: `PORT_KIT_WORK_SCIP`. |
 | `swarm` | path | `{work.dir}/swarm` | swarm.py, init-workspace | swarm.py's run dirs, one per workflow or job list: each job's prompt, reply and checked result (the resume cache), the run log and the script's return value. Env: `PORT_KIT_WORK_SWARM`. |
-| `usage_log` | path | `{work.dir}/usage.tsv` | port-set, swarm.py | Token and cost log of every model call. Env: `PORT_KIT_WORK_USAGE_LOG`. |
+| `usage_log` | path | `{work.dir}/usage.tsv` | port-set, swarm.py, track | Token and cost log of every model call. Env: `PORT_KIT_WORK_USAGE_LOG`. |
 | `state` | path | `{work.dir}/STATE.md` | init-workspace, port-set | The lead's phase state file. Placeholder `{{STATE}}`. Env: `PORT_KIT_WORK_STATE`. |
 | `baseline_failures` | path | `{work.dir}/baseline-failures.txt` | test-run, compare-runs.py | Tests that fail on the unported app at the pinned framework rev (phase 0). Env: `PORT_KIT_WORK_BASELINE_FAILURES`. |
 | `landing` | path | `{work.dir}/landing` | land/land-framework.sh, land/land-app.sh | Scratch clones and scan reports of landing runs. Env: `PORT_KIT_WORK_LANDING`. |

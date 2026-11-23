@@ -79,9 +79,9 @@ Phases 6 and 7 run as cycles (`tools/cycle`, [11-build-loop.md](11-build-loop.md
 
 `track eta` computes these from the cycle events and the board, and the dashboard shows them. The fixer mode changes the period: in `build`, fixers confirm their fixes before they hand back, so a round's gap is longer and the cycles per batch fewer.
 
-**Quota.** The lead's own session uses the same allowance as the agents, and `work.usage_log` holds only the agents' calls. So the projection reads the account's weekly use through `pipeline.weekly_quota_command`, sampled at every cycle: the use per hour since the last reset, times the hours to the finish, gives the share at the finish. When it passes 100 %, ask the developer for a schedule or a second account before the next batch.
+**Quota.** The lead's own session uses the same allowance as the agents, and `work.usage_log` holds only the agents' calls. `track usage` adds the lead's own cost from its session file, so `track eta`'s spend line holds both. So the projection reads the account's weekly use through `pipeline.weekly_quota_command`, sampled at every cycle: the use per hour since the last reset, times the hours to the finish, gives the share at the finish. When it passes 100 %, ask the developer for a schedule or a second account before the next batch.
 
-**Pricing the lead.** The lead is a large part of a run's cost, and `work.usage_log` does not hold it. Price it from three numbers:
+**Pricing the lead.** The lead is a large part of a run's cost, and `work.usage_log` does not hold it. `track usage` reads its recorded cost while the run goes on; to project it, price it from three numbers:
 
 | Term | What it is | How to get it |
 |---|---|---|

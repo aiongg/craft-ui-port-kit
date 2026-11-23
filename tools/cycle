@@ -50,7 +50,8 @@ Steps:
   7. send    `swarm.py --follow-up TASK <packet>` for each packet, pipeline.parallel at a time, and waits for every
              fixer to hand back, at most pipeline.followup_timeout_min minutes each; a fixer past it is stalled.
              Nothing is sent while the board is paused.
-  8. record  <work.runs>/LABEL/report.md and cycle.json, one row in <work.runs>/cycles.tsv, one `cycle` event, and
+  8. record  <work.runs>/LABEL/report.md and cycle.json, one row in <work.runs>/cycles.tsv, one `cycle` event, the
+             lead session's cost (`track usage`'s sample, when it runs from the lead's shell), and
              in phase 6 after a clean compile `track phase 7` (the phase gate decides; a refusal is listed).
   9. upstream  Fetches framework.branch and app.base_branch into refs/portkit/upstream/ of the integration trees
              (portkit/sync.py) and notes "sync due" when a tree is more than land.sync_after_commits behind, or
@@ -776,6 +777,7 @@ def main() -> int:
         c.out["upstream"] = c.upstream(code == EXIT_GREEN)
         c.out["notes"] += c.out["upstream"]
         c.out["weekly_pct"] = c.weekly()
+        c.out["lead"] = T.lead_sample()   # the cycle runs from the lead's shell: its session's cost so far
         c.out["end"] = utc(time.time())
         c.out["total_s"] = time.time() - c.t0
         c.out["seconds"] = {k: round(v, 1) for k, v in c.secs.items()}

@@ -358,6 +358,8 @@ def fold(events: list[dict], now: datetime, stale_min: int = 20, build_batches: 
     rounds: list[dict] = []
     cycles: list[dict] = []
     heads: dict[str, dict] = {}
+    lead: dict[str, dict] = {}             # lead session id -> its newest recorded cost
+    started = None                          # time of the first event
     phase = None
     paused = {"on": False, "note": None, "t": None}
     log: deque = deque(maxlen=LOG_CAP)
@@ -409,6 +411,7 @@ def fold(events: list[dict], now: datetime, stale_min: int = 20, build_batches: 
 
     for e in events:
         k, t = e.get("kind"), e.get("t")
+        started = started or t
         tk = None
         if e.get("task"):
             tk = task(str(e["task"]), t)
@@ -457,6 +460,8 @@ def fold(events: list[dict], now: datetime, stale_min: int = 20, build_batches: 
                      "batch": e.get("batch"), "area": e.get("area")}
         elif k in ("pause", "resume"):
             paused = {"on": k == "pause", "note": e.get("note"), "t": t}
+        elif k == "lead-cost" and isinstance(e.get("data"), dict) and e["data"].get("session"):
+            lead[str(e["data"]["session"])] = {"cost_usd": float(e["data"].get("cost_usd") or 0), "t": t}
         elif k == "head":
             heads[e.get("label")] = {"sha": e.get("sha"), "ref": e.get("ref"), "path": e.get("path"),
                                      "prev": e.get("prev"), "since": t}
@@ -481,7 +486,8 @@ def fold(events: list[dict], now: datetime, stale_min: int = 20, build_batches: 
     return {
         "version": STATE_VERSION, "generated": iso(now), "events": len(events), "stale_min": stale_min,
         "phase": phase, "paused": paused, "counts": counts, "tasks": tasks, "questions": questions,
-        "rounds": rounds, "cycles": cycles[-CYCLES_CAP:], "heads": heads, "stale": stale,
+        "rounds": rounds, "cycles": cycles[-CYCLES_CAP:], "heads": heads, "stale": stale, "started": started,
+        "lead": {"sessions": lead, "cost_usd": builtins.round(sum(v["cost_usd"] for v in lead.values()), 2)},
         "eta": {**eta(tasks, first_run, done_at, spans, now),
                 "cycles": cycle_eta(cycles, tasks, first_run, done_at, now, build_batches)},
         "log": list(reversed(log)),
@@ -595,8 +601,59 @@ def cycle_eta(cycles: list[dict], tasks: dict, first_run: dict, done_at: dict, n
             "notes": notes}
 
 
-def eta_text(state: dict) -> str:
-    """The projection `track eta` prints: the cycle model, the writing left and the weekly quota line."""
+def lead_sample() -> dict | None:
+    """Record the calling lead session's cost (sessions.last_cost of CLAUDE_CODE_SESSION_ID) as a `lead-cost` event;
+    the fold keeps the newest per session, so sessions before a clear or a handoff stay counted. Agents' shells
+    (PORT_KIT_AGENT set) record nothing. Returns {"session", "cost_usd", "models"} or None. Never raises."""
+    from . import sessions
+    from .config import ENV_AGENT
+    try:
+        sid = os.environ.get(sessions.ENV_SESSION)
+        if not sid or os.environ.get(ENV_AGENT):
+            return None
+        c = sessions.last_cost(sid)
+        if c is None:
+            return None
+        event("lead-cost", f"lead session {sid[:8]}: ${c['cost_usd']:.2f}", data={"session": sid, **c})
+        return {"session": sid, **c}
+    except Exception as e:
+        _warn(e)
+        return None
+
+
+def spend(state: dict, usage_log: Path | None) -> dict:
+    """Dollars so far: the agents' calls (work.usage_log, its cost_usd column) and the lead's sessions, the rate per
+    hour since the first event, and the total at the projected finish (track eta)."""
+    agents = 0.0
+    if usage_log and Path(usage_log).is_file():
+        lines = Path(usage_log).read_text().splitlines()
+        col = lines[0].split("\t").index("cost_usd") if lines and "cost_usd" in lines[0].split("\t") else None
+        for line in lines[1:] if col is not None else []:
+            try:
+                agents += float(line.split("\t")[col])
+            except (IndexError, ValueError):
+                continue
+    lead = float((state.get("lead") or {}).get("cost_usd") or 0)
+    total = agents + lead
+    t0 = parse_t(state.get("started"))
+    hours = (now_utc() - t0).total_seconds() / 3600 if t0 else None
+    rate = total / hours if hours and hours > 0.1 else None
+    left_h = ((state.get("eta") or {}).get("cycles") or {}).get("total_h")
+    r2 = lambda x: builtins.round(x, 2) if x is not None else None  # noqa: E731
+    return {"agents_usd": r2(agents), "lead_usd": r2(lead), "lead_sessions": len((state.get("lead") or {}).get("sessions") or {}),
+            "total_usd": r2(total), "per_h_usd": r2(rate),
+            "at_finish_usd": r2(total + rate * left_h) if rate is not None and left_h is not None else None}
+
+
+def spend_text(sp: dict) -> str:
+    return (f"spend: ${sp['agents_usd']:.2f} agents + ${sp['lead_usd']:.2f} lead ({sp['lead_sessions']} sessions) = "
+            f"${sp['total_usd']:.2f}" + (f", ${sp['per_h_usd']:.2f}/h" if sp.get("per_h_usd") is not None else "")
+            + (f", about ${sp['at_finish_usd']:.0f} at the finish" if sp.get("at_finish_usd") is not None else "")
+            + ("" if sp["lead_sessions"] else "; the lead's cost is not recorded yet (track usage from its shell)"))
+
+
+def eta_text(state: dict, sp: dict | None = None) -> str:
+    """The projection `track eta` prints: the cycle model, the writing left, the spend and the weekly quota line."""
     c = (state.get("eta") or {}).get("cycles") or {}
     L = [f"cycles: {c.get('cycles', 0)} run; median period "
          + (f"{c['period_s'] / 60:.1f} min ({c['periods_measured']} measured)" if c.get("period_s") else "not measured")
@@ -606,6 +663,8 @@ def eta_text(state: dict) -> str:
          + (f" = {c['cycle_h']:.1f} h" if c.get("cycle_h") is not None else ""),
          f"sets left: {c.get('sets_left', 0)}" + (f" at {c['sets_per_h']:g}/h = {c['write_h']:.1f} h" if c.get("write_h") else ""),
          "finish: " + (f"{c['finish']} ({c['total_h']:.1f} h)" if c.get("finish") else "not yet measurable")]
+    if sp is not None:
+        L.append(spend_text(sp))
     w = c.get("weekly")
     if w:
         L.append(f"weekly quota: {w['now_pct']:g} % used"

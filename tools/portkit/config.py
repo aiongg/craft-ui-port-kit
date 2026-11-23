@@ -98,7 +98,7 @@ KEYS: list[Key] = [
     K("work.swarm", "{work.dir}/swarm", "path", "swarm.py init-workspace",
       "swarm.py's run dirs, one per workflow or job list: each job's prompt, reply and checked result (the resume "
       "cache), the run log and the script's return value."),
-    K("work.usage_log", "{work.dir}/usage.tsv", "path", "port-set swarm.py",
+    K("work.usage_log", "{work.dir}/usage.tsv", "path", "port-set swarm.py track",
       "Token and cost log of every model call."),
     K("work.state", "{work.dir}/STATE.md", "path", "init-workspace port-set", "The lead's phase state file.",
       placeholder="STATE"),

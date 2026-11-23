@@ -25,7 +25,7 @@ Every headless agent the kit starts runs `claude -p` with these settings. Use th
 | The kit's `tools/` directory first on `PATH`, and `PORT_KIT_CONFIG` naming the port's `port.toml` | Prompts call the dashboard as `track ...` by its bare name, which `templates/claude-settings.json` allows (`Bash(track:*)`). `swarm.py` sets both for its jobs |
 | `--strict-mcp-config` | No MCP servers from your own config |
 | `PORT_KIT_AGENT=1` in the environment | The kit plugin's SessionStart hook prints the lead's context in every session inside the workspace; with this set it prints nothing, so an agent never reads the lead's instructions. `swarm.py` and `port-set` set it |
-| `--output-format json` | The result, the session id, the turn count, token usage and cost. Kit tools log each call in `work.usage_log` |
+| `--output-format json` | The result, the session id, the turn count, token usage and cost. Kit tools log each call in `work.usage_log`; the lead's own cost comes from its session file through `track usage` |
 | `--max-turns <n>` | A bound per call (`pipeline.*_max_turns`). A call that runs out reports `OUT OF TURNS` and can be continued |
 | Sessions kept (no `--no-session-persistence`); `--resume <session id>` for a follow-up | A follow-up resumes from the prompt cache, and the saved sessions are what `tools/collect-logs` sends when a run is reviewed. They sit under `~/.claude/projects/`, a few MB per agent |
 | `--add-dir <tree>` for each other tree it reads | A set that spans both repos reads the other tree; an app set reads the framework at `racheck.fw_base` |

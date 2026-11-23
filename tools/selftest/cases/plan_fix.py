@@ -62,3 +62,23 @@ def case_rebuild_writes_and_checks(s):
     check(any("sh.C9" in c for c in out["checks"]), "a called id no part defines", r)
     sizing = (p / "sizing.md").read_text()
     check("| all | all | 75 | 40 |" in sizing and "new 1" in sizing and "keep 1" in sizing, "sizing totals", r)
+
+
+def case_coverage_audits(s):
+    p = plan(s)
+    (s.root / "snap" / "src").mkdir(parents=True)
+    (s.root / "snap" / "src" / "lib.rs").write_text("\n")
+    s.config({"app.snapshot": str(s.root / "snap")})
+    (p / "settled.md").write_text(
+        "# Settled\n\n| Id | Question | Settled | Reason |\n|---|---|---|---|\n"
+        "| S-H1 | Title bar height in shell-w1. | 32 px. | Production. |\n"
+        "| L-4 | Who owns the menu glue? | shell-w2. | One hub set. |\n")
+    sheet = p / "sheets" / "shell-w1.md"
+    sheet.write_text(sheet.read_text() + "\n## Writer notes\n\n1. Title bar 32 px (S-H1).\n"
+                     "2. Returns `Result<Vec<T>, E>` and takes a <short> value as before.\n3. Height TBD.\n")
+    r = s.run("coverage.py", "--from", "sheets")
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    check(out["settled_not_carried"] == 1, f"one uncarried row (L-4 in shell-w2): {out}", r)
+    check(out["open_markers"] == 1, f"one marker (TBD), and the prose with angle brackets passes: {out}", r)
+    rep = (p / "eval-coverage.md").read_text()
+    check("L-4 (settled :6) names shell-w2" in rep and "Height TBD" in rep, f"both listed in the report:\n{rep}", r)

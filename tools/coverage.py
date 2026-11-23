@@ -3,13 +3,19 @@
 
 usage: coverage.py [--from sheets|plan] [--out FILE] [--tsv FILE] [--done FILE] [--config PORT.TOML]
 
-Four checks, each counted as gaps:
+Six checks, each counted as gaps:
   1. Map sections: every entry section of every area map ([[areas]] `map`, default <work.maps>/<area>.md) is named
      by a writer set, or listed in --done (work already finished, one `<area> <section>` per line).
   2. Files: every .rs file under app.ui_dirs (in app.snapshot, else app.checkout at plan.app_base) has an action in
      an app set, or a plan line that says it gets no edit.
   3. Tests: every #[test] fn in those files has a verdict (keep, rewrite, delete) or its file is deleted.
   4. No path is in two writer sets (directory entries included).
+  5. Settled decisions carried: every row of work.settled whose id is `S-...` or `L-...` and whose text names a set
+     id has that id in the set's sheet or <work.sets>/<set>/decisions.md (with --from plan: in the set's section of
+     work.ownership). One gap per row and set.
+  6. No open-question marker in a set's sheet, decisions.md or ownership section, outside code spans: TBD, TODO,
+     "open question", "undecided", "to be decided", "(open)", "??", or a table cell or line that is only an
+     unfilled template field (`<lowercase words>`). One gap per line.
 
 Two sources for the sets (--from; default `sheets` when work.sheets holds sheets, else `plan`):
   sheets  the writer sheets (templates/sheet.md): each sheet's Repo, `Map sections` head line and Files table; test
@@ -27,7 +33,7 @@ the ids of infra rows (tables under a heading with "Infra") and the gap, hook an
 their index (FG-, SG-, PC-, CH-, AC-, H-, G-) that no plan text names.
 
 Writes the report (default <work.plan>/eval-coverage.md), prints a JSON summary, posts one `coverage` event.
-Exit 0 when the four checks have no gaps, 1 otherwise, 2 when an input is missing.
+Exit 0 when the six checks have no gaps, 1 otherwise, 2 when an input is missing.
 """
 from __future__ import annotations
 
@@ -123,10 +129,11 @@ def sets_from_ownership(path: Path) -> dict:
         m = re.match(r"^#### (\S+)", line)
         if m:
             cur = m.group(1)
-            sets[cur] = {"repo": None, "files": [], "maps": [], "line": n, "src": path.name}
+            sets[cur] = {"repo": None, "files": [], "maps": [], "line": n, "src": path.name, "text": [line]}
             continue
         if cur is None:
             continue
+        sets[cur]["text"].append(line)
         m = re.match(r"^- Repo:? `?(\w+)", line)
         if m:
             sets[cur]["repo"] = m.group(1)
@@ -138,6 +145,8 @@ def sets_from_ownership(path: Path) -> dict:
         m = re.match(r"^\s+- `([^`]+)` \((\w+)\)", line)
         if m:
             sets[cur]["files"].append((m.group(1), m.group(2), n))
+    for d in sets.values():
+        d["text"] = "\n".join(d["text"])
     return sets
 
 
@@ -161,8 +170,60 @@ def sets_from_sheets(sheets, areas: list[str]) -> dict:
             elif seg:
                 maps.append((own_area, seg, n))
         sets[s.id] = {"repo": s.repo, "files": files, "maps": maps, "line": 0, "src": f"sheets/{s.id}.md",
-                      "tests": s.tests}
+                      "tests": s.tests, "text": s.text}
     return sets
+
+
+# ---------------------------------------------------------------- settled decisions and open markers
+
+SETTLED_ROW = re.compile(r"^\s*(?:\|\s*|[-*]\s+)(?:\*\*|`)?([SL]-[A-Za-z0-9]+)\b")
+MARKER = re.compile(r"\bTBD\b|\bTODO\b|\bopen questions?\b|\bundecided\b|\bto be decided\b|\(open\)|\?\?", re.I)
+PLACEHOLDER = re.compile(r"<[a-z][^<>]*>")
+LIST_HEAD = re.compile(r"^\s*(?:[-*]|\d+\.)\s+")
+
+
+def _word(token: str) -> re.Pattern:
+    return re.compile(r"(?<![\w-])" + re.escape(token) + r"(?![\w-])")
+
+
+def settled_not_carried(sets: dict, settled: Path, sets_dir: Path) -> list[tuple[str, str, int]]:
+    """(decision id, set, line in settled) for each settled row naming a set whose sheet and decisions.md lack the id."""
+    if not settled.is_file():
+        return []
+    pats = {s: _word(s) for s in sets}
+    out = []
+    for n, line in enumerate(read(settled).splitlines(), 1):
+        m = SETTLED_ROW.match(line)
+        if not m:
+            continue
+        rid = _word(m.group(1))
+        for s, pat in pats.items():
+            if not pat.search(line):
+                continue
+            dec = sets_dir / s / "decisions.md"
+            where = sets[s].get("text", "") + ("\n" + read(dec) if dec.is_file() else "")
+            if not rid.search(where):
+                out.append((m.group(1), s, n))
+    return out
+
+
+def open_markers(sets: dict, sets_dir: Path) -> list[tuple[str, str, int, str]]:
+    """(set, file, line, text) for each line of a set's sheet text or decisions.md with an open-question marker."""
+    out = []
+    for s, d in sets.items():
+        docs = [(d["src"], d.get("text", ""), d.get("line", 0))]
+        dec = sets_dir / s / "decisions.md"
+        if dec.is_file():
+            docs.append((f"{s}/decisions.md", read(dec), 0))
+        for src, text, first in docs:
+            for k, line in enumerate(text.splitlines()):
+                bare = re.sub(r"`[^`]*`", "", line)
+                cells = [c.strip() for c in bare.strip().strip("|").split("|")] if bare.lstrip().startswith("|") else []
+                only = LIST_HEAD.sub("", bare).strip().rstrip(".")
+                if (MARKER.search(bare) or any(PLACEHOLDER.fullmatch(c) for c in cells)
+                        or (not cells and PLACEHOLDER.fullmatch(only))):
+                    out.append((s, src, first + k if first else k + 1, line.strip()[:160]))
+    return out
 
 
 # ---------------------------------------------------------------- app files and tests
@@ -526,7 +587,8 @@ def main(argv=None) -> int:
         summary, out_path = run(a, cfg, ui_dirs, plan_root)
         gaps = summary["gaps"]
         rec.result(f"{gaps} gaps (sections {summary['map_section_gaps']}, files {summary['files_unowned']}, tests "
-                   f"{summary['test_gaps']}, paths in two sets {summary['paths_in_two_sets'] + summary['dir_overlaps']})",
+                   f"{summary['test_gaps']}, paths in two sets {summary['paths_in_two_sets'] + summary['dir_overlaps']}, "
+                   f"settled not carried {summary['settled_not_carried']}, open markers {summary['open_markers']})",
                    log=out_path, data=summary, ok=gaps == 0)
     print(json.dumps(summary))
     return 0 if gaps == 0 else 1
@@ -712,7 +774,10 @@ def run(a, cfg, ui_dirs, plan_root):
 
     # ---- report
     sec_cnt = Counter(c for _, _, c in sec_rows)
-    total_gaps = sec_cnt["gap"] + len(u_writer) + len(u_mentioned) + len(u_silent) + cnt["gap"] + len(dup_cross) + len(dir_overlap)
+    uncarried = settled_not_carried(sets, cfg.path("work.settled"), cfg.path("work.sets"))
+    markers = open_markers(sets, cfg.path("work.sets"))
+    total_gaps = (sec_cnt["gap"] + len(u_writer) + len(u_mentioned) + len(u_silent) + cnt["gap"] + len(dup_cross)
+                  + len(dir_overlap) + len(uncarried) + len(markers))
     W("# Plan coverage")
     W("")
     W(f"Script: `tools/coverage.py --from {source}` (read only). Sets from "
@@ -730,6 +795,8 @@ def run(a, cfg, ui_dirs, plan_root):
       f"{len(u_reason)} with a keep or no-edit line, **{len(u_mentioned)}** named without a reason, **{len(u_silent)}** never named |")
     W(f"| `#[test]` functions with a verdict | {len(result)} | {len(result) - cnt['gap']} | **{cnt['gap']}** |")
     W(f"| Paths in two writer sets | {len(by_path)} paths | - | **{len(dup_cross)}** exact, **{len(dir_overlap)}** under another set's directory entry |")
+    W(f"| Settled decisions that name a set, carried in its sheet or decisions.md | - | - | **{len(uncarried)}** |")
+    W(f"| Lines with an open-question marker in a set's sheet or decisions.md | - | - | **{len(markers)}** |")
     W("")
     W(f"Gaps in total: {total_gaps} (files with a keep or no-edit line are not gaps; read the line to judge the reason).")
     W("")
@@ -867,6 +934,21 @@ def run(a, cfg, ui_dirs, plan_root):
         W("")
         W("Listed twice in one set (no conflict): " + "; ".join(f"{v[0][0]} `{p}`" for (repo, p), v in sorted(dup_within.items())))
     W("")
+    W("## 5. Settled decisions carried")
+    W("")
+    W(f"Rows of `{cfg.path('work.settled').name}` that name a set whose {'sheet' if source == 'sheets' else 'ownership section'} "
+      f"and decisions.md do not cite the row's id: {len(uncarried)}.")
+    W("")
+    for rid, s, n in uncarried:
+        W(f"- {rid} (settled :{n}) names {s}; carry it into {sets[s]['src']} or {s}/decisions.md, citing {rid}")
+    W("")
+    W("## 6. Open-question markers")
+    W("")
+    W(f"Lines with TBD, TODO, an open question, `??` or an unfilled template field: {len(markers)}.")
+    W("")
+    for s, src, n, line in markers:
+        W(f"- {s} {src}:{n}: {line}")
+    W("")
     W("## Limits of the check")
     W("")
     if source == "plan":
@@ -893,6 +975,7 @@ def run(a, cfg, ui_dirs, plan_root):
         "test_gaps_count_only": sum(len(gaps_by_file[r]) for r in gaps_by_file if summaries.get(r)),
         "paths_in_two_sets": len(dup_cross), "dir_overlaps": len(dir_overlap), "dangling_section_refs": len(dangling),
         "infra_rows_not_in_plans": len(miss_infra), "gap_ids_not_in_plans": len(miss_gid),
+        "settled_not_carried": len(uncarried), "open_markers": len(markers),
     }
     return summary, out_path
 

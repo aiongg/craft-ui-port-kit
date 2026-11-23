@@ -12,7 +12,7 @@ These appear in every area. Fix the class in everything you own, not only in the
 2. **Old snapshots.** The plans read the code at older revisions. Re-read everything at the current bases: framework {{FW}} and app {{APP_SRC}} (read only), at the revisions {{STATE}} names.
 3. **Incomplete reader lists.** Readers missed tests, examples, re-exports (`pub(crate) use`), other crates and the app's binaries. Find every reader of a removed or changed mechanism with `git grep` over the whole repo.
 4. **Duplicates and invented signatures.** Framework items that duplicate an existing mechanism (a second link text, a second point-to-value mapping, state kept across passes), and signatures written without reading the code they extend (types, icons or methods that do not exist).
-5. **Decisions that never arrived.** Settled decisions ({{SETTLED}}, {{PLAN}}/conflicts.md, developer answers in {{STATE}}) that never reached the contract or the file sets.
+5. **Decisions that never arrived.** Settled decisions ({{SETTLED}}, {{PLAN}}/conflicts.md, developer answers in {{STATE}}) that never reached the contract or the file sets. {{PLAN}}/eval-coverage.md, sections 5 and 6, lists the settled rows a set does not cite by id and the open-question markers left in set texts: carry each decision with its id, and decide or remove each marker.
 6. **Rewrite sized as the whole file.** "Write" counts lines changed. A file whose kept functions stay is `edit`: the writer edits it in place and never retypes kept code.
 
 ## Rules

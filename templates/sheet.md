@@ -33,7 +33,7 @@ Every test function in every file of this set, including files it deletes. Verdi
 
 ## Writer notes
 
-What the phase 5 writer needs beyond the tables and the contract rows: bodies, rules, edge cases, with path:line evidence at the base. Short, numbered. No history.
+What the phase 5 writer needs beyond the tables and the contract rows: bodies, rules, edge cases, with path:line evidence at the base. Short, numbered. No history. A note that carries a settled decision or a ruling cites its id (`S-X1`, `L-4`): `coverage.py` checks that every settled decision naming this set is cited here or in `decisions.md`.
 
 ## Requests to other sets
 

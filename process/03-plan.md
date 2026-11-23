@@ -66,7 +66,7 @@ One Opus agent per area (`prompts/p2-area-merge.md`) merges the area's chunk pla
 - **Per area** (Opus, `prompts/p2-evaluate-area.md`): a random sample of at least 15 contract items, 15 file plans and 15 test verdicts, each checked against the code. A contract item: does the framework already have it or something it duplicates; does the signature fit the code it extends; does it remove what it replaces. A file plan: does `git grep` find every reader; is the action right. A verdict: is it right under the testing rule. Output: `eval-<area>.md` with every checked item, the must-fix list, and the **error rate** (wrong or needs-change items over items checked).
 - **Answer accuracy** (Opus, `prompts/p2-answer-accuracy.md`): a random sample of Haiku answers, fixed before any answer is read, checked against the code. It reports the wrong rate for answers given one group per agent and for batched answers, and by position in the batch. Above `plan.max_wrong_answers`, the chunks concerned are answered again at one group per agent and their plans redone.
 - **Size audit** (`prompts/p2-size-audit.md`): the lines to write split into framework additions, code moved between crates (counted once), app production code, rewritten tests and new tests. A port onto framework components should mostly delete: every app set that writes more than about half of what it deletes is checked, and either the rewrite is justified or a smaller plan is named (a call-site swap, a deletion, a test deleted instead of rewritten).
-- **Coverage** (script, `tools/coverage.py`): every map section is covered by a set; every `.rs` file under `app.ui_dirs` has an action or a reason it is untouched; every `#[test]` function in those files has a verdict; no file is in two sets.
+- **Coverage** (script, `tools/coverage.py`): every map section is covered by a set; every `.rs` file under `app.ui_dirs` has an action or a reason it is untouched; every `#[test]` function in those files has a verdict; no file is in two sets. It also runs two audits for the error classes that otherwise survive every evaluation round: every settled decision (`S-…`, `L-…` in `settled.md`) that names a set is cited by its id in that set's sheet or `decisions.md` (before the sheets exist: in its `ownership.md` section), and no set's text keeps an open-question marker (TBD, TODO, "open question", `??`, or an unfilled template field). Run it before the evaluators, so they confirm the plan instead of finding these.
 
 Expect the first evaluation to fail. Plans made from maps carry errors in a few repeating classes, and the fix round exists for them (`costs.md` has the measured rates).
 
@@ -130,7 +130,7 @@ Then put the sets on the board, so phases 4 to 7 have a task per set from the st
 
 ## Exit
 
-- [ ] `tools/coverage.py` reports 0 gaps.
+- [ ] `tools/coverage.py` reports 0 gaps, its settled-decision and open-marker audits included.
 - [ ] Every area's re-evaluated error rate is at most `plan.max_error_rate`.
 - [ ] The sampled wrong-answer rate is at most `plan.max_wrong_answers`.
 - [ ] `developer-questions.md` has no open question; `settled.md` holds every decision.

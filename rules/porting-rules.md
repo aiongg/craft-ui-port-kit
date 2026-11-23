@@ -58,10 +58,10 @@ The framework's UI gallery (craft-libs `crates/ui-gallery`) is the catalogue of 
 ## Tests and builds
 
 - **The test rule** is `testing-rule.md`. Every test names the regression it guards. Nothing trivial, no exact sizes or strings.
-- **Write first, build in batches.** In the batch phases (writing, review fixes, compile fixes, red rounds) agents write code with no build. One integrator builds every agent's work together and runs the tests once. Agents write code that compiles by reading carefully: every import path, signature and trait bound checked against the code.
+- **Write first, build in batches.** In the batch phases (writing, review fixes, compile fixes, red rounds) writers write code with no build, and fixers build only in the fixer mode `build` (`process/11-build-loop.md`, rule 3). One `tools/cycle` run builds every agent's work together and runs the tests once. Agents write code that compiles by reading carefully: every import path, signature and trait bound checked against the code.
 - **One-off tasks with a build tree** (a look fix, a late framework gap) check their own change as they go, in their own warm target dir: build the test binary of each crate they test (`cl test <crate> --no-run`), then run the trials for what they changed. `cl check` only for a crate they change but do not test.
 - **Every cargo command goes through `cl`** (`process/11-build-loop.md`). A plain cargo command with other features, `--all-features` or `--bins` builds a second copy of the framework and everything above it. CI runs those.
-- **No workspace-wide builds or tests locally.** Whole test binaries and full runs run in the integration tree, by the integrator or a gate.
+- **No workspace-wide builds or tests locally.** Whole test binaries and full runs run in the integration tree, through `tools/cycle` or a gate.
 - **Format before each commit** as `rules/agent-common.md` says ("Formatting").
 - **Count trials for run-model changes.** A change to the pass, the run model or a shared mechanism keeps or adds count trials: a frame runs only what it must (rows in view, passes per frame, runs per interaction), asserted as relations, not times.
 - **An app smoke trial** shows the whole app window at a desktop size for a few frames in a debug build, with in-memory settings. A debug-only assert on the first frame is otherwise invisible to release builds and to component trials.
@@ -74,7 +74,7 @@ The framework's UI gallery (craft-libs `crates/ui-gallery`) is the catalogue of 
 - Wall time is the bottleneck, not writing code. Every loop (builds, tests, measurement rounds, captures) is cut to the least wall time. A slow loop seen once is fixed at once.
 - Plan for the least total wall time to the goal. Judge what a step costs from what is already known (earlier timings, the code, the setup); never run anything only to find out what it costs.
 - Everything already known to be needed goes in one batch: all fixes together, one change, one confirming build at the end. Never one fix per round when the others are known.
-- **The fixer model.** Fixers write fixes code-only for their whole list, add `DIAG ` prints where unsure, and hand back. The lead (or an integrator) merges every fixer's branch, runs one build and one full run, and sends each fixer (the same agent, resumed) its still-failing tests with their panic lines and `DIAG ` output. Reason: one build for all fixes costs the same wall time as one build for one fix.
+- **The fixer model.** Fixers write fixes for their whole list (code-only, with `DIAG ` prints where unsure, unless the fixer mode is `build`) and hand back. One `tools/cycle` run merges every fixer's branch, runs one build and one full run, and sends each fixer (the same agent, resumed) its still-failing tests with their panic lines and `DIAG ` output. Reason: one build for all fixes costs the same wall time as one build for one fix.
 - A measurement runs only if its result changes what happens next. A separate measurement runs only to find which part of a batch missed its target.
 - Before starting anything that waits, say what it costs and why no cheaper path exists.
 - Report what was compared, not "done": the screens or states compared and what still differs.

@@ -88,7 +88,7 @@ Only when your prompt gives you builds:
 - To debug, print values at the suspected path with lines that start with `DIAG `, run the one trial, read, repeat. Remove every `DIAG ` line before you commit the final change.
 - Bound every wait with a timeout. No polling loops on a process.
 
-Without builds, you write code that compiles by reading carefully: check every import path, signature and trait bound against the code. **Formatting:** an agent that runs no builds formats each file it changed with `rustfmt --edition 2024 <file>`, which needs no build. The integrator runs `cargo fmt` on the changed crates only, never on vendored code (`process/08-tests-and-red-rounds.md`, step 5).
+Without builds, you write code that compiles by reading carefully: check every import path, signature and trait bound against the code. **Formatting:** an agent that runs no builds formats each file it changed with `rustfmt --edition 2024 <file>`, which needs no build. `tools/cycle` runs `cargo fmt` on the changed crates only, never on vendored code (`process/11-build-loop.md`, "The cycle").
 
 ## Git
 
@@ -97,7 +97,7 @@ Without builds, you write code that compiles by reading carefully: check every i
 - Delete tracked files with `git rm`, so the deletion is part of the commit.
 - Push only when your prompt says so, only your own branch, and never force-push a shared branch.
 - Before your work merges, rebase it on the shared branch your prompt names. Fixes after a merge go on the shared branch.
-- Do not regenerate generated docs (component indexes, API listings) unless your prompt says so. The integrator does that once.
+- Do not regenerate generated docs (component indexes, API listings) unless your prompt says so. The lead does that once.
 - Commit messages and code carry no attribution lines and nothing that names your machine, your accounts or personal data.
 
 ## Report

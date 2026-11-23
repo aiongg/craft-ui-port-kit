@@ -13,7 +13,7 @@ The lead is the agent session that runs the port (`process/00-overview.md`, "Rol
 
 - **Pick each agent's model by need.**
   - Haiku: finding things, reading code for facts, builds, runs and logs.
-  - Sonnet: writing, by default. Every set its sheet fully specifies, review fixes, compile fixes, red-round fixers, the integrator.
+  - Sonnet: writing, by default. Every set its sheet fully specifies, review fixes, compile fixes, red-round fixers.
   - Opus: judgement. Contract design, plans, evaluations, decisions, reviews, sets that change a shared mechanism, and a retry of a set or task a Sonnet agent failed.
   The `[models]` table in `port.toml` holds these defaults per step.
 - **No large Opus bursts.** Spread Opus work over the quota window instead of starting many Opus agents at once. A burst spends the reserve the rest of the week needs.

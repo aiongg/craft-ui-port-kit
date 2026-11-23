@@ -29,7 +29,7 @@ Roles
   A job's role names its model (models.<role>, unless "model" is given) and its tools, from one table, ROLE_TOOLS
   below: every role gets Read, Grep, Glob, Bash, Write and Edit, with pipeline.lookup_tools, Write, Edit and the kit's
   track command auto-approved, and a role in the table also gets its own commands (fixers `git add` and `git commit`,
-  the red integrator the gates, phase 2 sheet fixes and reconciles coverage.py and port-set). A job's own "tools" and
+  phase 2 sheet fixes and reconciles coverage.py and port-set). A job's own "tools" and
   "allow" replace these.
 
 Each job
@@ -107,9 +107,6 @@ ROLE_TOOLS = {
     "fix_retry": _FIXER,
     "red_fixer": _FIXER + ["Bash(python3 -I {kit}/tools/diag-cut.py:*)", "Bash({kit}/tools/diag-cut.py:*)"],
     "red_fixer_framework": _FIXER + ["Bash(python3 -I {kit}/tools/diag-cut.py:*)", "Bash({kit}/tools/diag-cut.py:*)"],
-    "red_integrator": _FIXER + ["Bash(git merge:*)", "Bash({kit}/tools/compile-gate:*)", "Bash({kit}/tools/test-run:*)",
-                                "Bash({kit}/tools/compare-runs.py:*)", "Bash({kit}/tools/split-failures.py:*)",
-                                "Bash({kit}/tools/diag-cut.py:*)", "Bash(cargo fmt:*)"],
     "sheet_fix": ["Bash(python3 -I {kit}/tools/coverage.py:*)", "Bash({kit}/tools/port-set:*)"],
 }
 TASK_IN_PROMPT = re.compile(r"\btrack\s+(?:step|status|ask)\s+([A-Za-z0-9][A-Za-z0-9._/-]{0,79})\b")

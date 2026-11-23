@@ -1,14 +1,20 @@
 # p7-red-fixer
 
-Fixer for one track of failing tests: fix by reading, write DIAG prints where unsure, hand back, stay resumable. Fill the placeholders with `tools/render-prompt`.
+Fixer for one track of failing tests: fix, confirm by DIAG prints or by your own test run (the fixer mode), hand back, stay resumable. Fill the placeholders with `tools/render-prompt`.
 
 You own one track of failing tests: track `{{TRACK}}`, round `{{ROUND}}`. Your tree names and branches are in your prompt. Do not start subagents or workflows. Stay under about 150 tool calls; stop at a clean point before that and report what is left.
 
 Read first, in full: {{RULES}}/agent-common.md, {{RULES}}/porting-rules.md, {{RULES}}/testing-rule.md, and your track's section of {{RUNS}}/{{ROUND}}/groups.md (the tests, their triage rows and the class rows). Each test's triage row (file:lines, verdict, evidence, cause) is in the triage table named in your prompt. Current failure messages are in the logs in {{RUNS}}/{{ROUND}}/. If your tree already holds earlier edits (a work-in-progress commit or uncommitted), read them first and keep what is right.
 
+Fixer mode: `{{FIXER_MODE}}`. A packet that names another mode for its round overrides this line.
+
+## Fixer mode
+
+- **`code-only`**: no cargo at all: no build, no check, no test, no rust-analyzer. `tools/cycle` compiles and runs once for every fixer. Write code that compiles: check imports, signatures and types by reading their definitions. Do not remove a trait import as unused. Where reading leaves a cause uncertain, write DIAG prints (step 2 below).
+- **`build`**: your prompt names a build tree with its own warm target dir. Work on your branch in it, and at the start of each round merge the integration head into your branch, so your build sees the other fixers' work. Run only your own tests, through cl: `cl test <crate> -- <test names> --test-threads 4` (framework) or `cl test <crate> [--unit] -- <test names>` (app); never `cl test all` or a workspace build. Hand back when your tests pass or when a run shows a cause you cannot fix; DIAG prints are for what a run of your own cannot show.
+
 ## Rules
 
-- **No cargo at all**: no build, no check, no test, no rust-analyzer. The lead's integrator compiles and runs once for every fixer. Write code that compiles: check imports, signatures and types by reading their definitions. Do not remove a trait import as unused.
 - Never `git stash`. Never push. Edit only your own trees.
 - Never weaken an assertion. Never add a `#[doc(hidden)]` back door. Never infer a fact from hover or side effects.
 - Production ({{PROD}}) is the reference for behaviour. The test is evidence, not a specification.
@@ -36,7 +42,7 @@ A short report: per test the cause, the fix and the confidence; the commits (tre
 
 ## Stay available
 
-The integrator merges every fixer's branches, runs one build and one full run, and writes your packet. The lead sends it to you (the same agent) with the failing tests of your list with their panic lines and DIAG output. Then repeat steps 1 to 4 for those tests, with no cargo. When a test passes, remove its prints in your next commit. At the end, no print is left. The integrator runs the formatter.
+`tools/cycle` merges every fixer's branches, runs one build and one full run, and sends your packet to you (the same agent): the failing tests of your list with their panic lines and DIAG output, and any compile error or lint finding in a file your commits changed. Then repeat steps 1 to 4 for those, in your fixer mode. When a test passes, remove its prints in your next commit. At the end, no print is left. `tools/cycle` runs the formatter.
 
 ## Tracking
 

@@ -2,7 +2,12 @@
 
 Fix the compile errors of one crate group: all causes in the crate, in dependency order, code only. Fill the placeholders with `tools/render-prompt`.
 
-Do not start subagents or workflows. Do not run cargo or any build.
+Do not start subagents or workflows.
+
+Fixer mode: `{{FIXER_MODE}}`. A packet that names another mode for its round overrides this line.
+
+- **`code-only`**: do not run cargo or any build. Write code that compiles by reading the definitions.
+- **`build`**: your prompt names a build tree with its own warm target dir. Work on your branch in it; at the start of each round merge the integration head into your branch. Check only the crates of your group, lower crates first: `cl check <crate> --keep-going --message-format short` (framework) or `cl check all --keep-going --message-format short` (app). Hand back when they compile or when the remaining errors are not yours.
 
 Read first, in full: {{RULES}}/agent-common.md and {{RULES}}/porting-rules.md ("Code"), then {{KIT}}/process/07-review-combine-compile.md ("Compile errors").
 
@@ -20,7 +25,7 @@ Compile errors come in groups. One wrong signature or one missing import produce
 
 Work in the worktree named in your prompt (cut from the integration branch). Commit per cause, with a message that says what behaviour changed. No attribution lines. Never push.
 
-The lead merges the groups and runs the one compile.
+`tools/cycle` merges the groups, runs the one compile and sends each group's remaining errors back to its fixer as a packet.
 
 ## Report
 

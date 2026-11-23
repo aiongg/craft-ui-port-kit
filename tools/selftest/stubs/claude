@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+"""Stub claude CLI for selftest cases: records each call and answers like `claude -p --output-format json`.
+
+Each call is appended to <STUB_CLAUDE_DIR>/calls.jsonl as {"argv": [...], "prompt": stdin, "cwd": ...}. The reply
+is a result object whose session_id is the `--resume` value when given, else `session-<n>` for the n-th call; its
+result text is `reply <n>`, or the content of <STUB_CLAUDE_DIR>/reply.txt when that exists.
+"""
+import json
+import os
+import sys
+from pathlib import Path
+
+d = Path(os.environ["STUB_CLAUDE_DIR"])
+d.mkdir(parents=True, exist_ok=True)
+argv = sys.argv[1:]
+prompt = sys.stdin.read()
+calls = d / "calls.jsonl"
+n = (len(calls.read_text().splitlines()) if calls.exists() else 0) + 1
+with open(calls, "a") as f:
+    f.write(json.dumps({"argv": argv, "prompt": prompt, "cwd": os.getcwd()}) + "\n")
+sid = argv[argv.index("--resume") + 1] if "--resume" in argv else f"session-{n}"
+reply = (d / "reply.txt").read_text() if (d / "reply.txt").exists() else f"reply {n}"
+print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "session_id": sid, "result": reply,
+                  "num_turns": 1, "total_cost_usd": 0.01, "usage": {"input_tokens": 1, "output_tokens": 1}}))

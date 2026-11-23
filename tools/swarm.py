@@ -4,6 +4,7 @@
 usage:
   swarm.py workflows/<name>.js --args ARGS.json [options]
   swarm.py JOBS.json [options]
+  swarm.py --follow-up TASK PROMPT-FILE [--run-dir DIR] [--max-turns N] [--memory-gb N] [--config FILE]
 
 options: --parallel N  --max-turns N  --retries N  --memory-gb N  --fresh  --dry-run  --run-dir DIR  --config FILE
 
@@ -14,14 +15,22 @@ Workflow scripts
   agent(prompt, opts), parallel(thunks), pipeline(items, ...stages), phase(title), log(message), args (the --args
   file) and budget (no limit). Every agent() call becomes one job, run here as `claude -p`. agent() returns the
   checked object when opts.schema is given, else the reply text, and null when the job failed. opts.label names the
-  job, opts.model picks its model (else models.default); opts.isolation, opts.effort and opts.agentType are ignored
-  (a note is logged). workflow() is not available.
+  job, opts.model or opts.role picks its model (else models.default), opts.role its tools (below), opts.inputs lists
+  the files it reads (below); opts.isolation, opts.effort and opts.agentType are ignored (a note is logged).
+  workflow() is not available.
 
 Job lists
-  A JSON array; each job: {"task", "prompt" | "prompt_file", "model" | "role" (a [models] key), "schema" |
-  "schema_file", "cwd", "add_dirs", "title", "group", "max_turns", "tools", "allow"}. Only task and the prompt are
-  required. Relative paths resolve against the list's directory. Node is not needed. The results go to
+  A JSON array; each job: {"task", "prompt" | "prompt_file", "model", "role" (a [models] key), "schema" |
+  "schema_file", "cwd", "add_dirs", "inputs", "title", "group", "max_turns", "tools", "allow"}. Only task and the
+  prompt are required. Relative paths resolve against the list's directory. Node is not needed. The results go to
   <run dir>/results.json as {task: value or null}.
+
+Roles
+  A job's role names its model (models.<role>, unless "model" is given) and its tools, from one table, ROLE_TOOLS
+  below: every role gets Read, Grep, Glob, Bash, Write and Edit, with pipeline.lookup_tools, Write, Edit and the kit's
+  track command auto-approved, and a role in the table also gets its own commands (fixers `git add` and `git commit`,
+  the red integrator the gates, phase 2 sheet fixes and reconciles coverage.py and port-set). A job's own "tools" and
+  "allow" replace these.
 
 Each job
   - runs `claude -p` with the prompt on stdin, `--model`, `--output-format json`, `--strict-mcp-config`,
@@ -33,6 +42,7 @@ Each job
     build.memory_cap with --memory-gb (default 4) when the key is set.
   - checks the result against the schema; on a mismatch it resumes the same session once (--retries) with the
     errors, then fails the job.
+  - keeps its session id in jobs/<key>/session, so a follow-up resumes it.
   - logs the call in work.usage_log (the port-set format, `set` = the job's task) and posts a `model-call` event.
   - is one task on the dashboard: `todo` when the script asks for it, `running`, then `done` or `failed`. The
     task id is opts.task when given, else the task named in the prompt's first `track step|status|ask <id>` call,
@@ -43,9 +53,19 @@ is on (`track pause`), or while pipeline.quota_command reports pipeline.quota_ca
 
 Resume
   The run dir (default <work.swarm>/<script or list name>) keeps each job's prompt, raw replies and checked result
-  under jobs/<key>/, where the key is a hash of the prompt, model and schema. A job whose key has a good result is
-  not run again: rerun the same command after a stop, a failure or an edit, and only new or failed jobs run.
-  --fresh ignores the stored results. --dry-run lists the jobs and runs none (every agent() returns null).
+  under jobs/<key>/, where the key is a hash of the prompt, model, schema and the content of every file the job
+  names in "inputs" (opts.inputs). A job whose key has a good result is not run again: rerun the same command after
+  a stop, a failure or an edit, and only new or failed jobs run; a job whose input file changed runs again.
+  --fresh ignores the stored results. --dry-run lists the jobs with their keys and runs none (every agent() returns
+  null).
+
+Follow-up
+  --follow-up TASK PROMPT-FILE sends PROMPT-FILE to the newest job of TASK (under --run-dir, else every run dir
+  under work.swarm) as a resumed session: same model, tools, working directory and schema check, so the agent keeps
+  what it read and did. Its reply goes to jobs/<key>/followup-<n>.json, its usage to work.usage_log, and the task
+  moves to running, then done or failed, on the dashboard. Prints one JSON object on stdout:
+  {"task", "ok", "value" (the checked object or reply text; null on failure), "error", "session_id", "cost_usd",
+  "job_dir"}. Exit 0 ok, 1 the call failed, 2 no such task, no saved session, or a usage error.
 
 Output: the run log (phase and log lines) on stdout and in <run dir>/log.txt; at the end, the script's return
 value as JSON on stdout and in <run dir>/result[-<stage>].json. Exit 0 when the script returned (failed jobs are
@@ -78,6 +98,20 @@ SETTINGS = KIT / "templates" / "claude-settings.json"
 TOOLS = "Read,Grep,Glob,Bash,Write,Edit"
 USAGE_HEAD = "time\tset\tstep\tmodel\tturns\tinput\tcache_write\tcache_read\toutput\tcost_usd\tsecs\n"
 MARK = "\x1eSWARM "
+# Commands each job role may run on top of the base set (pipeline.lookup_tools, Write, Edit, track). `{kit}` is the
+# kit root. Roles are [models] keys.
+_FIXER = ["Bash(git add:*)", "Bash(git commit:*)", "Bash(git diff:*)", "Bash(git status:*)", "Bash(git log:*)"]
+ROLE_TOOLS = {
+    "compile_fix": _FIXER,
+    "fix": _FIXER,
+    "fix_retry": _FIXER,
+    "red_fixer": _FIXER + ["Bash(python3 -I {kit}/tools/diag-cut.py:*)", "Bash({kit}/tools/diag-cut.py:*)"],
+    "red_fixer_framework": _FIXER + ["Bash(python3 -I {kit}/tools/diag-cut.py:*)", "Bash({kit}/tools/diag-cut.py:*)"],
+    "red_integrator": _FIXER + ["Bash(git merge:*)", "Bash({kit}/tools/compile-gate:*)", "Bash({kit}/tools/test-run:*)",
+                                "Bash({kit}/tools/compare-runs.py:*)", "Bash({kit}/tools/split-failures.py:*)",
+                                "Bash({kit}/tools/diag-cut.py:*)", "Bash(cargo fmt:*)"],
+    "sheet_fix": ["Bash(python3 -I {kit}/tools/coverage.py:*)", "Bash({kit}/tools/port-set:*)"],
+}
 TASK_IN_PROMPT = re.compile(r"\btrack\s+(?:step|status|ask)\s+([A-Za-z0-9][A-Za-z0-9._/-]{0,79})\b")
 
 
@@ -152,10 +186,25 @@ class Job:
     max_turns: int | None = None
     tools: str | None = None
     allow: str | None = None
+    role: str | None = None
+    inputs: list[str] = field(default_factory=list)
 
     def key(self) -> str:
-        h = hashlib.sha256(json.dumps([self.prompt, self.model, self.schema], sort_keys=True).encode())
+        files = []
+        for p in self.inputs:
+            try:
+                files.append([p, hashlib.sha256(Path(p).read_bytes()).hexdigest()])
+            except OSError:
+                files.append([p, "missing"])
+        h = hashlib.sha256(json.dumps([self.prompt, self.model, self.schema, *([files] if files else [])],
+                                      sort_keys=True).encode())
         return h.hexdigest()[:16]
+
+    def record(self) -> dict:
+        """What job.json keeps: enough to resume the job's session with the same settings."""
+        return {"task": self.task, "label": self.label, "model": self.model, "phase": self.phase, "schema": self.schema,
+                "role": self.role, "cwd": self.cwd, "add_dirs": self.add_dirs, "max_turns": self.max_turns,
+                "tools": self.tools, "allow": self.allow, "inputs": self.inputs}
 
 
 def task_id(opts: dict, prompt: str, label: str) -> str:
@@ -264,11 +313,10 @@ class Swarm:
             except json.JSONDecodeError:
                 pass
         (jd / "prompt.md").write_text(job.prompt)
-        (jd / "job.json").write_text(json.dumps({"task": job.task, "label": job.label, "model": job.model,
-                                                 "phase": job.phase, "schema": job.schema}, indent=1))
+        (jd / "job.json").write_text(json.dumps(job.record(), indent=1))
         if self.a.dry_run:
-            self.say(f"{job.task}: would run {job.model}, {len(job.prompt)} chars{', schema' if job.schema else ''} "
-                     f"({jd / 'prompt.md'})")
+            self.say(f"{job.task}: would run {job.model}, {len(job.prompt)} chars{', schema' if job.schema else ''}, "
+                     f"key {job.key()} ({jd / 'prompt.md'})")
             return None
         self.board(job, "todo", f"queued ({job.model})", new=True)
         self.wait_to_start()
@@ -298,7 +346,8 @@ class Swarm:
     def command(self, job: Job, resume: str | None) -> list[str]:
         cfg = self.cfg
         allow = job.allow or ",".join([cfg.get("pipeline.lookup_tools"), "Write", "Edit",
-                                       f"Bash({KIT / 'tools' / 'track'}:*)"])
+                                       f"Bash({KIT / 'tools' / 'track'}:*)",
+                                       *(c.replace("{kit}", str(KIT)) for c in ROLE_TOOLS.get(job.role or "", []))])
         dirs = []
         cwd = Path(job.cwd or cfg.get("work.dir"))
         cands = [str(KIT), cfg.get("work.dir"), cfg.get("framework.snapshot"), cfg.get("app.snapshot"),
@@ -328,11 +377,14 @@ class Swarm:
             env[config.ENV_CONFIG] = str(self.cfg.file)
         return env
 
-    def call(self, job: Job, jd: Path):
-        """Run the job; (value, None) on success, (None, reason) on failure."""
-        resume, prompt, tries = None, job.prompt, 0
+    def call(self, job: Job, jd: Path, resume: str | None = None, prompt: str | None = None, tag: str = ""):
+        """Run the job, or with `resume` a follow-up in its session; (value, None) on success, (None, reason) on
+        failure."""
+        prompt, tries = prompt or job.prompt, 0
         while True:
-            d, err = self.one_call(job, jd, prompt, resume, tries)
+            d, err = self.one_call(job, jd, prompt, resume, tries, tag)
+            if d and d.get("session_id"):
+                (jd / "session").write_text(d["session_id"])
             if err:
                 return None, err
             if not job.schema:
@@ -355,7 +407,7 @@ class Swarm:
                       "\nReturn the corrected result: only the JSON object, nothing else.")
             self.say(f"{job.task}: schema mismatch ({len(errs)} errors); asking once more")
 
-    def one_call(self, job: Job, jd: Path, prompt: str, resume: str | None, n: int):
+    def one_call(self, job: Job, jd: Path, prompt: str, resume: str | None, n: int, tag: str = ""):
         cmd = self.command(job, resume=resume)
         cwd = job.cwd or self.cfg.get("work.dir")
         t0 = time.time()
@@ -372,7 +424,7 @@ class Swarm:
             with self.lock:
                 self.procs.discard(p)
         secs = time.time() - t0
-        (jd / f"call-{n}.out").write_text(out + ("\n--- stderr ---\n" + errout if errout else ""))
+        (jd / f"{tag or 'call'}-{n}.out").write_text(out + ("\n--- stderr ---\n" + errout if errout else ""))
         try:
             d = json.loads(out)
             if isinstance(d, list):
@@ -382,19 +434,19 @@ class Swarm:
         except (json.JSONDecodeError, ValueError, IndexError):
             tail = (errout.strip().splitlines() or out.strip().splitlines() or ["no output"])[-1]
             return None, f"claude exit {p.returncode}: {tail[:200]}"
-        self.usage(job, d, secs, n)
+        self.usage(job, d, secs, n, tag)
         if d.get("subtype") == "error_max_turns":
-            return None, f"out of turns ({job.max_turns or self.a.max_turns})"
+            return d, f"out of turns ({job.max_turns or self.a.max_turns})"
         if d.get("is_error") or p.returncode != 0:
-            return None, f"claude reported an error ({d.get('subtype') or p.returncode}): {str(d.get('result'))[:200]}"
+            return d, f"claude reported an error ({d.get('subtype') or p.returncode}): {str(d.get('result'))[:200]}"
         return d, None
 
-    def usage(self, job: Job, d: dict, secs: float, n: int) -> None:
+    def usage(self, job: Job, d: dict, secs: float, n: int, tag: str = "") -> None:
         u = d.get("usage") or {}
         cost = float(d.get("total_cost_usd") or 0)
         nums = {"input": u.get("input_tokens", 0), "cache_write": u.get("cache_creation_input_tokens", 0),
                 "cache_read": u.get("cache_read_input_tokens", 0), "output": u.get("output_tokens", 0)}
-        step = job.label if n == 0 else f"{job.label} retry-{n}"
+        step = (f"{job.label} {tag}" if tag else job.label) + (f" retry-{n}" if n else "")
         row = [time.strftime("%Y-%m-%dT%H:%M"), job.task, step, job.model, str(d.get("num_turns")),
                *(str(v) for v in nums.values()), f"{cost:.3f}", f"{secs:.0f}"]
         with self.lock:
@@ -531,7 +583,8 @@ def _read_script(sw: Swarm, p: subprocess.Popen, name: str, answer, noted: set[s
             label = str(opts.get("label") or f"job-{m['id']}")
             job = Job(prompt=m["prompt"], label=label, task=task_id(opts, m["prompt"], label),
                       model=model_for(sw.cfg, opts), schema=opts.get("schema"), phase=opts.get("phase"),
-                      title=label, group=opts.get("phase") or name)
+                      title=label, group=opts.get("phase") or name, role=opts.get("role"),
+                      inputs=[str(x) for x in opts.get("inputs") or []])
             fut = sw.submit(job)
             fut.add_done_callback(lambda f, mid=m["id"]: answer(mid, None if f.cancelled() or f.exception() else f.result()))
         elif op in ("return", "error"):
@@ -561,15 +614,93 @@ def load_jobs(cfg: config.Config, path: Path) -> list[Job]:
                         schema=schema, title=j.get("title"), group=j.get("group") or path.stem,
                         cwd=rel(j["cwd"]) if j.get("cwd") else None, add_dirs=[rel(d) for d in j.get("add_dirs", [])],
                         max_turns=j.get("max_turns"), tools=",".join(tools) if isinstance(tools, list) else tools,
-                        allow=",".join(allow) if isinstance(allow, list) else allow))
+                        allow=",".join(allow) if isinstance(allow, list) else allow, role=j.get("role"),
+                        inputs=[rel(x) for x in j.get("inputs", [])]))
     return jobs
+
+
+# ---------------------------------------------------------------- follow-up
+
+def session_of(jd: Path) -> str | None:
+    """The job's last session id: jobs/<key>/session, else the newest call output that names one."""
+    f = jd / "session"
+    if f.is_file() and f.read_text().strip():
+        return f.read_text().strip()
+    for out in sorted(jd.glob("*.out"), key=lambda x: x.stat().st_mtime, reverse=True):
+        try:
+            d = json.loads(out.read_text().split("\n--- stderr ---\n")[0])
+            d = next((x for x in reversed(d) if isinstance(x, dict) and x.get("type") == "result"), {}) if isinstance(d, list) else d
+            if d.get("session_id"):
+                return d["session_id"]
+        except (ValueError, AttributeError):
+            continue
+    return None
+
+
+def find_job(cfg: config.Config, task: str, run_dir: str | None) -> Path | None:
+    """The newest job directory of `task` under run_dir, else under every run dir of work.swarm."""
+    roots = [Path(run_dir)] if run_dir else sorted(Path(cfg.get("work.swarm")).glob("*"))
+    found = []
+    for root in roots:
+        for f in root.glob("jobs/*/job.json"):
+            try:
+                if json.loads(f.read_text()).get("task") == task:
+                    found.append(f.parent)
+            except ValueError:
+                continue
+    return max(found, key=lambda d: max(x.stat().st_mtime for x in d.iterdir())) if found else None
+
+
+def follow_up(cfg: config.Config, a) -> int:
+    task, prompt_file = a.follow_up
+    out = {"task": task, "ok": False, "value": None, "error": None, "session_id": None, "cost_usd": 0.0, "job_dir": None}
+
+    def done(code: int, error: str | None = None) -> int:
+        out["error"] = error
+        print(json.dumps(out, ensure_ascii=False))
+        return code
+    try:
+        prompt = Path(prompt_file).read_text()
+    except OSError as e:
+        return done(2, f"cannot read {prompt_file}: {e}")
+    jd = find_job(cfg, task, a.run_dir)
+    if jd is None:
+        return done(2, f"no job of task {task} under {a.run_dir or cfg.get('work.swarm')}")
+    out["job_dir"] = str(jd)
+    sid = session_of(jd)
+    if not sid:
+        return done(2, f"{jd}: no saved session to resume")
+    rec = json.loads((jd / "job.json").read_text())
+    job = Job(prompt=(jd / "prompt.md").read_text() if (jd / "prompt.md").is_file() else "", label=rec.get("label") or task,
+              task=task, model=rec.get("model") or cfg.get("models.default"), schema=rec.get("schema"),
+              phase=rec.get("phase"), title=rec.get("label"), group=jd.parent.parent.name, cwd=rec.get("cwd"),
+              add_dirs=rec.get("add_dirs") or [], max_turns=rec.get("max_turns"), tools=rec.get("tools"),
+              allow=rec.get("allow"), role=rec.get("role"), inputs=rec.get("inputs") or [])
+    n = len(list(jd.glob("followup-*.json"))) + 1
+    tag = f"followup-{n}"
+    (jd / f"{tag}-prompt.md").write_text(prompt)
+    sw = Swarm(cfg, jd.parent.parent, a)
+    with track.recorded("swarm follow-up", task=task) as r:
+        sw.board(job, "running", f"follow-up {n} ({job.model})")
+        try:
+            value, err = sw.call(job, jd, resume=sid, prompt=prompt, tag=tag)
+        except Exception as e:  # report it as the call's failure, in the same JSON shape
+            value, err = None, f"{type(e).__name__}: {e}"
+        sw.pool.shutdown(wait=False)
+        out.update(ok=err is None, value=value, session_id=session_of(jd), cost_usd=round(sw.stats["cost"], 3))
+        (jd / f"{tag}.json").write_text(json.dumps({k: out[k] for k in ("ok", "value", "session_id")} | {"error": err},
+                                                   indent=1, ensure_ascii=False))
+        sw.board(job, "done" if err is None else "failed", None if err is None else err[:300])
+        r.result(f"{task} follow-up {n}: {'ok' if err is None else 'FAILED: ' + err[:200]}", log=str(jd), ok=err is None)
+    return done(0 if err is None else 1, err)
 
 
 # ---------------------------------------------------------------- CLI
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("source", help="workflows/<name>.js or a job list (.json)")
+    ap.add_argument("source", nargs="?", help="workflows/<name>.js or a job list (.json)")
+    ap.add_argument("--follow-up", nargs=2, metavar=("TASK", "PROMPT_FILE"))
     ap.add_argument("--args", help="the workflow's args JSON file (render-prompt --workflow-args)")
     ap.add_argument("--parallel", type=int)
     ap.add_argument("--max-turns", type=int)
@@ -590,6 +721,11 @@ def main(argv=None) -> int:
     par_src = (f"--parallel; pipeline.parallel is {cfg.get('pipeline.parallel')}" if a.parallel else "pipeline.parallel")
     a.parallel = a.parallel or int(cfg.get("pipeline.parallel"))
     a.max_turns = a.max_turns or int(cfg.get("pipeline.job_max_turns"))
+    if a.follow_up:
+        return follow_up(cfg, a)
+    if not a.source:
+        print("swarm: name a workflow script or a job list, or use --follow-up TASK PROMPT-FILE", file=sys.stderr)
+        return 2
     src = Path(a.source)
     if not src.is_file():
         print(f"swarm: no such file: {src}", file=sys.stderr)

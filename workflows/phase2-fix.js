@@ -63,7 +63,7 @@ if (!todo.length) throw new Error('no fix jobs (args.contract, args.sheets and a
 
 phase('Fix')
 const results = await parallel(todo.map(j => () => agent(prompt(j.id) + j.text,
-  { label: j.id, phase: 'Fix', schema: RESULT, model: j.model, task: j.id })))
+  { label: j.id, phase: 'Fix', schema: RESULT, model: j.model, role: 'sheet_fix', task: j.id })))
 
 const failed = todo.filter((j, i) => !results[i]).map(j => j.id)
 log(`Fix round: ${todo.length - failed.length} of ${todo.length} jobs done; failed: ${failed.join(', ') || 'none'}`)

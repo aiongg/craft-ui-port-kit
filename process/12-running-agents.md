@@ -20,7 +20,7 @@ Every headless agent the kit starts runs `claude -p` with these settings. Use th
 |---|---|
 | Prompt on stdin, working directory = the agent's tree (the set's tree, the integration tree) | Relative paths in the prompt resolve there |
 | `--model <model>` | From the `[models]` table, per step |
-| `--tools <list>` | Only what the job needs. Lookup and plan-check jobs get `pipeline.lookup_tools` (read, search, `git grep`/`show`/`ls-files`, `track`); writers in agent mode also get edit tools |
+| `--tools <list>` | Only what the job needs. Lookup and plan-check jobs get `pipeline.lookup_tools` (read, search, `git grep`/`show`/`ls-files`, `track`); writers in agent mode also get edit tools. A `swarm.py` job's role (`role` in a job list, `opts.role` in a workflow) adds the commands that role runs, from one table, `ROLE_TOOLS` in `tools/swarm.py`: fixers `git add` and `git commit`, the red integrator the gates, phase 2 sheet fixes `coverage.py` and `port-set` |
 | `--settings` with the rust-analyzer LSP plugin off, or `templates/claude-settings.json` | With the plugin on, every agent that edits starts its own rust-analyzer on the whole workspace, which multiplies memory use. Writers get diagnostics from the shared racheck daemons instead. The template also allows the read-only commands, so lookup agents do not stop on permission prompts |
 | The kit's `tools/` directory first on `PATH`, and `PORT_KIT_CONFIG` naming the port's `port.toml` | Prompts call the dashboard as `track ...` by its bare name, which `templates/claude-settings.json` allows (`Bash(track:*)`). `swarm.py` sets both for its jobs |
 | `--strict-mcp-config` | No MCP servers from your own config |
@@ -85,11 +85,11 @@ The dashboard (`tools/track.md`) shows every task's state. Agents keep it curren
 
 ## Resuming agents
 
-- **Follow-ups go to the same agent.** After an agent hands back, its review findings, still-failing tests or a "go" on its plan go back to it, resumed with its context intact (`--resume <session id>` for a headless call, or the resume mechanism of the session that started it). The agent already knows the code it read.
+- **Follow-ups go to the same agent.** After an agent hands back, its review findings, still-failing tests or a "go" on its plan go back to it, resumed with its context intact (`tools/swarm.py --follow-up TASK PROMPT-FILE` for a `swarm.py` job: it resumes the task's saved session with the same model, tools and tree, and prints one JSON line with the reply; `--resume <session id>` for another headless call; or the resume mechanism of the session that started it). The agent already knows the code it read.
 - **Writer sets continue from their trees.** `port-set agent SET --continue` starts an agent that finishes an earlier agent's committed work in the set's trees, in a fresh context. `run-area` gives an agent-mode set up to `pipeline.agent_continue_rounds` such rounds while its check names an error or it ran out of turns.
 - **Start a fresh agent** when the old one's context is too large (past about 150 tool calls), or when its brief was wrong. Give the fresh one a corrected brief and the old one's report.
 - **Never redirect a running agent.** Stop it, and start a fresh one with a corrected brief. A correction sent mid-run mixes two briefs in one context.
-- **Batches resume.** Restart a stopped batch with the same command: `swarm.py` resumes its job list, `run-area` skips the sets already in its log, and `run-batch --plancheck` skips sets whose `plancheck.md` exists.
+- **Batches resume.** Restart a stopped batch with the same command: `swarm.py` resumes its job list (a job reruns when its prompt, model, schema or the content of a file in its `inputs` changed), `run-area` skips the sets already in its log, and `run-batch --plancheck` skips sets whose `plancheck.md` exists.
 
 ## Reports and progress files
 

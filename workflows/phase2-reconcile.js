@@ -110,7 +110,7 @@ Keep the previous version of each file you overwrite as <name>.before-reconcile 
 - Coverage: run \`python3 -I ${args.kit}/tools/coverage.py --from sheets\` from the workspace directory. It writes ${args.plan}/eval-coverage.md.
 - ${args.plan}/sizing.md: the totals of the sizing report (sets, files by action, lines to write and delete by repo and area, tests keep/rewrite/delete/new), the write split of ${args.plan}/eval-size.md recomputed (framework additions, moves, app production, rewritten tests, new tests), and the sets that wait on an open developer question.
 Return \`done\` = the files written, \`changed\` = 0, \`open_questions\` = parse failures plus coverage gaps, \`note\` = the totals and the gap counts.`,
-  { label: 'rebuild', phase: 'Rebuild and re-evaluate', schema: RESULT, model: need(args.models, 'models').sheet_fix, task: 'rebuild' })
+  { label: 'rebuild', phase: 'Rebuild and re-evaluate', schema: RESULT, model: need(args.models, 'models').sheet_fix, role: 'sheet_fix', task: 'rebuild' })
 
 const evalsP = parallel(areas.map(a => () => agent(
   fill(need(args.prompts, 'prompts').evaluate_area, { AREA: a.id, AREA_CODE: a.code, TASK: `eval-${a.id}-r${round}` }) +

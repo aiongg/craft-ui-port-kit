@@ -105,7 +105,7 @@ const evals = await parallel([
   () => agent(fill(P().answer_accuracy, { TASK: 'eval-answers' }) + RETURN_ACCURACY,
     { label: 'eval:answers', phase: 'Evaluate', schema: ACCURACY_SCHEMA, model: M().evaluate, task: 'eval-answers' }),
   () => agent(`Run \`python3 -I ${args.kit}/tools/coverage.py\` once, from the workspace directory (it picks the sheets when they exist, else the ownership file). It reads files and writes ${args.plan}/eval-coverage.md. Edit nothing. Return the total number of gaps its summary prints, and the report path.`,
-    { label: 'eval:coverage', phase: 'Evaluate', schema: COVERAGE_SCHEMA, model: 'haiku', task: 'eval-coverage' }),
+    { label: 'eval:coverage', phase: 'Evaluate', schema: COVERAGE_SCHEMA, model: 'haiku', role: 'sheet_fix', task: 'eval-coverage' }),
 ])
 
 const perArea = areas.map((a, i) => ({ area: a.id, ...(evals[i] || { failed: true }) }))

@@ -4,7 +4,7 @@ Brief for one fix after landing: an issue on the landed port, a red CI leg, or a
 
 ## How the lead uses this file
 
-Copy the block under "The brief" into {{WORK}}/briefs/{{TASK}}.md and fill every field marked `<...>`. One brief per fix: a second issue or a second red leg is its own task. Before you write it, take a build tree for the agent: a free tree of the pool with its warm target dir, or a new target dir seeded from a warm one with `{{KIT}}/tools/seed-target <new-target> <warm-target> <worktree>` ({{KIT}}/process/11-build-loop.md, "Target dirs and trees"). Never hand an agent a cold target dir: it rebuilds every dependency before its first test. Put the task on the board before you launch it: `track status {{TASK}} todo --title "<one line>"`. When the agent hands back, give the build tree back to the pool and record the fix (`track event merge "{{TASK}}"`, or `track event landing` for a push).
+Copy the block under "The brief" into {{WORK}}/briefs/{{TASK}}.md and fill every field marked `<...>`. One brief per fix: a second issue or a second red leg is its own task. Before you write it, take a build slot for the agent: `{{KIT}}/tools/build-pool take {{TASK}}` prints its trees and their warm target dirs ({{KIT}}/process/11-build-loop.md, "Target dirs and trees"). With no slot free, wait for one; never hand an agent a cold target dir: it rebuilds every dependency before its first test. Put the task on the board before you launch it: `track status {{TASK}} todo --title "<one line>"`. When the agent hands back, give the slot back (`{{KIT}}/tools/build-pool give {{TASK}}`) and record the fix (`track event merge "{{TASK}}"`, or `track event landing` for a push).
 
 ## The brief
 

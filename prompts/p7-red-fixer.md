@@ -11,7 +11,7 @@ Fixer mode: `{{FIXER_MODE}}`. A packet that names another mode for its round ove
 ## Fixer mode
 
 - **`code-only`**: no cargo at all: no build, no check, no test, no rust-analyzer. `tools/cycle` compiles and runs once for every fixer. Write code that compiles: check imports, signatures and types by reading their definitions. Do not remove a trait import as unused. Where reading leaves a cause uncertain, write DIAG prints (step 2 below).
-- **`build`**: your prompt names a build tree with its own warm target dir. Work on your branch in it, and at the start of each round merge the integration head into your branch, so your build sees the other fixers' work. Run only your own tests, through cl: `cl test <crate> -- <test names> --test-threads 4` (framework) or `cl test <crate> [--unit] -- <test names>` (app); never `cl test all` or a workspace build. Hand back when your tests pass or when a run shows a cause you cannot fix; DIAG prints are for what a run of your own cannot show.
+- **`build`**: your prompt or packet names your build trees (a build pool slot), each with its own warm target dir; switch each to your branch first and check that the switch succeeded. Work on your branch in it, and at the start of each round merge the integration head into your branch, so your build sees the other fixers' work. Run only your own tests, through cl: `cl test <crate> -- <test names> --test-threads 4` (framework) or `cl test <crate> [--unit] -- <test names>` (app); never `cl test all` or a workspace build. Hand back when your tests pass or when a run shows a cause you cannot fix; DIAG prints are for what a run of your own cannot show.
 
 ## Rules
 

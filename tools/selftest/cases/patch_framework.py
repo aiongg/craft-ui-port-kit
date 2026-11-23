@@ -58,3 +58,14 @@ def case_no_framework_package(s):
     setup(s, lock='version = 4\n\n[[package]]\nname = "app"\nversion = "0.1.0"\n')
     p = s.run("patch-framework")
     check(p.returncode == 1 and "takes no package" in p.stderr, "0 packages exits 1", p)
+
+
+def case_cargo_config_leaves_the_manifest(s):
+    app = setup(s)
+    cfg = s.root / "slot" / ".cargo" / "config.toml"
+    p = s.run("patch-framework", "--cargo-config", str(cfg), str(app / "Cargo.toml"), str(app / "Cargo.lock"),
+              str(s.root / "fw"))
+    check(p.returncode == 0 and (app / "Cargo.toml").read_text() == MANIFEST, "the manifest is not changed", p)
+    text = cfg.read_text()
+    check(f'craft-x = {{ path = "{s.root}/fw/crates/x" }}' in text
+          and f'[patch."{URL}"]\ncraft-ui = {{ path = "{s.root}/fw/crates/ui" }}' in text, f"config tables: {text}", p)

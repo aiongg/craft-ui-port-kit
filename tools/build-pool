@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""build-pool: the fixed set of build slots that build-mode fixers and follow-up agents take and give back.
+
+usage: build-pool make [N] | take TASK [--json] | give TASK | status [--json] | size [--peak-gb G]   [--config PORT.TOML]
+
+A slot is one build tree per repo with an integration tree (framework.integration, app.integration), each with its
+own target dir seeded from the integration tree's warm one (tools/seed-target). Slots live under build.pool_dir:
+`<k>/fw` and `<k>/app/tree`, each with `-target` beside it, and `<k>/app/.cargo/config.toml` (written by
+`patch-framework --cargo-config`) pointing the app tree at the slot's framework tree. The tool never edits a tracked
+file. Trees start detached at the integration head; the task switches its tree to its branch (`git switch`).
+
+  make [N]     add N slots (default build.pool_size). Refuses (exit 2) when an integration tree has no warm target
+               dir yet.
+  take TASK    give TASK a free slot, or the slot it already holds, and print its trees and target dirs. Exit 1
+               when no slot is free or no pool exists.
+  give TASK    free TASK's slot and detach its trees. Exit 1 while a tree has tracked changes other than Cargo.lock.
+               A task that holds no slot: a note, exit 0.
+  status       the slots, their holders and since when.
+  size         suggest build.pool_size: the smaller of MemAvailable over G (default build.memory_gb, set it to the
+               measured peak of one build) and free disk under build.pool_dir over the integration target dirs' size.
+
+State: <work.dir>/build-pool.json, changed under an flock. Each make, take and give posts a `build-pool` event.
+Exit 0 done, 1 refused, 2 a setup or tool failure.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from portkit import config  # noqa: E402
+from portkit.pool import Pool, PoolError, SetupError  # noqa: E402
+from portkit.track import TrackError  # noqa: E402
+
+
+def show(k: int, slot: dict) -> str:
+    return f"slot {k}: " + "; ".join(f"{r} {v['tree']} (target {v['target']})" for r, v in slot.items())
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("command", choices=("make", "take", "give", "status", "size"))
+    ap.add_argument("arg", nargs="?")
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("--peak-gb", type=float)
+    ap.add_argument("--config")
+    a = ap.parse_args()
+    try:
+        cfg = config.load(a.config)
+        pool = Pool(cfg)
+        if a.command == "make":
+            n = int(a.arg) if a.arg else cfg.get("build.pool_size")
+            if not n:
+                raise SetupError("name N, or set build.pool_size (`build-pool size` suggests it)")
+            pool.make(int(n))
+        elif a.command in ("take", "give"):
+            if not a.arg:
+                raise SetupError(f"{a.command} needs a TASK")
+            if a.command == "take":
+                k, slot = pool.take(a.arg)
+                print(json.dumps({"slot": k, "trees": slot}) if a.json else show(k, slot))
+            else:
+                k = pool.give(a.arg)
+                print(f"{a.arg} holds no build slot" if k is None else f"slot {k} free")
+        elif a.command == "status":
+            st = pool.read()["slots"]
+            if a.json:
+                print(json.dumps({k: {**v, "trees": pool.slot(k)} for k, v in st.items()}, indent=1))
+            elif not st:
+                print("no build pool (tools/build-pool make N)")
+            for k, v in sorted(st.items(), key=lambda kv: int(kv[0])):
+                print(f"{show(int(k), pool.slot(k))}: " + (f"{v['task']} since {v['since']}" if v["task"] else "free"))
+        else:
+            r = pool.size(a.peak_gb or float(cfg.get("build.memory_gb")))
+            print(json.dumps(r) if a.json else
+                  f"pool_size {r['pool_size']}: by memory {r['by_ram']} ({r['mem_available_gb']} GB available / "
+                  f"{r['peak_gb']} GB per build), by disk {r['by_disk']} ({r['disk_free_gb']} GB free / "
+                  f"{r['target_gb']} GB of integration target dirs)")
+    except PoolError as e:
+        print(f"build-pool: {e}", file=sys.stderr)
+        return 1
+    except (SetupError, config.ConfigError, TrackError) as e:
+        print(f"build-pool: {e}", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

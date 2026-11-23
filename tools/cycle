@@ -43,11 +43,13 @@ Steps:
   5. look    When the app half compiled and look.driver is set: `cl <look.port_build>` in app.integration, then
              `look pair` for each states file with a state of one of the cycle's areas (all of them when no area
              is known). Skipped, and said so, while look.port_build is unset.
-  6. packets One file per fixer in <work.runs>/LABEL/followup/<TASK>.md: a header with the cycle and the fixer mode
-             (pipeline.fixer_mode, `auto` decided by build.warm_check_s, build.full_run_s and build.fw_trial_s), the fixer's diag-cut
-             packet, and the compile errors and lint findings in files its group owns (--groups) or its merged
-             commits changed. A fixer with no
-             failing test, no finding and no `DIAG ` line left on its branches gets no packet; its task goes to done.
+  6. packets One file per fixer in <work.runs>/LABEL/followup/<TASK>.md: a header with the cycle, the fixer mode
+             (pipeline.fixer_mode, `auto` decided by build.warm_check_s, build.full_run_s and build.fw_trial_s) and
+             the call budget (pipeline.fixer_calls); in build mode with a build pool, the fixer's build trees
+             (`build-pool take TASK`; with no slot free that fixer works code-only this round); the fixer's diag-cut
+             packet; and the compile errors and lint findings in files its group owns (--groups) or its merged
+             commits changed. A fixer with no failing test, no finding and no `DIAG ` line left on its branches gets
+             no packet; its task goes to done and gives its build slot back.
   7. send    `swarm.py --follow-up TASK <packet>` for each packet, pipeline.parallel at a time, and waits for every
              fixer to hand back, at most pipeline.followup_timeout_min minutes each; a fixer past it is stalled.
              Nothing is sent while the board is paused.
@@ -87,6 +89,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from portkit import config, gates, track  # noqa: E402
 from portkit import sync as upstream_sync  # noqa: E402
+from portkit.pool import Pool, PoolError, SetupError  # noqa: E402
 from portkit import track as T  # noqa: E402
 from portkit.testlog import load_tracks  # noqa: E402
 
@@ -459,11 +462,13 @@ class Cycle:
             if not failing and not mine and not diag_left:
                 result[task] = {"packet": None, "failing": 0, "findings": 0}
                 track.status(task, "done", f"cycle {self.a.label}: nothing left on its list")
+                self.give_slot(task)
                 continue
+            mode, trees = self.slot_for(task)
             L = [f"# Cycle {self.a.label}: your next round", "",
-                 f"Fixer mode for this round: `{self.mode}`. Follow your prompt's section for this mode, on the same "
+                 f"Fixer mode for this round: `{mode}`. Follow your prompt's section for this mode, on the same "
                  f"branches as before, and hand back the same way. Budget: about "
-                 f"{self.cfg.get('pipeline.fixer_calls')} tool calls for this round.", ""]
+                 f"{self.cfg.get('pipeline.fixer_calls')} tool calls for this round.", "", *trees]
             if mine:
                 L += [f"## Compile errors and lint findings in files your commits changed ({len(mine)})", "", "```",
                       *mine, "```", ""]
@@ -473,9 +478,36 @@ class Cycle:
                 L += ["Every test of your list passes. Remove the `DIAG ` prints you left, in one commit."]
             f = out_dir / f"{task}.md"
             f.write_text("\n".join(L).rstrip() + "\n")
-            result[task] = {"packet": str(f), "failing": failing, "findings": len(mine)}
+            result[task] = {"packet": str(f), "failing": failing, "findings": len(mine), "mode": mode}
         result["_unowned"] = unowned
         return result
+
+    def slot_for(self, task: str) -> tuple[str, list[str]]:
+        """The task's mode for this round and the packet lines naming its build trees. In build mode with a build pool,
+        the task takes a slot (the one it holds, else a free one); with none free it works code-only this round."""
+        if self.mode != "build":
+            return self.mode, []
+        pool = Pool(self.cfg)
+        if not pool.exists():
+            return self.mode, []
+        try:
+            k, slot = pool.take(task)
+        except PoolError as e:
+            self.out["notes"].append(f"{task}: {e}; it works code-only this round")
+            return "code-only", [f"No build slot is free this round ({e}): work `code-only`.", ""]
+        return self.mode, [f"Your build trees this round (build pool slot {k}; switch each to your branch first):", "",
+                           *(f"- {r}: `{v['tree']}`, target dir `{v['target']}`" for r, v in slot.items()), ""]
+
+    def give_slot(self, task: str) -> None:
+        pool = Pool(self.cfg)
+        if not pool.exists():
+            return
+        try:
+            k = pool.give(task)
+            if k is not None:
+                self.out["notes"].append(f"{task}: build slot {k} given back")
+        except (PoolError, SetupError) as e:
+            self.out["notes"].append(f"{task}: build slot not given back: {e}")
 
     def groups(self) -> dict[str, set]:
         """{cfix-<stem>: the files the group owns}: its `<stem>.files` when present, else the files of its errors."""

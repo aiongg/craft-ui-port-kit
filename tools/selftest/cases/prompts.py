@@ -7,7 +7,7 @@ def case_followup_fix_renders(s):
     check(r.returncode == 0 and "{{" not in r.stdout, "p10-followup-fix renders with every placeholder filled", r)
     check("rules/agent-common.md and " in r.stdout and "# Task fix-1" in r.stdout,
           "the brief makes the agent read agent-common.md", r)
-    check("seed-target" in r.stdout and "No bare `sleep`" in r.stdout and "timeout 170" in r.stdout and "end your turn" not in r.stdout, "the brief carries the build-tree and wait rules", r)
+    check("tools/build-pool take fix-1" in r.stdout and "No bare `sleep`" in r.stdout and "timeout 170" in r.stdout and "end your turn" not in r.stdout, "the brief carries the build-tree and wait rules", r)
 
 
 def case_app_stub_stage_renders(s):

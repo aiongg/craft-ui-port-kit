@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Write the framework path patches into the app's Cargo.toml, so the app builds against a local framework tree.
 
-usage: patch-framework [--dry-run] [APP-CARGO.TOML APP-CARGO.LOCK [FW-CHECKOUT]]
+usage: patch-framework [--dry-run] [--cargo-config FILE] [APP-CARGO.TOML APP-CARGO.LOCK [FW-CHECKOUT]]
 
 Defaults: app.integration's Cargo.toml and Cargo.lock, and framework.integration.
 
@@ -17,6 +17,10 @@ The app's own lines stay where they are. The tool only adds overrides:
     URL in framework.patch_urls (and the [patch.crates-io] table itself when the app has none). An app table of the
     same name is commented out the same way.
 A rerun first restores the commented lines and drops both regions, so it changes nothing when nothing moved.
+With --cargo-config FILE the manifest stays as it is: the same tables go into FILE as a cargo config file instead
+(`[patch.crates-io]` with the overrides, one `[patch."<url>"]` per URL). Cargo reads config files in the parent
+directories of the build, and a config `[patch]` wins over the manifest's for the same package, so a build tree
+below FILE's `.cargo` directory builds against FW-CHECKOUT with no tracked file changed (tools/build-pool).
 Prints the regions. Exit status 1 when the lock takes no package from a framework URL, or a package it takes is
 missing in the checkout. The patch is for local builds only: commit it on a local branch and never push it.
 """
@@ -95,6 +99,13 @@ def patch(text: str, overrides: dict[str, str], url_tables: dict[str, list[str]]
 def main():
     args = [a for a in sys.argv[1:] if a != "--dry-run"]
     dry = "--dry-run" in sys.argv
+    cargo_config = None
+    if "--cargo-config" in args:
+        i = args.index("--cargo-config")
+        if i + 1 >= len(args):
+            sys.exit(__doc__)
+        cargo_config = Path(args[i + 1])
+        del args[i:i + 2]
     if len(args) not in (0, 2, 3):
         sys.exit(__doc__)
     cfg = config.load()
@@ -130,7 +141,15 @@ def main():
     missing = [n for n in needed if n not in dirs]
     tables = {u: [f'{n} = {{ path = "{dirs[n]}" }}' for n in ns if n in dirs and n not in overrides] for u, ns in per_url.items()}
 
-    new, added = patch(text, overrides, tables)
+    if cargo_config:
+        added = ["# port-kit framework patch: written by tools/patch-framework --cargo-config", "[patch.crates-io]",
+                 *(f"{k} = {v}" for k, v in overrides.items())]
+        for u, rows in tables.items():
+            if rows:
+                added += ["", f'[patch."{u}"]', *rows]
+        new = text
+    else:
+        new, added = patch(text, overrides, tables)
     print("\n".join(added))
     print(f"\npackages: {len(needed)}; not found: {len(missing)}", file=sys.stderr)
     for n in missing:
@@ -139,7 +158,10 @@ def main():
         print(f"patch-framework: the lock takes no package from {', '.join(URLS)}; is the lock committed with the "
               "framework pinned by git rev?", file=sys.stderr)
         return 1
-    if not dry and new != text:
+    if not dry and cargo_config:
+        cargo_config.parent.mkdir(parents=True, exist_ok=True)
+        cargo_config.write_text("\n".join(added) + "\n")
+    elif not dry and new != text:
         toml_p.write_text(new)
     return 1 if missing else 0
 

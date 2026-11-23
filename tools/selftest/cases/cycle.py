@@ -206,3 +206,17 @@ def case_compile_groups_own_files(s):
     check(p.returncode == 1 and "merged 2/2" in p.stdout, "both groups merge without a conflict", p)
     pk = s.work / "runs" / "c1" / "followup" / f"cfix-g-{owner}.md"
     check(pk.is_file() and "app/src/shared.rs:1:1" in pk.read_text(), "the shared file's error goes to its owner", p)
+
+
+def case_build_mode_packet_names_the_slot(s):
+    setup(s, {"pipeline.fixer_mode": "build"})
+    (s.work / "build-pool.json").write_text(json.dumps({"slots": {"1": {"task": "other", "since": "x"},
+                                                                  "2": {"task": None, "since": None}}}))
+    p = s.run("cycle", "r1", "--fixers", "fixers.txt", "--tracks", "groups.md", "--no-lint", "--no-send")
+    pk = (s.work / "runs" / "r1" / "followup" / "t1.md").read_text()
+    check("Fixer mode for this round: `build`" in pk and "build pool slot 2" in pk
+          and str(s.work / "trees" / "pool" / "2" / "app" / "tree") in pk, f"the packet names slot 2's trees: {pk}", p)
+    (s.work / "build-pool.json").write_text(json.dumps({"slots": {"1": {"task": "other", "since": "x"}}}))
+    p = s.run("cycle", "r2", "--no-lint", "--no-send")
+    pk = (s.work / "runs" / "r2" / "followup" / "t1.md").read_text()
+    check("Fixer mode for this round: `code-only`" in pk, "no free slot: code-only this round", p)

@@ -123,6 +123,7 @@ Every cargo command goes through the framework's `cl` ([11-build-loop.md](11-bui
 3. Run `cl doctor` in the app integration tree. It must report one feature resolution.
 4. Make the first warm build in the app integration tree as a background task: `cl test all --no-run`. Set `build.launcher`, `build.runner` and `build.memory_cap` first if this machine shares its cores or memory with other work.
 5. When it ends, run `cl doctor` again: the target dir must hold one build of each pinned crate. A second build of a framework crate means the selection misses a package; fix the selection and rebuild.
+6. Make the build pool, the build trees that build-mode fixers and follow-up agents take ([11-build-loop.md](11-build-loop.md), "Target dirs and trees"). Note the peak memory of one build (the capped scope's or the system monitor's maximum during step 4), then run `tools/build-pool size --peak-gb <peak>`: it suggests `build.pool_size`, the smaller of the free memory over that peak and the free disk over the integration target dirs' size. Memory, not time, limits how many builds run at once. Record `build.pool_size` in `port.toml` and run `tools/build-pool make` once the framework integration tree has a warm target dir too (after the framework baseline of section 7 has finished). Each slot is one build tree per repo with a seeded target dir, under `build.pool_dir`.
 
 ## 6a. Set up the look comparison
 
@@ -191,6 +192,7 @@ Check each item, then record `tools/track phase 1 "inventory"` and go to [02-inv
 - [ ] The port branch pins the framework at `plan.base` by rev; the local patch points at `framework.integration`.
 - [ ] The snapshots and the production reference exist at their commits.
 - [ ] `cl doctor` is clean after the warm build.
+- [ ] `build.pool_size` is recorded; `tools/build-pool make` runs as soon as the framework baseline has finished, before the first fixer in the mode `build`.
 - [ ] The look driver and the production build with its control hooks exist, and production reached one state ([step 6a](#6a-set-up-the-look-comparison)).
 - [ ] `look calibrate --side up` reports no problem for the current production build ([step 6a](#6a-set-up-the-look-comparison)).
 - [ ] `work.baseline_failures` exists and the baseline counts are on the dashboard; the framework baseline (`baseline-fw`) is running or done.

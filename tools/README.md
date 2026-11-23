@@ -55,7 +55,7 @@ Every long-running tool posts one event to the progress dashboard when it ends, 
 | `mod-lines.py` | Reads `.rs` paths on stdin and prints every `mod x;` line whose file is missing. |
 | `cross-owner SET...` | Lists files a set changed that the ownership table gives to another set. |
 | `move-base COMMIT` | Moves the framework writing base, drops unchanged set trees, remaps sheet line numbers, restarts the framework daemon. Prints the push command; never pushes. |
-| `patch-framework [--dry-run]` | Writes the framework path patches into the app's `Cargo.toml` for local builds, from the committed lock, as marked overrides beside the app's own patch lines; a rerun changes nothing. Exit 1 when the lock takes no framework package. |
+| `patch-framework [--dry-run] [--cargo-config FILE]` | Writes the framework path patches into the app's `Cargo.toml` for local builds, from the committed lock, as marked overrides beside the app's own patch lines; a rerun changes nothing. With `--cargo-config` it writes the same tables to a cargo config file and leaves the manifest as it is (the build pool's app trees). Exit 1 when the lock takes no framework package. |
 | `trash-stale-tests --dir DEPS --since EPOCH` | Removes test executables a build superseded (to the trash when a `trash` command exists, else deleted). |
 
 ### Plan and sync
@@ -72,6 +72,7 @@ Every long-running tool posts one event to the progress dashboard when it ends, 
 
 | Tool | What it does |
 |---|---|
+| `build-pool make [N] \| take TASK \| give TASK \| status \| size` | The build pool: `build.pool_size` slots under `build.pool_dir`, each one build tree per repo with a seeded target dir; the app tree builds against its slot's framework tree. Tasks take and give back slots under a lock. |
 | `seed-target NEW-TARGET WARM-TARGET [WORKTREE]` | Seeds a cargo target dir from a warm one, so a new worktree reuses the built dependencies. Use the same toolchain. |
 | `capped GB CMD...` | Runs a heavy job in its own systemd scope with a memory cap (Linux). Optional launcher through `build.memory_cap`. |
 | `scip/scipdb.py` | Turns a rust-analyzer SCIP index into sqlite and answers reference queries. `scip_pb2.py` is its generated protobuf module (needs the `protobuf` Python package). |

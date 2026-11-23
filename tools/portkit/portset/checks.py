@@ -1,6 +1,7 @@
 """The scripted self-check of a written set (check.md) and its rust-analyzer check (racheck.md).
 
-check.md has an `## Errors` and a `## Warnings` section, one item per paragraph, `none` when empty. Batch runners read
+check.md has a `rust-analyzer:` line (racheck's error count, or "not run"), an `## Errors` section (scripted errors,
+then rust-analyzer's) and a `## Warnings` section, one item per paragraph, `none` when empty. Batch runners read
 it: an item starting `untouched:` or `test not deleted:` gets an agent round; items starting
 `compile error (rust-analyzer)` are cross-set errors that wait for the batch recheck.
 """
@@ -275,11 +276,16 @@ def check(sheet: Sheet) -> tuple[list[str], list[str]]:
     return errs, warns
 
 
-def write_check(sheet: Sheet, errs, warns) -> list[str]:
+def write_check(sheet: Sheet, errs, warns, ra: list[str] | None) -> list[str]:
+    """check.md: the scripted errors with rust-analyzer's (`ra`, None when no daemon ran) and the warnings. The
+    `rust-analyzer:` line under the title always states racheck's count, or that it did not run."""
     out = ctx.set_dir(sheet.id) / "check.md"
-    out.write_text("# check\n\n## Errors\n\n" + ("\n\n".join(errs) or "none") + "\n\n## Warnings\n\n"
+    errs = list(errs) + list(ra or [])
+    line = "rust-analyzer: not run (no daemon)" if ra is None else f"rust-analyzer: {len(ra)} errors (racheck.md)"
+    out.write_text("# check\n\n" + line + "\n\n## Errors\n\n" + ("\n\n".join(errs) or "none") + "\n\n## Warnings\n\n"
                    + ("\n\n".join(warns) or "none") + "\n")
-    print(f"check: {len(errs)} errors, {len(warns)} warnings ({out})")
+    print(f"check: {len(errs)} errors ({'racheck not run' if ra is None else f'{len(ra)} from racheck'}), "
+          f"{len(warns)} warnings ({out})")
     return errs
 
 
@@ -323,10 +329,10 @@ def racheck_set(sheet: Sheet) -> list[str] | None:
 
 
 def checks(sheet: Sheet) -> list[str]:
-    """The scripted check plus rust-analyzer's errors when its daemons run; writes check.md. Returns the errors."""
+    """The scripted check plus rust-analyzer's errors when its daemons run; writes check.md. Returns the errors.
+    Every writer of check.md goes through here, so its count always includes racheck's."""
     errs, warns = check(sheet)
-    errs += racheck_set(sheet) or []
-    return write_check(sheet, errs, warns)
+    return write_check(sheet, errs, warns, racheck_set(sheet))
 
 
 def scripted(errs: list[str]) -> list[str]:

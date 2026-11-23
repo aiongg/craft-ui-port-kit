@@ -57,7 +57,7 @@ Run `tools/track --help` for the summary. `--config PATH` before the command pic
 | `track show [TASK] [--json]` | Text view: phase, counts, tasks by state with age, open questions. With TASK: its history, links, questions and last tool event. |
 | `track alerts [--stale-min N]` | One line per item that needs action (below). Always exits 0, so a poll loop never stops on it. |
 | `track watch [--timeout MIN] [--poll SEC]` | Waits for the next new alert line or the timeout (below). Always exits 0. |
-| `track md [--out PATH]` | Writes STATUS.md (phase, tasks by state, questions, rounds) for the app's port branch. Default path: `<app.integration>/STATUS.md`; `--out -` prints it. |
+| `track md [--out PATH]` | Writes STATUS.md (phase, tasks by state, questions, rounds) in the workspace. Default path: `<work.dir>/STATUS.md`; a path outside `work.dir` is refused; `--out -` prints it. |
 | `track publish` | Folds every event again and rewrites `out_dir`. Writes do this already; run it after changing the dashboard files or to rebuild a deleted `state.json`. |
 | `track serve [--port P] [--host H]` | See [Viewing the page](#viewing-the-page). |
 | `track pause [NOTE]` / `track resume [NOTE]` | The pause switch: while paused, `track step` refuses to start a step. |

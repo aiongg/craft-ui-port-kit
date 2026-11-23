@@ -3,9 +3,14 @@
 Blocks (full text in bundle.FORMAT): `@@@ EDIT <path>` with SEARCH/REPLACE pairs, `@@@ NEW <path>` ... `@@@ END`,
 `@@@ DELETE <path>`, and `@@@ BLOCKED` ... `@@@ END` (nothing is applied). Before the blocks, the moves in
 <set dir>/moves.tsv run as `git mv` and the sheet's `delete` rows are removed.
+
+An EDIT block applies only where its SEARCH text matches exactly once in the file it names; otherwise it fails. Every
+applied block is recorded in <set dir>/applied.tsv (path and hashes of SEARCH and REPLACE), so a rerun of the same
+edits reports that block as already applied instead of failing.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 
 from .context import ctx, git
@@ -107,6 +112,8 @@ def apply_edits(sheet: Sheet, edits_text: str, also=()):
     finding names). Returns (report lines, failure lines)."""
     owned = sheet.owned() | set(also)
     report, fails = [], []
+    applied = ctx.set_dir(sheet.id) / "applied.tsv"
+    done = {tuple(l.split("\t")) for l in applied.read_text().splitlines()} if applied.exists() else set()
     for src, dst in moves(sheet):
         tree = sheet.tree(sheet.repo_of(src))
         if (tree / src).exists() and not (tree / dst).exists():
@@ -136,12 +143,10 @@ def apply_edits(sheet: Sheet, edits_text: str, also=()):
             text = f.read_text()
             if PREFIX.match(search):
                 search, replace = strip_prefix(search), strip_prefix(replace)
-            # A rerun of the same edits leaves blocks that are already applied alone.
-            if replace.strip() and search not in replace and replace in text and not locate(text, search):
+            mark = block_mark(path, search, replace)
+            # A rerun of the same edits leaves a block this set applied before alone, never a block it did not.
+            if mark in done and replace in text:
                 report.append(f"already applied: {path}")
-                continue
-            if replace.strip() and search in replace and replace != search and replace in text:
-                report.append(f"already applied: {path}")   # an insertion around its anchor is already there
                 continue
             hit = locate(text, search)
             if not hit:
@@ -150,8 +155,15 @@ def apply_edits(sheet: Sheet, edits_text: str, also=()):
                 continue
             at, ln = hit
             f.write_text(text[:at] + replace + text[at + ln:])
+            with open(applied, "a") as fh:
+                fh.write("\t".join(mark) + "\n")
             report.append(f"edited {path}")
     return report, fails
+
+
+def block_mark(path: str, search: str, replace: str) -> tuple[str, str, str]:
+    h = lambda t: hashlib.sha256(t.encode()).hexdigest()[:16]  # noqa: E731
+    return path, h(search), h(replace)
 
 
 def write_apply(sheet: Sheet, report, fails) -> list[str]:

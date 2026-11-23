@@ -10,7 +10,8 @@
 #   A set's base commit is <work.sets>/<set>/base-<repo>. For REPO=fw, <work.sets>/<set>/landed (a set already in the
 #   writing base) takes precedence, so only its later commits land.
 # Where two sets edit the same lines the later set wins (-X theirs); the files that decided are printed so the
-# combine can check that both sets' intent survives.
+# combine can check that both sets' intent survives. Exit 1 on a conflict -X theirs cannot resolve, or when
+# combine-lost reports a lost line.
 set -eu
 . "$(dirname "$(readlink -f "$0")")/portkit/lib.sh"
 track_self combine-area "$0" "$@"
@@ -56,5 +57,7 @@ for a in "$@"; do
   fi
   echo "$s: $n commits; -X theirs decided: $u"
 done
-"$TOOLS/combine-lost" "$@"
+lost=0
+"$TOOLS/combine-lost" "$@" || lost=1
 echo "crates: $(git diff --name-only "$BASE" HEAD | python3 -I "$TOOLS/portkit/gates.py" packages "$J" | tr '\n' ' ')"
+[ $lost = 0 ] || { echo "combine-area: combine-lost found lost lines (LOST above); restore them before the gate" >&2; exit 1; }

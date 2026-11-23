@@ -40,7 +40,7 @@ Record the round: `tools/track event decision "<area> review <round>: <n> findin
 Fixers work in the sets' code-only trees, with no build.
 
 - Write a list file with one line per set that has findings: `<set> <path to review-<round>.md>`.
-- Run it as a background task: `tools/fix-batch <list>`. Each line runs `port-set fix <set> <findings>`: one model call that applies the findings and rulings, then the scripted check and racheck. `port-set` moves each set's task (`running`, then `done` or `review`).
+- Run it as a background task: `tools/fix-batch <list>`. A line without an existing findings file stops the batch before it starts. Each line runs `port-set fix <set> <findings>`: one model call that applies the findings and rulings, then the scripted check and racheck. `port-set` moves each set's task (`running`, then `done` or `review`).
 - A set with many findings or many files gets the agent-mode fixer instead: `prompts/p6-fix-agent.md`, one agent per set, task `<set>`.
 - A set that fails its fix twice goes to `models.fix_retry`: `tools/fix-batch <list> <N> <models.fix_retry>`.
 
@@ -57,7 +57,7 @@ REPO=app tools/combine-area <batch> <set>...      # app side, in app.integration
 
 - Each set lands as **one net-change commit**: its whole diff from its base, not its separate commits. A set with a second repo lands from its `<set>-<repo>` tree.
 - Where two sets edit the same lines, the later set wins (`-X theirs`). combine-area prints the files where that decided; read each and confirm both sets' intent survived.
-- combine-area then runs `tools/combine-lost`: lines a set added that the combined tree lacks, and that no later set removed or changed. Each lost line is a combine error: restore it.
+- combine-area then runs `tools/combine-lost`: lines a set added that the combined tree lacks, and that no later set removed or changed. Each lost line is a combine error: combine-area exits 1, and you restore the line before the gate.
 - **Owed lines.** A set not yet written may owe a line the batch needs to compile (a `mod` line, a re-export, a call it will add). Add it on the integration branch as a separate commit whose message starts `owed by <set>:`, so its writer finds and replaces it. Never edit another set's branch for it.
 - `tools/cross-owner <set>...` lists files a set changed that `owners.tsv` gives to another set. Each is a bookkeeping error: move the change to its owner, or record why it stays.
 

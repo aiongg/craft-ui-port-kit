@@ -16,7 +16,7 @@ The lead and the developer:
   track show [TASK] [--json]          text view
   track alerts [--stale-min N]        stale, blocked and failed tasks, open questions, answers waiting; exit 0 always
   track watch [--timeout MIN] [--poll SEC]   wait for a new alert (then print the digest) or the timeout; exit 0
-  track md [--out PATH]               STATUS.md for the app's port branch (default: in the app integration tree)
+  track md [--out PATH]               STATUS.md in the workspace (default: <work.dir>/STATUS.md; - prints it)
   track publish                       fold the events and rewrite out_dir (every write does this)
   track serve [--port P] [--host H]   serve out_dir and accept answers from the page
   track pause [NOTE] | track resume [NOTE]
@@ -316,7 +316,10 @@ def cmd_md(a):
     if a.out == "-":
         sys.stdout.write(text)
         return
-    out = Path(a.out) if a.out else Path(s.cfg.get("app.integration") or s.dir) / "STATUS.md"
+    work = Path(s.cfg.get("work.dir")).resolve()
+    out = (Path(a.out) if a.out else work / "STATUS.md").resolve()
+    if work != out and work not in out.parents:
+        sys.exit(f"track md: {out} is outside the workspace ({work}); STATUS.md is written only inside it")
     out.write_text(text)
     print(out)
 

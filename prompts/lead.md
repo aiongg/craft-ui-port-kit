@@ -24,7 +24,7 @@ In phase 0, with the dashboard question, ask the developer the landing questions
 {{RULES}}/lead-rules.md, "The dashboard", lists them; they are rules, not suggestions. Two points the rules leave to this prompt:
 
 - Give each agent its task id in its prompt: render it with `TASK=<id>`. Create the task first (`track status <TASK> todo`, or `track import sheets` and `track import tracks` for writer sets and red-round tracks).
-- At the end of each batch, run `track md`, which writes STATUS.md for the app's port branch; `track show` gives the same view as text.
+- At the end of each batch, run `track md`, which writes STATUS.md in the workspace; `track show` gives the same view as text.
 
 ## Hand-off
 

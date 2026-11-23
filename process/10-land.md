@@ -111,4 +111,4 @@ The developer runs the landed app once on each platform it ships on (a window op
 - [ ] `cl check all` passed in both landed clones, or each `--skip-check` reason is in `STATE.md`.
 - [ ] The developer ran the app once on each platform it ships on, and the results are in `STATE.md`.
 - [ ] CI results for both repositories are recorded on the dashboard and in `STATE.md`.
-- [ ] `tools/track md` has written `STATUS.md` for the app's port branch.
+- [ ] `tools/track md` has written `STATUS.md` in the workspace.

@@ -123,9 +123,10 @@ The parser is `tools/portkit/portset/sheet.py`. [templates/sheet.md](../template
 | `open.md` | `run` | DECIDE items that stopped a write |
 | `edits-1.md`, `edits-2.md`, ..., `edits-<label>.md` | `run`, `fix` | Each one-shot reply |
 | `apply.md` | `apply`, `run`, `fix` | What applied and what failed |
-| `check.md` | `check`, `run`, `agent`, `fix` | `## Errors` and `## Warnings`, one item per paragraph, `none` when empty |
+| `check.md` | `check`, `run`, `agent`, `fix` | A `rust-analyzer:` line (racheck's error count, or `not run (no daemon)`), then `## Errors` (scripted, then rust-analyzer's) and `## Warnings`, one item per paragraph, `none` when empty |
 | `racheck.md` | `racheck`, `run`, `fix` | rust-analyzer errors by file |
 | `blocked.md` | `run`, `fix` | The writer's BLOCKED reason |
+| `applied.tsv` | `apply`, `run`, `fix` | One line per applied EDIT block: path, SEARCH hash, REPLACE hash |
 | `sheet.md`, `agent-prompt.md`, `agent-prompt-continue.md` | `agent` | The agent's input |
 | `<findings>-prompt.md` | `fix` | The fix call's prompt |
 | `<label>.json`, `<label>.err` | every model call | The raw reply; the output of a failed call |
@@ -187,11 +188,11 @@ Applies an edits file in the one-shot format:
 @@@ END
 ```
 
-Before the blocks: the moves in `moves.tsv` run as `git mv`, and the sheet's `delete` rows are removed. Then each block in order; a later SEARCH sees the text after earlier blocks. A block for a path outside the Files table fails and is skipped. A SEARCH that matches no place, or more than one, fails. Line-number prefixes copied from the bundle are stripped. A block that is already applied is reported as such, so rerunning an edits file is safe. `apply.md` lists what applied and what failed.
+Before the blocks: the moves in `moves.tsv` run as `git mv`, and the sheet's `delete` rows are removed. Then each block in order; a later SEARCH sees the text after earlier blocks. A block for a path outside the Files table fails and is skipped. A SEARCH that matches no place, or more than one, fails. Line-number prefixes copied from the bundle are stripped. Every applied block is recorded in `applied.tsv` (path and hashes of SEARCH and REPLACE); a block recorded there whose REPLACE text is in the file is reported as already applied, so rerunning an edits file is safe. A block never applied passes only when its SEARCH matches. A `@@@ BLOCKED` block with no reason is a malformed reply: the command fails and nothing is applied. `apply.md` lists what applied and what failed.
 
 ### check SET
 
-The scripted self-check. Writes `check.md`; prints the counts.
+The scripted self-check, plus rust-analyzer's errors when the daemons run (as `racheck`). Writes `check.md`; prints the counts. Every command that writes `check.md` runs both, so its count always includes racheck's.
 
 Errors:
 

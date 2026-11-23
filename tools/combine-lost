@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """After combine-area: list lines a set added that the combined tree lacks and no later set removed or changed.
 -X theirs can drop an earlier set's lines silently where two sets edit neighbouring lines; this finds them.
+Exit 1 when a line is lost, 0 otherwise.
 
 Usage: [REPO=fw|app] combine-lost SET[@REV]...   (same arguments, same order as combine-area; reads the integration
 worktree's HEAD: framework.integration for REPO=fw, app.integration for REPO=app)"""
@@ -80,7 +81,8 @@ def main():
                     lost += 1
         summary = f"combine-lost: {lost} line(s) missing; {changed} changed in place (words all present)"
         print(summary)
-        rec.result(summary, data={"lost": lost, "changed": changed})
+        rec.result(summary, data={"lost": lost, "changed": changed}, ok=lost == 0)
+    sys.exit(1 if lost else 0)
 
 
 if __name__ == "__main__":

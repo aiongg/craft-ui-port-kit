@@ -12,7 +12,7 @@ own a set's state (plancheck, run, agent, fix) move its task with `track.status`
 | The writer runs out of turns | blocked, on lead | how to continue (`agent --continue`) |
 | Written, scripted check errors or apply failures left | review | the counts; check.md, apply.md |
 | Written, scripted check clean | done | rust-analyzer errors, if any, wait for the batch recheck |
-| The command fails (claude call, git) | failed | the error |
+| The command fails (claude call, git, a BLOCKED block with no reason) | failed | the error |
 
 The end-of-command event of plancheck is ok unless the command fails; that of run, agent and fix is ok only when the set
 ends done. A command module sets `record=False` on a subparser to post no event (quick read-only commands).
@@ -27,7 +27,7 @@ from pathlib import Path
 from portkit import track
 
 from .bundle import build_bundle, instructions, numbered
-from .checks import check, checks, racheck_set, scripted, write_check
+from .checks import checks, racheck_set, scripted
 from .context import ctx, git
 from .edits import apply_edits, blocked_reason, remove, write_apply
 from .model import (AGENT_ALLOWED, EDIT_TOOLS, READ_TOOLS, WRITE_NOW, agent_prompt, claude, commit, continue_text,
@@ -98,10 +98,8 @@ def cmd_apply(a) -> Outcome:
 def cmd_check(a) -> Outcome:
     sheet = Sheet(a.set)
     need_trees(sheet)
-    errs, warns = check(sheet)
-    write_check(sheet, errs, warns)
-    return Outcome(f"{len(errs)} errors, {len(warns)} warnings", ok=not errs, log=ctx.sets / sheet.id / "check.md",
-                   data={"errors": len(errs), "warnings": len(warns)})
+    errs = checks(sheet)
+    return Outcome(f"{len(errs)} errors", ok=not errs, log=ctx.sets / sheet.id / "check.md", data={"errors": len(errs)})
 
 
 def cmd_racheck(a) -> Outcome:
@@ -117,14 +115,17 @@ def cmd_racheck(a) -> Outcome:
 # ---------------------------------------------------------------- state
 
 def blocked(sheet: Sheet, text: str) -> str | None:
-    """The writer's BLOCKED reason (written to blocked.md), or None."""
+    """The writer's BLOCKED reason (written to blocked.md), or None. A BLOCKED block with no reason is a malformed
+    reply: the command fails, as for any failed call, and nothing is applied."""
     reason = blocked_reason(text)
     if reason is None:
         return None
+    if not reason:
+        raise SystemExit(f"{sheet.id}: malformed reply: a BLOCKED block with no reason; nothing applied")
     out = ctx.set_dir(sheet.id) / "blocked.md"
     out.write_text(f"# {sheet.id}: blocked\n\n{reason}\n")
     print(f"BLOCKED: nothing applied; reason in {out}")
-    return reason or "(no reason given)"
+    return reason
 
 
 def first_line(text: str) -> str:
@@ -252,9 +253,8 @@ def cmd_agent(a) -> Outcome:
     track.status(sheet.id, "running", f"{'agent continue' if a.cont else 'agent write'} ({model})")
     reply = claude(prompt, sheet, model, EDIT_TOOLS, turns, label,
                    extra=("--permission-mode", "acceptEdits", "--allowedTools", AGENT_ALLOWED))
-    errs, warns = check(sheet)
-    write_check(sheet, errs, warns)
-    commit(sheet, f"{sheet.id}: {'finished' if a.cont else 'written'} by an agent")
+    commit(sheet, f"{sheet.id}: {'finished' if a.cont else 'written'} by an agent")   # racheck reads the commits
+    errs = checks(sheet)
     return end_state(sheet, "finished by an agent" if a.cont else "written by an agent",
                      out_of_turns=reply.out_of_turns, errs=errs)
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run `port-set fix` (apply a review's findings to a set, code only) on every line "<set> <findings-file>" of a
-# list, N at a time.
+# list, N at a time. A line without an existing findings file stops the batch before it starts (exit 2).
 # Usage: fix-batch LIST [N] [MODEL] [TURNS]
 #   N       default pipeline.parallel
 #   MODEL   default models.fix (a set that failed twice: pass models.fix_retry)
@@ -24,6 +24,13 @@ one() {
   echo "$(date -u +%H:%M) $s fix $label: $(grep -E '^(apply|check|racheck|OPEN|BLOCKED|OUT OF TURNS|done|fix-)' "$sets/$s/fix-$label.log" | tr '\n' ' ' | cut -c1-300)" | tee -a "$log"
 }
 export -f one
+
+# Every line must name a set and an existing findings file; a bad line stops the batch before any set runs.
+bad=$(sed '/^[[:space:]]*$/d' "$list" | while read -r s f rest; do
+  { [ -n "$f" ] && [ -z "$rest" ] && [ -f "$f" ]; } || echo "  $s ${f:-(no findings file)}${rest:+ $rest}"
+done)
+[ -z "$bad" ] || die "$list: lines without a findings file, or with more than two fields:
+$bad"
 
 mkdir -p "$sets"
 sed '/^[[:space:]]*$/d' "$list" | xargs -P "$n" -L1 bash -c 'one "$0" "$1"'

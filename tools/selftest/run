@@ -10,7 +10,9 @@ their exit status, output and files. -v prints the output of failed cases' last 
 
 Prints one line per case and a last line `selftest: <n> passed, <n> failed`. Exit 0 when every case passed, 1 otherwise.
 """
+import contextlib
 import importlib
+import io
 import shutil
 import sys
 import tempfile
@@ -38,14 +40,18 @@ def main(argv: list[str]) -> int:
                 continue
             d = Path(tempfile.mkdtemp(prefix="kit-selftest-"))
             s = lib.Scratch(d)
+            buf = io.StringIO()
             try:
-                getattr(mod, name)(s)
+                with contextlib.redirect_stdout(buf):
+                    getattr(mod, name)(s)
                 passed += 1
                 print(f"ok      {full}")
                 shutil.rmtree(d, ignore_errors=True)
             except Exception as e:  # one failing case must not stop the others
                 failed += 1
                 print(f"FAILED  {full}: {e if isinstance(e, AssertionError) else traceback.format_exc(limit=3)}")
+                if verbose and buf.getvalue():
+                    print("  --- case output ---\n  " + buf.getvalue().replace("\n", "\n  "))
                 if verbose and s.last is not None:
                     print("  --- last call output ---\n  " + (s.last.stdout + s.last.stderr).replace("\n", "\n  "))
                 print(f"        scratch kept: {d}")

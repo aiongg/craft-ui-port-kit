@@ -662,7 +662,7 @@ def show_text(state: dict, task: str | None = None, now: datetime | None = None)
 
 
 def md_text(state: dict, now: datetime | None = None) -> str:
-    """STATUS.md: phase, tasks by state, questions and rounds, for the app's port branch."""
+    """STATUS.md: phase, tasks by state, questions and rounds, written in the workspace."""
     now = now or now_utc()
     ph = state.get("phase") or {}
     esc = lambda s: str(s or "").replace("|", "\\|").replace("\n", " ")

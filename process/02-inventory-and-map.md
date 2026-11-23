@@ -87,7 +87,7 @@ Each area agent writes `<work.maps>/<area>.md` (format: `templates/area-map.md`,
 1. every part, one row per map section;
 2. the shared framework gaps (`SG-n`), merged and deduplicated across areas, each marked `before` (blocks a family of parts) or `beside`;
 3. the app-side changes several sections need (`AC-n`);
-4. the dependency order and the critical path;
+4. the dependency order, the critical path and the areas ranked by risk (missing components and shared gaps per area, the riskiest sections first);
 5. the missing control hooks (`H-n`): states a script cannot reach yet;
 6. coverage: per-area counts, every inventory entry checked by id, and the parts mapped in more than one area.
 

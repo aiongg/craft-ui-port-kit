@@ -43,7 +43,7 @@ Each phase has one runbook. Read it in full when the phase starts, and follow it
 | 8 | Look and behaviour | `process/09-look-and-behaviour.md` | `p8-task-brief` | `look` |
 | 9 | Land | `process/10-land.md` | `p9-production-merge` | `land/scan-range.py`, `land/land-framework.sh`, `land/land-app.sh`, `land/pin-framework.py` |
 
-Phases 5 to 7 repeat per build batch: the framework-side sets first, area by area, then the app sets.
+Phases 5 to 7 repeat per build batch: the pilot, then the framework-side sets as one batch (two above about 60 sets), then the app sets.
 
 Read these when the situation comes up, not up front:
 

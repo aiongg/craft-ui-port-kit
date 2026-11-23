@@ -29,7 +29,7 @@ The per-task model (one agent plans, writes, builds and gates one task) stays on
 | 8 | Look and behaviour | Tests green | Every map section's states compared with the old app and accepted | states files, old/new captures | one agent per component class | incremental | [09-look-and-behaviour.md](09-look-and-behaviour.md) |
 | 9 | Land | Look accepted | Framework changes on `framework.branch`; app scrubbed and pinned to the landed framework rev; CI result recorded | scan reports, landing clones | lead | CI | [10-land.md](10-land.md) |
 
-Phases 5 to 7 repeat per **build batch**: the framework-side sets first, area by area, then the app sets in one or two batches written against the compiled framework. The number of build passes, not the number of sets, sets the wall time of these phases.
+Phases 5 to 7 repeat per **build batch**: the pilot, then the framework-side sets as one batch (two above about 60 sets), then the app sets in one or two batches written against the compiled framework. The number of build passes, not the number of sets, sets the wall time of these phases.
 
 Two more pages apply to every phase: [11-build-loop.md](11-build-loop.md) (cl, the one feature resolution, warm target dirs) and [12-running-agents.md](12-running-agents.md) (headless agents, background tasks, quota, models).
 

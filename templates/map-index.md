@@ -39,6 +39,13 @@ The area maps list framework gaps under their own ids. Merged and deduplicated t
 | Work | Needed by |
 |---|---|
 
+### Risk ranking
+
+| Rank | Area or section | Missing components | Needs props | Shared gaps | Why it is risky |
+|---|---|---|---|---|---|
+
+The riskiest main-surface section with the shell is the pilot; the framework sets the ranking marks riskiest go first in the batch after it.
+
 ### Step 1: the first parts, one agent each, in parallel
 
 | Part | Sections | Framework area it exercises | Size | Control calls today |

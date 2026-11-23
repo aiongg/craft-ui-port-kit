@@ -112,7 +112,7 @@ KEYS: list[Key] = [
       "the branch the framework team names. Pins and landing use it.", placeholder="FW_BRANCH"),
     K("framework.checkout", None, "path", "move-base patch-framework init-workspace",
       "Local framework clone. Branches and worktrees are made from it.", required=True, placeholder="FW_CHECKOUT"),
-    K("framework.integration", "{framework.checkout}", "path", "combine-area combine-lost compile-gate test-run patch-framework racheck-tree racheck-gate",
+    K("framework.integration", "{framework.checkout}", "path", "combine-area combine-lost compile-gate test-run patch-framework racheck-tree racheck-gate look portkit/gates.py",
       "Framework integration worktree: combines and compile gates run here.", placeholder="FW_INT"),
     K("framework.snapshot", "{work.trees}/snap-fw", "path", "init-workspace make-snapshots workflows prompts",
       "Read-only framework checkout at plan.base, read by phase 1 and 2 agents.", placeholder="FW"),
@@ -136,7 +136,7 @@ KEYS: list[Key] = [
       placeholder="APP_ID", default_doc="from app.name"),
     K("app.checkout", None, "path", "init-workspace patch-framework land/land-app.sh",
       "Local app clone. Branches and worktrees are made from it.", required=True, placeholder="APP_CHECKOUT"),
-    K("app.integration", "{app.checkout}", "path", "combine-area combine-lost compile-gate test-run patch-framework racheck-tree racheck-gate gate-classify.py feature-selection.py",
+    K("app.integration", "{app.checkout}", "path", "combine-area combine-lost compile-gate test-run patch-framework racheck-tree racheck-gate gate-classify.py feature-selection.py look portkit/gates.py",
       "App integration worktree: combines, compile gates and full test runs run here.", placeholder="APP_INT"),
     K("app.snapshot", "{work.trees}/snap-app", "path", "init-workspace make-snapshots coverage.py workflows prompts render-prompt",
       "Read-only app checkout at plan.app_base, read by phase 1 and 2 agents.", placeholder="APP_SRC"),
@@ -289,14 +289,14 @@ KEYS: list[Key] = [
       "becomes a `head` event. Entries built on unset keys are dropped."),
 
     # ---- look: production against port captures (tools/look.md)
-    K("look.driver", None, "path", "look",
+    K("look.driver", None, "path", "look portkit/gates.py",
       "The app's look driver: a Python file with `start`, `shoot` and `stop` (tools/look.md, \"Driver interface\")."),
-    K("look.states_dir", "{work.dir}/look/states", "path", "look",
+    K("look.states_dir", "{work.dir}/look/states", "path", "look portkit/gates.py",
       "States files, one per panel or dialog (`<Panel>.json`)."),
     K("look.run_dir", "{work.dir}/look/run", "path", "look",
       "Scratch space of `look pair`: each app instance's work dir and the full-window shots of the last run."),
-    K("look.production_binary", None, "path", "look",
-      "Production build with the control hooks (process/09-look-and-behaviour.md, step 1); side `up`."),
+    K("look.production_binary", None, "path", "look portkit/gates.py",
+      "Production build with the control hooks (process/01-setup.md, step 6a); side `up`."),
     K("look.port_binary", None, "path", "look",
       "The port's binary as the build loop builds it in the app integration tree; side `port`."),
     K("look.window", "1440x900", "str", "look",
@@ -304,6 +304,9 @@ KEYS: list[Key] = [
     K("look.threshold", 16, "int", "look",
       "A pixel differs visibly when one colour channel differs by more than this (of 255). Smaller differences "
       "show in the difference image but make no crop."),
+    K("look.differences", "{work.dir}/look/differences.md", "path", "look portkit/gates.py",
+      "The differences file: one row per look difference with its judgement, class and outcome (tools/look.md, "
+      "\"The differences file\"). `look brief` and the phase 8 gate read it."),
 
     # ---- land: scrub and landing (the tools print push commands and never push)
     K("land.framework_via", "pr", "str", "land/land-framework.sh",
@@ -342,6 +345,7 @@ CALL_PLACEHOLDERS = {
     "PART": "Decision part id (`<area>-<n>`)",
     "STAGE": "Contract stub stage number",
     "CRATES": "Framework crates of one contract stub stage, in build order",
+    "LOOK": "The look evidence of one fix class, filled by `look brief`",
 }
 # Placeholders derived from the kit itself.
 KIT_PLACEHOLDERS = {"KIT": "Kit root directory", "RULES": "The kit's rules/ directory"}

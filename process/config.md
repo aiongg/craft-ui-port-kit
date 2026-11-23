@@ -109,7 +109,7 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `repo` | str | `https://github.com/storytold/craft-libs` | land/land-framework.sh, land/pin-framework.py, patch-framework, prompts | Framework repository URL. It must be the remote that holds plan.base: the pin names this URL and a rev only that remote has does not resolve for anyone else. Placeholder `{{FW_REPO}}`. Env: `PORT_KIT_FRAMEWORK_REPO`. |
 | `branch` | str | `next` | land/land-framework.sh, init-workspace, prompts | Framework branch the port targets: `next` on the framework's upstream; when it does not exist there yet, the branch the framework team names. Pins and landing use it. Placeholder `{{FW_BRANCH}}`. Env: `PORT_KIT_FRAMEWORK_BRANCH`. |
 | `checkout` | path | required | move-base, patch-framework, init-workspace | Local framework clone. Branches and worktrees are made from it. Placeholder `{{FW_CHECKOUT}}`. Env: `PORT_KIT_FRAMEWORK_CHECKOUT`. |
-| `integration` | path | `{framework.checkout}` | combine-area, combine-lost, compile-gate, test-run, patch-framework, racheck-tree, racheck-gate | Framework integration worktree: combines and compile gates run here. Placeholder `{{FW_INT}}`. Env: `PORT_KIT_FRAMEWORK_INTEGRATION`. |
+| `integration` | path | `{framework.checkout}` | combine-area, combine-lost, compile-gate, test-run, patch-framework, racheck-tree, racheck-gate, look, portkit/gates.py | Framework integration worktree: combines and compile gates run here. Placeholder `{{FW_INT}}`. Env: `PORT_KIT_FRAMEWORK_INTEGRATION`. |
 | `snapshot` | path | `{work.trees}/snap-fw` | init-workspace, make-snapshots, workflows, prompts | Read-only framework checkout at plan.base, read by phase 1 and 2 agents. Placeholder `{{FW}}`. Env: `PORT_KIT_FRAMEWORK_SNAPSHOT`. |
 | `writing_base` | str | `port/stubs` | port-set, combine-area, move-base, racheck.py, compile-gate, racheck-tree, racheck-gate | Framework branch the writers start from: the contract stubs (phase 3). Placeholder `{{FW_WRITING_BASE}}`. Env: `PORT_KIT_FRAMEWORK_WRITING_BASE`. |
 | `facade` | str | `craft` | port-set, prompts, feature-selection.py, racheck.py | Facade crate. App code reaches every member crate through it. Placeholder `{{FACADE}}`. Env: `PORT_KIT_FRAMEWORK_FACADE`. |
@@ -124,7 +124,7 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `name` | str | required | port-set, prompts | Display name of the app. Placeholder `{{APP}}`. Env: `PORT_KIT_APP_NAME`. |
 | `id` | str | from app.name | init-workspace, prompts | Short lowercase id for file and branch names. Default: app.name lowercased, spaces to dashes. Placeholder `{{APP_ID}}`. Env: `PORT_KIT_APP_ID`. |
 | `checkout` | path | required | init-workspace, patch-framework, land/land-app.sh | Local app clone. Branches and worktrees are made from it. Placeholder `{{APP_CHECKOUT}}`. Env: `PORT_KIT_APP_CHECKOUT`. |
-| `integration` | path | `{app.checkout}` | combine-area, combine-lost, compile-gate, test-run, patch-framework, racheck-tree, racheck-gate, gate-classify.py, feature-selection.py | App integration worktree: combines, compile gates and full test runs run here. Placeholder `{{APP_INT}}`. Env: `PORT_KIT_APP_INTEGRATION`. |
+| `integration` | path | `{app.checkout}` | combine-area, combine-lost, compile-gate, test-run, patch-framework, racheck-tree, racheck-gate, gate-classify.py, feature-selection.py, look, portkit/gates.py | App integration worktree: combines, compile gates and full test runs run here. Placeholder `{{APP_INT}}`. Env: `PORT_KIT_APP_INTEGRATION`. |
 | `snapshot` | path | `{work.trees}/snap-app` | init-workspace, make-snapshots, coverage.py, workflows, prompts, render-prompt | Read-only app checkout at plan.app_base, read by phase 1 and 2 agents. Placeholder `{{APP_SRC}}`. Env: `PORT_KIT_APP_SNAPSHOT`. |
 | `production` | path | `{work.trees}/prod` | prompts, compare-runs.py, make-snapshots | Read-only checkout of the app's production main at the commit the port last merged: the behaviour reference for triage, red rounds and look work. Placeholder `{{PROD}}`. Env: `PORT_KIT_APP_PRODUCTION`. |
 | `release` | path | unset | prompts | Optional read-only checkout of the latest app release. Placeholder `{{RELEASE}}`. Env: `PORT_KIT_APP_RELEASE`. |
@@ -250,13 +250,14 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 
 | Key | Type | Default | Read by | Meaning |
 |---|---|---|---|---|
-| `driver` | path | unset | look | The app's look driver: a Python file with `start`, `shoot` and `stop` (tools/look.md, "Driver interface"). Env: `PORT_KIT_LOOK_DRIVER`. |
-| `states_dir` | path | `{work.dir}/look/states` | look | States files, one per panel or dialog (`<Panel>.json`). Env: `PORT_KIT_LOOK_STATES_DIR`. |
+| `driver` | path | unset | look, portkit/gates.py | The app's look driver: a Python file with `start`, `shoot` and `stop` (tools/look.md, "Driver interface"). Env: `PORT_KIT_LOOK_DRIVER`. |
+| `states_dir` | path | `{work.dir}/look/states` | look, portkit/gates.py | States files, one per panel or dialog (`<Panel>.json`). Env: `PORT_KIT_LOOK_STATES_DIR`. |
 | `run_dir` | path | `{work.dir}/look/run` | look | Scratch space of `look pair`: each app instance's work dir and the full-window shots of the last run. Env: `PORT_KIT_LOOK_RUN_DIR`. |
-| `production_binary` | path | unset | look | Production build with the control hooks (process/09-look-and-behaviour.md, step 1); side `up`. Env: `PORT_KIT_LOOK_PRODUCTION_BINARY`. |
+| `production_binary` | path | unset | look, portkit/gates.py | Production build with the control hooks (process/01-setup.md, step 6a); side `up`. Env: `PORT_KIT_LOOK_PRODUCTION_BINARY`. |
 | `port_binary` | path | unset | look | The port's binary as the build loop builds it in the app integration tree; side `port`. Env: `PORT_KIT_LOOK_PORT_BINARY`. |
 | `window` | str | `1440x900` | look | Window size `<width>x<height>` for states files that name none. Env: `PORT_KIT_LOOK_WINDOW`. |
 | `threshold` | int | `16` | look | A pixel differs visibly when one colour channel differs by more than this (of 255). Smaller differences show in the difference image but make no crop. Env: `PORT_KIT_LOOK_THRESHOLD`. |
+| `differences` | path | `{work.dir}/look/differences.md` | look, portkit/gates.py | The differences file: one row per look difference with its judgement, class and outcome (tools/look.md, "The differences file"). `look brief` and the phase 8 gate read it. Env: `PORT_KIT_LOOK_DIFFERENCES`. |
 
 ### [land]
 
@@ -344,3 +345,4 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `{{PART}}` | Decision part id (`<area>-<n>`) (per call) |
 | `{{STAGE}}` | Contract stub stage number (per call) |
 | `{{CRATES}}` | Framework crates of one contract stub stage, in build order (per call) |
+| `{{LOOK}}` | The look evidence of one fix class, filled by `look brief` (per call) |

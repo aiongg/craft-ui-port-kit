@@ -5,6 +5,7 @@ usage:
   look [--config PORT.TOML] pair PANEL... | --all  [--side up|port|both] [--only ID[,ID...]]
   look [--config PORT.TOML] crops PAGE... [--threshold N] [--gap N] [--pad N] [--max N]
   look [--config PORT.TOML] states AREA SECTION [--panel NAME] [--theme NAME] [--force]
+  look [--config PORT.TOML] brief CLASS [--force]
 
 pair    For each panel, reads <look.states_dir>/<PANEL>.json, starts production (side `up`, look.production_binary)
         and the port (side `port`, look.port_binary) at the same time through the app's driver (look.driver),
@@ -18,13 +19,19 @@ crops   Recomputes the difference images and region crops of existing pages (a p
 states  Writes the states of one area map section into <look.states_dir>/<PANEL>.json. The panel name is the
         framework panel or dialog type the section names (or --panel). States already in the file are kept
         unless --force; new ones are added, so sections on one panel share a file.
+brief   Writes a look fixer's brief, <work.dir>/briefs/look-fix-<CLASS>.md: prompts/p8-task-brief.md with its Look
+        evidence filled from the `fix` rows of CLASS in the differences file (look.differences): the rows, the
+        Look reference of each map section they come from, the full-size shots and region crops of each state, the
+        rules that decide, and the fixer's own `look pair PANEL --only IDS` calls. The lead fills the rest. An
+        existing brief is kept unless --force.
 
 Dashboard: each `pair` run posts one `look` event on the task look-<PANEL>, with the page as its `page` link
-(relative to track.out_dir). `states` posts a `look-states` event on the same task, which creates it.
+(relative to track.out_dir). `states` posts a `look-states` event on the same task, which creates it. `brief`
+posts a `look-brief` event on the task look-fix-<CLASS>, which creates it.
 
 pair and crops need Pillow and numpy; without them, look runs itself again under
 `uv run --with pillow --with numpy` when uv is installed.
-Exit: 0 done; 1 a capture failed (the page shows the error); 2 usage, config or states-file error.
+Exit: 0 done; 1 a capture failed (the page shows the error); 2 usage, config, states-file or differences-file error.
 Reference: tools/look.md.
 """
 from __future__ import annotations
@@ -34,6 +41,7 @@ import concurrent.futures as cf
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -44,7 +52,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from portkit import config, track  # noqa: E402
-from portkit.look import page, states  # noqa: E402
+from portkit.look import differences, page, states  # noqa: E402
 
 SIDES = ("up", "port")
 SIDE_KEY = {"up": "look.production_binary", "port": "look.port_binary"}
@@ -89,20 +97,30 @@ def load_driver(path: Path):
     return mod
 
 
-def version(cfg, side: str, binary: Path) -> str:
-    """What the side ran: the binary's build time, and for the port the integration tree's commit."""
+def head(cfg) -> dict:
+    """The commits the port binary is built from: both integration trees' HEAD, and whether either had local changes.
+    The phase gate compares a pair's head with the trees' current one (tools/portkit/gates.py)."""
+    out = {"dirty": False}
+    for name, key in (("app", "app.integration"), ("framework", "framework.integration")):
+        tree = cfg.get(key)
+        out[name] = None
+        if not tree:
+            continue
+        r = subprocess.run(["git", "-C", str(tree), "rev-parse", "HEAD"], capture_output=True, text=True)
+        if r.returncode == 0:
+            out[name] = r.stdout.strip()
+            d = subprocess.run(["git", "-C", str(tree), "status", "--porcelain", "--untracked-files=no"],
+                               capture_output=True, text=True)
+            out["dirty"] = out["dirty"] or bool(d.stdout.strip())
+    return out
+
+
+def version(cfg, side: str, binary: Path, at: dict | None) -> str:
+    """What the side ran: the binary's build time, and for the port the app integration tree's commit."""
     built = datetime.fromtimestamp(binary.stat().st_mtime, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     text = f"{binary.name} built {built}"
-    tree = cfg.get("app.integration") if side == "port" else None
-    if tree:
-        try:
-            sha = subprocess.run(["git", "-C", tree, "rev-parse", "--short=10", "HEAD"], capture_output=True,
-                                 text=True, check=True).stdout.strip()
-            dirty = subprocess.run(["git", "-C", tree, "status", "--porcelain", "--untracked-files=no"],
-                                   capture_output=True, text=True).stdout.strip()
-            text = f"{sha}{' + local changes' if dirty else ''}, {text}"
-        except (OSError, subprocess.CalledProcessError):
-            pass
+    if side == "port" and at and at.get("app"):
+        text = f"{at['app'][:10]}{' + local changes' if at['dirty'] else ''}, {text}"
     return text
 
 
@@ -206,6 +224,7 @@ def _pair_one(cfg, driver, pixels, panel, sides, binaries, only, rec) -> int:
             for old in shots.glob(f"full-{side}-*.png"):
                 old.unlink()
         todo = {side: [states.for_side(doc, s, side, window) for s in run] for side in sides}
+        port_head = head(cfg) if "port" in sides else None      # before the run: what the binary was built from
         with cf.ThreadPoolExecutor(len(sides)) as ex:
             futs = {side: ex.submit(run_side, driver, side, binaries[side], work / side, shots, todo[side])
                     for side in sides}
@@ -225,7 +244,9 @@ def _pair_one(cfg, driver, pixels, panel, sides, binaries, only, rec) -> int:
         for side in SIDES:
             if side in sides:
                 man["sides"][side] = {"label": "production" if side == "up" else "port", "t": stamp,
-                                      "version": version(cfg, side, binaries[side])}
+                                      "version": version(cfg, side, binaries[side], port_head)}
+                if side == "port":
+                    man["sides"][side]["head"] = port_head
             else:
                 man["sides"][side] = (old.get("sides") or {}).get(side) or {"label": "production" if side == "up" else "port"}
         failed = 0
@@ -253,6 +274,8 @@ def _pair_one(cfg, driver, pixels, panel, sides, binaries, only, rec) -> int:
                     entry[side] = {"shot": f"{side}-{sid}.png", "full": f"full-{side}-{sid}.png", "t": stamp}
                 else:
                     entry[side] = {"error": res, "t": stamp}
+                if side == "port":
+                    entry[side]["head"] = port_head
                     failed += 1
             man["states"].append(entry)
         man["times"]["shots"] = round(t1 - t0, 1)
@@ -364,6 +387,113 @@ def cmd_states(cfg, a) -> int:
     return 0
 
 
+def _look_reference(maps: dict, cache: dict, ref: str | None) -> str:
+    """The **Look reference** field of the map section a state names (`"map": "AREA SID"`)."""
+    if not ref:
+        return "no map section recorded for this state (`look states` records it as `map`)"
+    if ref not in cache:
+        area, _, sid = ref.partition(" ")
+        f = maps.get(area)
+        try:
+            _sid, part, fields = states.find_section(Path(f).read_text(), sid) if f else (None, None, None)
+            cache[ref] = (f"{part}: " + fields["look reference"].replace("\n", " ")) if fields and \
+                fields.get("look reference") else f"{part or ref}: the map section has no Look reference"
+        except (OSError, states.StatesError) as e:
+            cache[ref] = f"cannot read the map section ({e})"
+    return cache[ref]
+
+
+def look_evidence(cfg, cls: str, rows: list[dict]) -> str:
+    """The `{{LOOK}}` text of a brief: what the fixer of one class needs to see and to rerun."""
+    look_dir = cfg.path("track.out_dir") / "look"
+    ph = cfg.placeholders()
+    maps = {ar["id"]: ar["map"] for ar in cfg.areas}
+    refs: dict = {}
+    panels: dict[str, list[str]] = {}
+    for r in rows:
+        ids = panels.setdefault(r["panel"], [])
+        if r["state"] not in ids:
+            ids.append(r["state"])
+    L = [f"Class `{cls}`: {len(rows)} difference(s) in {sum(len(v) for v in panels.values())} state(s) of "
+         f"{len(panels)} panel(s), from {cfg.path('look.differences')}.", "",
+         "| Panel | State | What differs | Judgement | Cause |", "|---|---|---|---|---|"]
+    L += [f"| {r['panel']} | {r['state']} | {r.get('what differs', '')} | {r.get('judgement', '')} | "
+          f"{r.get('cause', '')} |" for r in rows]
+    L += ["", "Judge every state on its full-size images below: production, port, the difference, and each region "
+          "crop (production left, port right, at 2x). Contact sheets and downscaled pages are for the developer, "
+          "never for acceptance. The rules that decide: " + ph["RULES"] + "/porting-rules.md, \"Look\" and "
+          "\"Old look or standardized look\"."]
+    for panel, ids in panels.items():
+        page_dir = look_dir / panel
+        try:
+            doc = states.load(cfg.path("look.states_dir") / f"{panel}.json", strict=False)
+        except (OSError, states.StatesError):
+            doc = {"states": []}
+        by_id = {s["id"]: s for s in doc["states"]}
+        try:
+            man = {s["id"]: s for s in json.loads((page_dir / "manifest.json").read_text())["states"]}
+        except (OSError, ValueError, KeyError):
+            man = {}
+        L += ["", f"{panel} (page {page_dir / 'index.html'}; regions as text: {page_dir / 'crops.txt'}):"]
+        for sid in ids:
+            st, m = by_id.get(sid), man.get(sid)
+            L.append(f"- `{sid}`" + (f" ({st.get('title', sid)})" if st else ": not in the states file"))
+            if st:
+                L.append(f"  - Look reference: {_look_reference(maps, refs, st.get('map'))}")
+            if not m:
+                L.append("  - no capture yet: run the pair below first")
+                continue
+            status = page.state_status(m)
+            shots = [f"{label} {page_dir / m[side]['shot']}" for side, label in (("up", "production"), ("port", "port"))
+                     if (m.get(side) or {}).get("shot")]
+            if m.get("diff"):
+                shots.append(f"difference {page_dir / m['diff']['file']}")
+            L.append(f"  - {status}" + (f", {m.get('regions', 0)} region(s), {m['diff']['visible']:.2f} % visible"
+                                        if status == "differs" else "") + ": " + "; ".join(shots))
+            for cr in m.get("crops", []):
+                x0, y0, x1, y1 = cr["box"]
+                L.append(f"  - {page_dir / cr['file']}: box {x0},{y0},{x1},{y1} ({x1 - x0}x{y1 - y0}), {cr['px']} px")
+    L += ["", "Your pairs, after each build of the port in your build tree (they write the pages above):"]
+    L += [f"- `{ph['KIT']}/tools/look pair {panel} --only {','.join(ids)}`" for panel, ids in panels.items()]
+    return "\n".join(L)
+
+
+def cmd_brief(cfg, a) -> int:
+    cls = a.cls
+    if not differences.CLASS_RE.fullmatch(cls):
+        raise Fail(f"brief: class {cls!r}: lowercase letters, digits and dashes")
+    dfile = cfg.path("look.differences")
+    rows = [r for r in differences.read(dfile) if r.get("class") == cls and differences.outcome(r)[0] == "fix"]
+    if not rows:
+        raise Fail(f"brief: no row of class {cls} with Outcome `fix` in {dfile}")
+    task = f"look-fix-{cls}"
+    out = cfg.path("work.dir") / "briefs" / f"{task}.md"
+    if out.exists() and not a.force:
+        raise Fail(f"brief: {out} exists (the lead may have filled it); --force replaces it")
+    argv = [str(config.KIT_ROOT / "tools" / "render-prompt"), "p8-task-brief", f"TASK={task}",
+            f"LOOK={look_evidence(cfg, cls, rows)}"] + (["--config", str(cfg.file)] if cfg.file else [])
+    r = subprocess.run(argv, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise Fail(f"brief: render-prompt p8-task-brief failed: {(r.stderr or r.stdout).strip()[:400]}")
+    lines = r.stdout.splitlines()
+    try:
+        start = next(i for i, ln in enumerate(lines) if ln.strip() == "## The brief")
+        open_ = next(i for i in range(start + 1, len(lines)) if lines[i].strip() == "```")
+        close = next(i for i in range(open_ + 1, len(lines)) if lines[i].strip() == "```")
+    except StopIteration:
+        raise Fail("brief: prompts/p8-task-brief.md has no fenced block under \"## The brief\"")
+    text = "\n".join(lines[open_ + 1:close]) + "\n"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text)
+    left = sorted(set(re.findall(r"<[^<>\n]{2,80}>", text)))
+    print(f"{out}: {len(rows)} difference(s) of class {cls}")
+    print(f"fill before the agent starts: {len(left)} field(s) marked <...>, among them Goal, Reference, Mechanism, "
+          f"Start here and the worktree line")
+    track.event("look-brief", f"{cls}: {len(rows)} difference(s) in "
+                f"{len({(r['panel'], r['state']) for r in rows})} state(s)", task=task, links={"brief": str(out)})
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="look", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config")
@@ -385,10 +515,13 @@ def main(argv=None) -> int:
     p.add_argument("--panel")
     p.add_argument("--theme")
     p.add_argument("--force", action="store_true", help="replace states whose id is already in the file")
+    p = sub.add_parser("brief", help="write a look fixer's brief from the differences file")
+    p.add_argument("cls", metavar="CLASS")
+    p.add_argument("--force", action="store_true", help="replace an existing brief")
     a = ap.parse_args(argv)
     try:
         cfg = config.load(a.config)
-        return {"pair": cmd_pair, "crops": cmd_crops, "states": cmd_states}[a.cmd](cfg, a)
+        return {"pair": cmd_pair, "crops": cmd_crops, "states": cmd_states, "brief": cmd_brief}[a.cmd](cfg, a)
     except (Fail, states.StatesError, config.ConfigError) as e:
         print(f"look: {e}", file=sys.stderr)
         return 2

@@ -4,7 +4,7 @@ Single-task brief for one-off work (a look fix, a framework gap found late): Goa
 
 ## How the lead uses this file
 
-Copy the block under "The brief" into {{WORK}}/briefs/{{TASK}}.md and fill every field marked `<...>`. The agent reads {{RULES}}/agent-common.md, {{RULES}}/porting-rules.md and this brief. Whatever else it needs, the brief names with its section. What you already looked up (files, lines, values, callers) goes into the brief, so the agent does not search for it again. A brief is complete and correct before the agent starts. Before you launch the agent, create its task: `track status {{TASK}} todo`.
+For a look fix, `{{KIT}}/tools/look brief <class>` writes the block under "The brief" to {{WORK}}/briefs/look-fix-<class>.md with its Look evidence filled from the differences file ({{KIT}}/tools/look.md, "look brief"); fill every field marked `<...>`. For any other task, copy the block into {{WORK}}/briefs/{{TASK}}.md, delete its Look evidence section and fill every field marked `<...>`. The agent reads {{RULES}}/agent-common.md, {{RULES}}/porting-rules.md and this brief. Whatever else it needs, the brief names with its section. What you already looked up (files, lines, values, callers) goes into the brief, so the agent does not search for it again. A brief is complete and correct before the agent starts. Before you launch the agent, create its task: `track status {{TASK}} todo`.
 
 A follow-up brief copies the Goal of round 1 word for word, and updates the Reference table with the values as they now are. Each item in "This round" says which part of the goal it serves, and why. Write the item yourself from the review or gate verdict. A finding outside the goal is not an item: it becomes a new task. If the goal itself was wrong, stop: rewrite the brief from the base and start a fresh agent. A task that has grown past its goal is split: finish the goal, and open new tasks for the rest.
 
@@ -28,6 +28,9 @@ Do not start subagents or workflows.
 
 Relations that must hold for these parts: <for example "the title sits inside the band", "the chevron is smaller than the text">.
 
+## Look evidence
+{{LOOK}}
+
 ## Mechanism
 <The framework signal or declaration to build on, with file:line. If none exists and adding it follows from the goal, say where it belongs. If it needs a design choice that is not made yet: "Stop and report the options".>
 
@@ -40,7 +43,7 @@ Not in this task (outside the goal): <one line each, or "none">.
 
 ## Done when
 - Trials: <behaviour trials by name, or "none: <reason>">.
-- Pairs: <element, view, mode> on the compare page `<track.out_dir>/look/<Panel>/`; run `{{KIT}}/tools/look pair <Panel>` to make it ({{KIT}}/process/09-look-and-behaviour.md).
+- Pairs: <for a look fix: every state under Look evidence, through the `look pair` calls listed there; otherwise element, view, mode on the compare page `<track.out_dir>/look/<Panel>/`, made with `{{KIT}}/tools/look pair <Panel> --only <ids>`>. Judge them on the full-size images, never a contact sheet ({{KIT}}/process/09-look-and-behaviour.md).
 - Verify by driving: <user actions and the expected result, if any>.
 - Crate tests: <packages, with the base counts>.
 

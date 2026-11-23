@@ -154,26 +154,48 @@ FIELD = re.compile(r"^\s*-\s+\*\*([A-Za-z][A-Za-z ]*)\*\*\s*:?\s*(.*)$")
 HOOK = re.compile(r"\bCH-\d+\b")
 
 
+def sections(text: str) -> list[tuple[str, str, dict[str, str]]]:
+    """Every section of an area map: (section id, part name, {field name in lower case: text})."""
+    out = []
+    cur = None
+    field = None
+    for line in text.splitlines():
+        m = HEADING.match(line)
+        if m:
+            cur = (m.group(1), m.group(2).strip(), {})
+            field = None
+            out.append(cur)
+            continue
+        if cur is None:
+            continue
+        if line.startswith("#"):
+            cur = None
+            continue
+        f = FIELD.match(line)
+        if f:
+            field = f.group(1).strip().lower()
+            cur[2][field] = f.group(2).strip()
+        elif field and line.strip():
+            cur[2][field] += "\n" + line.rstrip()
+    return out
+
+
 def find_section(text: str, section: str) -> tuple[str, str, dict[str, str]]:
     """(section id, part name, {field name: text}) of the map section with that id (case-insensitive)."""
-    lines = text.splitlines()
-    for i, line in enumerate(lines):
-        m = HEADING.match(line)
-        if not m or m.group(1).lower() != section.lower():
-            continue
-        fields: dict[str, str] = {}
-        cur = None
-        for line2 in lines[i + 1:]:
-            if line2.startswith("#"):
-                break
-            f = FIELD.match(line2)
-            if f:
-                cur = f.group(1).strip().lower()
-                fields[cur] = f.group(2).strip()
-            elif cur and line2.strip():
-                fields[cur] += "\n" + line2.rstrip()
-        return m.group(1), m.group(2).strip(), fields
+    for sec in sections(text):
+        if sec[0].lower() == section.lower():
+            return sec
     raise StatesError(f"no section {section} in the map (headings `## <ID>. <name>` or `### <ID> <name>`)")
+
+
+def map_files(cfg) -> dict[str, Path]:
+    """The map file of each area that has one (framework-only areas have none)."""
+    return {ar["id"]: Path(ar["map"]) for ar in cfg.areas if ar.get("map") and ar.get("repos") != ["fw"]}
+
+
+def shows_nothing(fields: dict[str, str]) -> bool:
+    """A section whose **States** field says `none` (a reason may follow) has nothing to capture."""
+    return re.match(r"\s*none\b", fields.get("states", ""), re.I) is not None
 
 
 def panel_name(part: str, framework_field: str) -> str:

@@ -1,6 +1,6 @@
 # look: production and port, state by state
 
-`tools/look` captures every state of a panel or dialog in the app's production build and in the port, and writes one static compare page per panel. Phase 8 ([process/09-look-and-behaviour.md](../process/09-look-and-behaviour.md)) uses it to find look differences; the lead judges each pair by looking at it.
+`tools/look` captures every state of a panel or dialog in the app's production build and in the port, and writes one static compare page per panel. Phase 0 sets up the driver and production ([process/01-setup.md](../process/01-setup.md), step 6a), phase 1 writes a states file as each map section is accepted ([process/02-inventory-and-map.md](../process/02-inventory-and-map.md), step 7), the build loop captures pairs whenever the port compiles, and phase 8 ([process/09-look-and-behaviour.md](../process/09-look-and-behaviour.md)) judges every pair and fixes what differs. The lead judges each pair by looking at it at full size.
 
 It builds nothing. The build loop builds the port; production is built once with the control hooks.
 
@@ -11,6 +11,9 @@ It builds nothing. The build loop builds the port; production is built once with
 - [The compare page](#the-compare-page)
 - [States files](#states-files)
 - [States from the map](#states-from-the-map)
+- [The differences file](#the-differences-file)
+- [look brief](#look-brief)
+- [The phase gate](#the-phase-gate)
 - [Driver interface](#driver-interface)
 - [Helpers for drivers](#helpers-for-drivers)
 - [Dashboard events](#dashboard-events)
@@ -27,12 +30,13 @@ It builds nothing. The build loop builds the port; production is built once with
 | `look pair --all` | The same for every states file in `look.states_dir`. |
 | `look crops PAGE... [--threshold N] [--gap N] [--pad N] [--max N]` | Recomputes the difference images and region crops of existing pages and redraws them. Captures nothing. `PAGE` is a panel name or a page directory. |
 | `look states AREA SECTION [--panel NAME] [--theme NAME] [--force]` | Writes the states of one area map section into a states file. |
+| `look brief CLASS [--force]` | Writes a look fixer's brief for one class of differences ([look brief](#look-brief)). |
 
 `--side up` or `--side port` captures one side only; the other side keeps its images from the last run, marked with that run's time. `--only` captures some states; the others keep theirs the same way. States with a `needs` field are listed on the page and never captured.
 
 `crops` options: `--threshold` (default `look.threshold`) is the channel difference above which a pixel differs visibly; differing pixels closer than `--gap` (12) join one region; each region grows by `--pad` (6) pixels; at most `--max` (20) crops per state.
 
-Exit codes: `0` every state captured; `1` a capture failed (the page shows the error); `2` a usage, config or states-file error.
+Exit codes: `0` every state captured; `1` a capture failed (the page shows the error); `2` a usage, config, states-file or differences-file error.
 
 ## What a run writes
 
@@ -44,7 +48,7 @@ Exit codes: `0` every state captured; `1` a capture failed (the page shows the e
 | `<track.out_dir>/look/<Panel>/diff-<state>.png` | The difference image |
 | `<track.out_dir>/look/<Panel>/crop-<state>-<n>.png` | One region that differs: production left, port right, at 2× |
 | `<track.out_dir>/look/<Panel>/crops.txt` | Each state's result and its regions with their boxes, largest first, for agents that read text |
-| `<track.out_dir>/look/<Panel>/manifest.json` | What the page shows: sides with build time and port commit, every state's images, errors and differences. `look crops` redraws the page from it. |
+| `<track.out_dir>/look/<Panel>/manifest.json` | What the page shows: sides with build time and port commit, every state's images, errors and differences. Each state's `port` entry carries `head`: `{"app": sha, "framework": sha, "dirty": bool}`, the HEAD of both integration trees when the run started, which the phase gate compares with the trees' current HEAD. `look crops` redraws the page from it. |
 | `<track.out_dir>/look/index.html` | Every panel with its counts and the time of its last run |
 | `<look.run_dir>/<Panel>/<side>/` | Each app instance's work dir (its log is `app.log`) |
 
@@ -64,7 +68,7 @@ A table lists every state with its result:
 | `partial` | Only one side has a shot |
 | `waiting` | The state has a `needs` field and is not captured |
 
-Each state then shows production, port and the difference image side by side, and the crops of its regions. The view buttons switch every state to side by side, blink (production and port alternate in one frame) or difference only; the choice is remembered in the browser. Every image links its full-window shot. A match by the numbers is not acceptance: the lead looks at every pair (process/09, step 4).
+Each state then shows production, port and the difference image side by side, and the crops of its regions. The view buttons switch every state to side by side, blink (production and port alternate in one frame) or difference only; the choice is remembered in the browser. Every image links its full-window shot. A match by the numbers is not acceptance: the lead looks at every pair at full size (process/09, step 2).
 
 The difference image is the port shot in dim grey, red where a channel differs by more than the threshold, and dark amber where it differs less. Shots of different sizes are compared over their shared area, and the rest counts as differing.
 
@@ -122,6 +126,55 @@ The file name is the framework panel or dialog type the section's **Framework** 
 
 Read every generated file against its map section before the first `look pair`, and fill in `crop`, the setups and every `needs: "steps"`.
 
+## The differences file
+
+The lead writes every look difference it judges into one file, `look.differences` (default `<work.dir>/look/differences.md`), as rows of a Markdown table. `look brief` and the phase gate read it; other text in the file is free.
+
+```markdown
+| Panel | State | What differs | Judgement | Cause | Class | Outcome |
+|---|---|---|---|---|---|---|
+| LayersPanel | structure | row height 28, production 32 | production better | ListRow default height | row-height | fix |
+| LayersPanel | sample | focus ring 2 px, production 1 px | port better | one focus ring for every component | - | kept: the framework's one focus ring |
+```
+
+| Column | Holds |
+|---|---|
+| Panel, State | The states file's name and the state's id, as on the compare page |
+| What differs | The region and what it shows, with sizes where they are known |
+| Judgement | `production better`, `port better`, `both: <target look>`, or `unclear` while you decide by the rules |
+| Cause | The likely shared cause: one token, one default, one mechanism |
+| Class | The fix class (lowercase letters, digits, dashes), whose task is `look-fix-<class>`; `-` for none |
+| Outcome | `fix` while a class task works on it; `fixed` once a new pair shows it fixed; `kept: <reason>` for a difference that stays, with the reason the rules give |
+
+Rows are per state, not per region: region numbers change with every capture. A state may have several rows, one per difference.
+
+## look brief
+
+`look brief CLASS` writes `<work.dir>/briefs/look-fix-<CLASS>.md` for the agent that fixes one class. It takes the rows of that class whose Outcome is `fix`, and for each state they name:
+
+- the map section the state comes from (the state's `map` field) and that section's **Look reference** field;
+- the full-size files of its last pair: production, port, the difference image, and every region crop with its box and pixel count (from the page's `manifest.json`; `crops.txt` has the same list as text);
+- the rules that decide (`rules/porting-rules.md`, "Look" and "Old look or standardized look"), and that acceptance uses these full-size images, never a contact sheet or a downscaled page, which are for the developer;
+- the fixer's own call per panel: `look pair <Panel> --only <ids>`.
+
+That text fills `{{LOOK}}` in the Look evidence section of `prompts/p8-task-brief.md`, rendered with `TASK=look-fix-<CLASS>`; the file holds the brief block only. The lead fills the fields marked `<...>` (worktree, model, Goal, Reference, Mechanism, Start here) before the agent starts. An existing brief is kept unless `--force`, since the lead may have filled it. It exits 2 when no row of the class has Outcome `fix`.
+
+## The phase gate
+
+`track phase` runs the look rows of `PHASE_EXITS` in `tools/portkit/gates.py` ([tools/track.md](track.md), "The phase gate"):
+
+| Exit of | Row | Passes when |
+|---|---|---|
+| 0 | The look driver and the production build with its control hooks exist | `look.driver` and `look.production_binary` name files |
+| 1 | Every map section has a states file | Every section of every area map has a **States** field, and every section whose field is not `none` is named by a state's `map` field in `look.states_dir` |
+| 1 | Production reaches every state | Every state has no `needs` and a production shot without an error (`look pair --all --side up`) |
+| 8 | Every map section has a states file | As at exit 1 |
+| 8 | Every state has a pair from the current port head | Every state has both shots, no error and no `needs`, and its port `head` equals the current HEAD of both integration trees, without local changes |
+| 8 | Every difference is fixed or has its reason in the differences file | Every state whose pair differs has a `kept: <reason>` row and no `fix` row |
+| 8 | The lead accepted every panel | Every `look-<Panel>` task is `done` |
+
+The landing tools run the four phase 8 look rows too (`tools/land/look-gate.py`, [process/10-land.md](../process/10-land.md)). The one override for both is `track phase 9 --force "reason"`, recorded as a decision: the landing tools pass when that decision covers every row that fails at landing time.
+
 ## Driver interface
 
 A driver is one Python file per app, named by `look.driver`. `look pair` loads it and calls, for each side in its own thread:
@@ -171,6 +224,7 @@ The kit's `tools/` directory is on the import path while `look` runs a driver.
 
 - Each panel of a `look pair` run posts one `look` event on the task `look-<Panel>`: `look ok|failed (<duration>): <Panel>: <n> states, <d> differ, <m> match, <f> failed, <w> not captured`, with the counts in its data and the page as its `page` link, relative to `track.out_dir`. It is `failed` when any capture failed. The event creates the task when it is new and never changes its state: the lead moves it (process/09).
 - `look states` posts a `look-states` event on the same task with the state count and the states file as its `states` link. Running it puts the panel's task on the board.
+- `look brief` posts a `look-brief` event on the task `look-fix-<CLASS>` with the brief as its `brief` link, which puts the class's task on the board.
 
 ## Config keys
 
@@ -185,9 +239,10 @@ The `[look]` section of port.toml; [process/config.md](../process/config.md) has
 | `port_binary` | unset | The port's binary in the app integration tree's target dir (side `port`) |
 | `window` | `1440x900` | Window size for states files that name none |
 | `threshold` | `16` | Channel difference (of 255) above which a pixel differs visibly |
+| `differences` | `{work.dir}/look/differences.md` | The differences file |
 
 ## Requirements
 
 - Python 3.11 or later.
-- Pillow and numpy for `pair` and `crops`. Without them, `look` runs itself again under `uv run --with pillow --with numpy` when `uv` is installed; otherwise it says to install them. `states` needs neither.
+- Pillow and numpy for `pair` and `crops`. Without them, `look` runs itself again under `uv run --with pillow --with numpy` when `uv` is installed; otherwise it says to install them. `states` and `brief` need neither.
 - On Linux, `Xvfb` for drivers that use `Display` (Debian and Ubuntu: package `xvfb`). Rendering without a GPU needs a CPU Vulkan or GL driver (Mesa's lavapipe or llvmpipe); the PhotoCraft driver uses lavapipe when it is installed.

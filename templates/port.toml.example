@@ -174,11 +174,12 @@ ui_dirs = ["crates/ui-egui/src"]              # REQUIRED: UI source dirs to inve
 # heads = ["app={app.integration}:{app.port_branch}", "framework={framework.integration}:HEAD"]
 
 [look]
-# Production against port captures in phase 8 (tools/look.md). Pages go to <track.out_dir>/look/.
+# Production against port captures, set up in phases 0 and 1 and judged in phase 8 (tools/look.md). Pages go to <track.out_dir>/look/.
 # driver = ""                               # the app's driver file (examples/photocraft/look-driver/driver.py)
-# production_binary = ""                    # production built with the control hooks (process/09, step 1)
+# production_binary = ""                    # production built with the control hooks (process/01, step 6a)
 # port_binary = ""                          # the port's binary in the app integration tree's target dir
 # states_dir = "{work.dir}/look/states"
 # run_dir = "{work.dir}/look/run"
 # window = "1440x900"
 # threshold = 16                            # channel difference (of 255) that counts as visible
+# differences = "{work.dir}/look/differences.md"   # look differences with their outcome (tools/look.md)

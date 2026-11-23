@@ -10,7 +10,7 @@ Rendering a prompt
   PROMPT is a name in prompts/ or templates/ (`p7-red-fixer`, `STATE.md`) or a file path. Every `{{NAME}}` is filled
   from `config.placeholders()` (the keys in process/config.md that have a placeholder, plus {{KIT}} and {{RULES}}),
   then from the NAME=VALUE arguments, which fill the per-call placeholders (AREA, SET, CHUNK, TRACK, ROUND, OUT,
-  TASK, PART, STAGE, CRATES) and may override any other. AREA_CODE is filled from AREA's `[[areas]]` entry when not
+  TASK, PART, STAGE, CRATES, LOOK) and may override any other. AREA_CODE is filled from AREA's `[[areas]]` entry when not
   given. The result goes to stdout.
   A placeholder left empty stays in the text as `{{NAME}}` and is named on stderr with the key that would fill it.
   --strict makes that exit 1. A prompt file opens with a header for the lead (`# <file name>`, then a paragraph

@@ -137,6 +137,13 @@ def fw_part(cfg, rd: Path, crate: str, flt: str, no_run: bool, threads: str) -> 
     return r
 
 
+def cl_adds_no_fail_fast(cfg, app: Path, env: dict) -> bool:
+    """True when the app's `cl test` already passes --no-fail-fast to cargo (`cl --dry-run` prints the command it would
+    run). Cargo rejects the flag twice."""
+    r = subprocess.run(gates.cl(cfg, ["--dry-run", "test", "all"]), cwd=app, env=env, capture_output=True, text=True)
+    return r.returncode == 0 and "--no-fail-fast" in r.stdout + r.stderr
+
+
 def app_part(cfg, rd: Path, filters: list[str], no_run: bool, threads: str) -> dict:
     app = cfg.path("app.integration")
     env = gates.cl_env(cfg)
@@ -167,7 +174,7 @@ def app_part(cfg, rd: Path, filters: list[str], no_run: bool, threads: str) -> d
     log = rd / "app.log"
     log.write_bytes(b"")
     t = time.time()
-    cmd = ["test", "all", "--no-fail-fast", "--", *filters, *(["--test-threads", threads] if threads else [])]
+    cmd = ["test", "all", *([] if cl_adds_no_fail_fast(cfg, app, env) else ["--no-fail-fast"]), "--", *filters, *(["--test-threads", threads] if threads else [])]
     rc = gates.run_logged(gates.cl(cfg, cmd), app, log, env)
     text = log.read_text(errors="replace")
     bins = testlog.app_binaries(build_text, text)

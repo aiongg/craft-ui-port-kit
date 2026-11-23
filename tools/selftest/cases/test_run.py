@@ -65,3 +65,18 @@ def case_build_tool_failure(s):
     (s.root / "cl-logs" / "test-all-no-run.1.log").unlink()
     p = s.run("test-run", "bad", "--app")
     check(p.returncode == 2, "a build failure with no compile error exits 2", p)
+
+
+def case_no_fail_fast_once(s):
+    _, app = setup(s)
+    fake_binary(app, "target/debug/deps/app-1", ["tests::a", "tests::b", "other::tests::c"])
+    fake_binary(app, "target/debug/deps/ui-1", ["ui::x", "ui::y"])
+
+    def test_call():
+        calls = [json.loads(l) for l in (s.root / "cl-logs" / "calls.jsonl").read_text().splitlines()]
+        return [c["argv"] for c in calls if c["argv"][:2] == ["test", "all"] and "--no-run" not in c["argv"]][-1]
+    s.run("test-run", "r1", "--app")
+    check("--no-fail-fast" in test_call(), f"added when cl does not: {test_call()}")
+    s.cl_log("--dry-run-test", "cargo test --workspace --no-fail-fast\n")
+    s.run("test-run", "r2", "--app")
+    check("--no-fail-fast" not in test_call(), f"left out when cl adds it: {test_call()}")

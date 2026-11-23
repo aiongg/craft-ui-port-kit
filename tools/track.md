@@ -96,7 +96,9 @@ A `question` line is a blocking question. Questions asked without `--blocking` c
 - **The exit items.** It runs every row of `PHASE_EXITS` in `tools/portkit/gates.py` for the phase it leaves: the items of that runbook's Exit list a script can decide without a build (files that must exist, board state, the last gate events since the phase began, `coverage.py`, `port-set audit`, `git grep 'DIAG '`), plus four rows for every phase: `STATE.md` written since the phase began, no blocked or failed task, no stale task, no open blocking question.
 - **On a pass** it records the phase and prints the new runbook's path and its exit list. Read that runbook in full.
 - **On a failure** it records nothing, prints each failing item with its reason, and exits 1.
-- **`--force "reason"`** records the phase anyway, with a `decision` event naming every failing item and the reason.
+- **`--force "reason"`** records the phase anyway, with a `decision` event naming every failing item and the reason. The event's `forced` field holds the same as data: `{"from": <phase left>, "to": N, "items": [<item texts>], "reason": ...}`.
+- **`--force` on the current phase** runs the exit items of the phase before it again and records a new decision when any fails. Use it when an item breaks after the move: the landing tools read the latest `track phase 9` record ([tools/look.md](look.md), "The phase gate").
+- **The look items** ([tools/look.md](look.md), "The phase gate"): at exit 0 the look driver and the production build exist; at exit 1 every map section has a states file and production reaches every state; at exit 8 every state has a pair from the current port head, every difference is fixed or kept with a reason, and the lead accepted every panel. The landing tools run the phase 8 look items too and accept only the phase 9 decision as an override.
 
 The other exit items stay the lead's to check. A new machine-checkable item is one function and one `ExitCheck` entry in `PHASE_EXITS`.
 

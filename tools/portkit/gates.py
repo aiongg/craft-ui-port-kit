@@ -146,6 +146,7 @@ class GateContext:
         self.events = events          # events after the latest phase event, in file order
         self.started = started        # datetime of the latest phase event, or None
         self.stale = stale            # ids of stale tasks, against the clock
+        self.heads = {}               # {"app" | "framework": sha} the look rows compare pairs with, for a landing
 
     def tasks(self) -> dict:
         return self.state.get("tasks", {})
@@ -171,10 +172,22 @@ class GateContext:
 
 
 class ExitCheck:
-    def __init__(self, phase: int | None, text: str, check):
+    def __init__(self, phase: int | None, text: str, check, group: str | None = None):
         self.phase = phase            # the phase whose exit this row checks; None: every phase
         self.text = text              # the runbook item, as the lead reads it
         self.check = check            # GateContext -> None | reason
+        self.group = group            # "look": the rows the landing tools also run (land_look_check)
+
+
+def context(store) -> GateContext:
+    """The context for leaving the store's current phase: the events after its latest phase event."""
+    from . import track as T
+    st = store.state()
+    events, _, _ = store.read_events()
+    last = max((i for i, e in enumerate(events) if e.get("kind") == "phase"), default=-1)
+    now = T.now_utc()
+    return GateContext(store.cfg, st, events[last + 1:], T.parse_t((st.get("phase") or {}).get("t")),
+                       [i for i, tk in st["tasks"].items() if T.is_stale(tk, now, store.stale_min) is not None])
 
 
 def _ids(items, n=8) -> str:
@@ -381,6 +394,136 @@ def x_triage(ctx):
     return _missing(ctx.cfg.path("work.runs") / "triage.tsv")
 
 
+# ---- look rows (tools/look.md): states files from the maps, pairs from the current port head, the differences file
+
+def _look_files(ctx) -> dict[str, dict]:
+    """{panel: states file} for every states file in look.states_dir; an unreadable one raises."""
+    d = ctx.cfg.path("look.states_dir")
+    out = {}
+    for f in sorted(d.glob("*.json")) if d.is_dir() else []:
+        try:
+            out[f.stem] = json.loads(f.read_text())
+        except (OSError, json.JSONDecodeError) as e:
+            raise RuntimeError(f"{f.name} does not parse: {e}")
+    return out
+
+
+def _look_manifest(ctx, panel: str) -> dict:
+    try:
+        man = json.loads((ctx.cfg.path("track.out_dir") / "look" / panel / "manifest.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return {st["id"]: st for st in man.get("states", [])}
+
+
+def _shot_ok(ctx, panel: str, entry: dict | None) -> bool:
+    return bool(entry and entry.get("shot") and not entry.get("error")
+                and (ctx.cfg.path("track.out_dir") / "look" / panel / entry["shot"]).is_file())
+
+
+def _port_head(ctx) -> dict:
+    """The commits pairs must come from: the integration trees' HEAD, or the commit a landing tool lands."""
+    out = {}
+    for name, key in (("app", "app.integration"), ("framework", "framework.integration")):
+        if ctx.heads.get(name):
+            out[name] = ctx.heads[name]
+            continue
+        r = ctx.git(key, "rev-parse", "HEAD") if ctx.cfg.get(key) else None
+        out[name] = r.stdout.strip() if r is not None and r.returncode == 0 else None
+    return out
+
+
+def x_look_setup(ctx):
+    bad = []
+    for key in ("look.driver", "look.production_binary"):
+        v = ctx.cfg.get(key)
+        if not v:
+            bad.append(f"{key} is not set")
+        elif not ctx.cfg.path(key).is_file():
+            bad.append(f"{key}: no file {ctx.cfg.path(key)}")
+    return "; ".join(bad) or None
+
+
+def x_look_states(ctx):
+    from .look import states as S
+    named = {str(st.get("map", "")).lower() for doc in _look_files(ctx).values() for st in doc.get("states", [])}
+    missing, no_field = [], []
+    for area, f in S.map_files(ctx.cfg).items():
+        if not f.is_file():
+            continue
+        for sid, _part, fields in S.sections(f.read_text()):
+            if "states" not in fields:
+                no_field.append(f"{area} {sid}")
+            elif not S.shows_nothing(fields) and f"{area} {sid}".lower() not in named:
+                missing.append(f"{area} {sid}")
+    why = []
+    if missing:
+        why.append(f"no state names the section (look states AREA SECTION): {_ids(missing)}")
+    if no_field:
+        why.append(f"no **States** field (write `none` for a part with nothing to show): {_ids(no_field)}")
+    return "; ".join(why) or None
+
+
+def x_look_production(ctx):
+    files = _look_files(ctx)
+    if not files:
+        return f"no states files in {ctx.cfg.path('look.states_dir')}"
+    bad = []
+    for panel, doc in files.items():
+        man = _look_manifest(ctx, panel)
+        for st in doc.get("states", []):
+            if st.get("needs"):
+                bad.append(f"{panel} {st['id']} needs {st['needs']}")
+            elif not _shot_ok(ctx, panel, man.get(st["id"], {}).get("up")):
+                bad.append(f"{panel} {st['id']}: no production shot")
+    return f"production does not reach (look pair --all --side up): {_ids(bad)}" if bad else None
+
+
+def x_look_pairs(ctx):
+    files = _look_files(ctx)
+    if not files:
+        return f"no states files in {ctx.cfg.path('look.states_dir')}"
+    now = _port_head(ctx)
+    bad = []
+    for panel, doc in files.items():
+        man = _look_manifest(ctx, panel)
+        for st in doc.get("states", []):
+            sid = st["id"]
+            got = man.get(sid, {})
+            if st.get("needs"):
+                bad.append(f"{panel} {sid} needs {st['needs']}")
+            elif not (_shot_ok(ctx, panel, got.get("up")) and _shot_ok(ctx, panel, got.get("port"))):
+                bad.append(f"{panel} {sid}: no pair")
+            else:
+                h = got["port"].get("head") or {}
+                old = [f"{k} {str(h.get(k))[:10]} (head {str(now[k])[:10]})" for k in ("app", "framework")
+                       if h.get(k) != now[k]]
+                if old:
+                    bad.append(f"{panel} {sid}: captured at " + ", ".join(old))
+                elif h.get("dirty"):
+                    bad.append(f"{panel} {sid}: captured with local changes")
+    return f"rerun look pair --all: {_ids(bad)}" if bad else None
+
+
+def x_look_differences(ctx):
+    from .look import differences as D, page
+    rows = D.read(ctx.cfg.path("look.differences"))
+    bad = []
+    for panel in _look_files(ctx):
+        for sid, st in _look_manifest(ctx, panel).items():
+            if page.state_status(st) == "differs":
+                why = D.state_verdict(D.for_state(rows, panel, sid))
+                if why:
+                    bad.append(f"{panel} {sid}: {why}")
+    return _ids(bad) if bad else None
+
+
+def x_look_accepted(ctx):
+    tasks = ctx.tasks()
+    bad = [f"look-{p}" for p in _look_files(ctx) if (tasks.get(f"look-{p}") or {}).get("state") != "done"]
+    return f"not accepted (track status look-<Panel> done): {_ids(bad)}" if bad else None
+
+
 PHASE_EXITS: list[ExitCheck] = [
     ExitCheck(None, "STATE.md records the phase", x_state_md),
     ExitCheck(None, "No task is blocked or failed", x_no_blocked),
@@ -391,8 +534,11 @@ PHASE_EXITS: list[ExitCheck] = [
     ExitCheck(0, "The snapshots and the production reference exist", x_snapshots),
     ExitCheck(0, "work.baseline_failures exists and the baseline counts are on the dashboard", x_baseline),
     ExitCheck(0, "Every setup task on the board is done", x_setup_done),
+    ExitCheck(0, "The look driver and the production build with its control hooks exist", x_look_setup),
     ExitCheck(1, "[[areas]] in port.toml matches areas.json", x_areas),
     ExitCheck(1, "Every area has its map; the index exists", x_maps),
+    ExitCheck(1, "Every map section has a states file", x_look_states),
+    ExitCheck(1, "Production reaches every state", x_look_production),
     ExitCheck(2, "tools/coverage.py reports 0 gaps", x_coverage),
     ExitCheck(2, "Every set is on the board", x_sheets_on_board),
     ExitCheck(2, "sizing.md exists", x_sizing),
@@ -411,6 +557,11 @@ PHASE_EXITS: list[ExitCheck] = [
     ExitCheck(7, "git grep -n 'DIAG ' returns nothing in either integration tree", x_no_diag),
     ExitCheck(7, "Both integration branches are committed", x_committed),
     ExitCheck(7, "The failing tests were triaged before the tracks formed (work.runs/triage.tsv)", x_triage),
+    ExitCheck(8, "Every map section has a states file", x_look_states, "look"),
+    ExitCheck(8, "Every state has a pair from the current port head", x_look_pairs, "look"),
+    ExitCheck(8, "Every difference is fixed or has its reason in the differences file", x_look_differences, "look"),
+    ExitCheck(8, "The lead accepted every panel", x_look_accepted, "look"),
+    ExitCheck(8, "The tests ran after the last fix", x_round_since),
 ]
 
 
@@ -426,6 +577,43 @@ def exit_failures(phase: int, ctx: GateContext) -> tuple[int, list[tuple[str, st
         if why:
             out.append((r.text, why))
     return len(rows), out
+
+
+def land_look_check(store, which: str, sha: str) -> tuple[bool, list[str]]:
+    """The look rows for a landing tool that lands commit `sha` of the `app` or the `framework`: the pairs must come
+    from that commit. They pass, or the latest record of phase 9 was forced over every row that fails now (its
+    decision event's `forced` data). The framework may land before phase 8 without them (process/10-land.md).
+    Returns (ok, lines to print)."""
+    from . import track as T
+    st = store.state()
+    cur = (st.get("phase") or {}).get("n")
+    if which == "framework" and (cur is None or cur < 8):
+        return True, [f"look gate: early framework landing in phase {cur if cur is not None else 'not set'}; "
+                      "the look gate applies from phase 8"]
+    ctx = context(store)
+    ctx.heads = {which: sha}
+    rows = [r for r in PHASE_EXITS if r.group == "look"]
+    fails = []
+    for r in rows:
+        try:
+            why = r.check(ctx)
+        except Exception as e:
+            why = f"check failed to run: {e}"
+        if why:
+            fails.append((r.text, why))
+    if not fails:
+        return True, [f"look gate: {len(rows)} of {len(rows)} look checks passed"]
+    events, _, _ = store.read_events()
+    i = max((k for k, e in enumerate(events) if e.get("kind") == "phase" and e.get("n") == 9), default=-1)
+    dec = events[i - 1] if i > 0 and events[i - 1].get("kind") == "decision" else {}
+    forced = dec.get("forced") or {}
+    if forced.get("to") == 9 and {t for t, _ in fails} <= set(forced.get("items", [])):
+        return True, [f"look gate: {len(fails)} look check(s) fail, forced by the decision of {dec.get('t')}: "
+                      f"{forced.get('reason')}"] + [f"  - {t}: {w}" for t, w in fails]
+    lines = [f"look gate: {len(fails)} look check(s) fail:"] + [f"  - {t}: {w}" for t, w in fails]
+    lines.append('Fix them, or record the decision: track phase 9 --force "<reason>"'
+                 + (" (it covers only the checks failing when it is recorded)" if forced else ""))
+    return False, lines
 
 
 def runbook(phase: int) -> Path | None:

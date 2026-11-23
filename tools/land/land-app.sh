@@ -8,6 +8,9 @@
 #   --skip-check   go on although `cl check all` cannot run or fails in the landed clone; REASON is printed and
 #                  recorded on the dashboard. Without it a failing or impossible check stops the tool.
 #
+# Once REF is fetched it runs the look gate (tools/land/look-gate.py app REF's commit): the phase 8 look rows pass with
+# every pair captured from that commit, or `track phase 9 --force` recorded them as a decision. Without either it
+# stops before anything is scanned or rewritten.
 # Fetches only REF (and its history) from the tree into <work.landing>/app-<ref> (never touching it), fetches app.base_branch from app.upstream and takes
 # the merge base with REF. It scans base..REF (tools/land/scan-range.py) and, when there are hits, rewrites only that
 # range with git filter-repo (local framework paths become land.sibling_framework) and scans again. A last commit pins
@@ -34,6 +37,7 @@ FW_URL=$(cfgr framework.repo); FW_BRANCH=$(cfgr framework.branch)
 land_need_filter_repo
 W=$(cfgr work.landing)/app-$(land_slug "$REF"); REPORT=$W.scan.txt
 OLD=$(land_clone "$SRC" "$W" "$REF")
+land_look_gate app "$OLD"
 cd "$W"
 git remote add landing-upstream "$UPSTREAM"
 git fetch -q landing-upstream "$BASE_BRANCH:refs/remotes/landing-upstream/$BASE_BRANCH"

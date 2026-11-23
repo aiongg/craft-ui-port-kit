@@ -11,7 +11,8 @@ Agents (judgement):
   track round N --pass P --fail F [--log PATH] [--data KEY=VALUE]...
   track event KIND TEXT [--task ID] [--link NAME=URL]... [--data KEY=VALUE]...
   track phase N [NOTE] [--batch B] [--area A] [--force REASON]
-        runs the exit checks of the current phase first and refuses (exit 1) when one fails
+        runs the exit checks of the current phase first and refuses (exit 1) when one fails; --force records
+        the move as a decision; --force on the current phase checks the exit of the phase before it again
 The lead and the developer:
   track show [TASK] [--json]          text view
   track alerts [--stale-min N]        stale, blocked and failed tasks, open questions, answers waiting; exit 0 always
@@ -208,19 +209,15 @@ def cmd_phase(a):
     ph = st.get("phase") or {}
     cur = ph.get("n")
     failures, ran = [], 0
-    if cur is not None and a.n != cur:
-        events, _, _ = s.read_events()
-        last = max((i for i, e in enumerate(events) if e.get("kind") == "phase"), default=-1)
-        now = T.now_utc()
-        ctx = gates.GateContext(s.cfg, st, events[last + 1:], T.parse_t(ph.get("t")),
-                                [i for i, tk in st["tasks"].items() if T.is_stale(tk, now, s.stale_min) is not None])
-        ran, failures = gates.exit_failures(cur, ctx)
+    left = cur if a.n != cur else (cur - 1 if a.force and cur else None)   # a forced re-record checks its entry again
+    if cur is not None and left is not None:
+        ran, failures = gates.exit_failures(left, gates.context(s))
     if not phase_move_ok(cur, a.n):
         failures.insert(0, ("The move follows the phase order",
                             f"phase {cur if cur is not None else 'not set'} to {a.n}: allowed are "
                             + ("0" if cur is None else f"{cur}, {cur + 1}" + (" or 5 (next build batch)" if cur == 7 else ""))))
     if failures and not a.force:
-        print(f"track: phase {a.n} refused: {len(failures)} exit item(s) of phase {cur} {T.PHASES.get(cur, '')} fail:",
+        print(f"track: phase {a.n} refused: {len(failures)} exit item(s) of phase {left} {T.PHASES.get(left, '')} fail:",
               file=sys.stderr)
         for text, why in failures:
             print(f"  - {text}: {why}", file=sys.stderr)
@@ -228,16 +225,17 @@ def cmd_phase(a):
         sys.exit(EXIT_REFUSED)
     recs = []
     if failures:
-        recs.append(T.new_event("decision", text=f"phase {a.n} forced past {len(failures)} exit item(s) of phase {cur}: "
-                                + "; ".join(f"{t} ({w})" for t, w in failures) + f". Reason: {a.force}"))
+        recs.append(T.new_event("decision", text=f"phase {a.n} forced past {len(failures)} exit item(s) of phase {left}: "
+                                + "; ".join(f"{t} ({w})" for t, w in failures) + f". Reason: {a.force}",
+                                forced={"from": left, "to": a.n, "items": [t for t, _ in failures], "reason": a.force}))
     if cur in (5, 6, 7) and a.n in (5, 6, 7):   # the build batch phases keep the batch and area until given anew
         a.batch, a.area = a.batch or ph.get("batch"), a.area or ph.get("area")
     recs.append(T.new_event("phase", n=a.n, note=" ".join(a.note) or None, batch=a.batch, area=a.area))
     s.write(recs)
     where = ", ".join(x for x in (f"batch {a.batch}" if a.batch else "", f"area {a.area}" if a.area else "") if x)
     print(f"phase {a.n} {T.PHASES[a.n]}" + (f" ({where})" if where else ""))
-    if cur is not None and a.n != cur:
-        print(f"exit of phase {cur} {T.PHASES.get(cur, '')}: {ran - len(failures)} of {ran} checks passed"
+    if cur is not None and left is not None:
+        print(f"exit of phase {left} {T.PHASES.get(left, '')}: {ran - len(failures)} of {ran} checks passed"
               + (f", {len(failures)} forced" if failures else ""))
     if a.n != cur:
         rb = gates.runbook(a.n)

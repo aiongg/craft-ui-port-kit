@@ -28,6 +28,16 @@ land_clone() {
   printf '%s\n' "$sha"
 }
 
+# land_look_gate app|framework SHA: the look rows of the phase 8 exit for the commit SHA that lands
+# (tools/land/look-gate.py). A failure stops the tool (exit 1) unless `track phase 9 --force "reason"` was recorded
+# over every failing row; that decision is the only override. The framework may land before phase 8 without them.
+land_look_gate() {
+  python3 -I "$LAND/look-gate.py" "$1" "$2" || {
+    echo "Do not land: the look gate fails (process/09-look-and-behaviour.md, Exit)." >&2
+    exit 1
+  }
+}
+
 # land_skip_check ARGS...: sets LAND_ARGS to the arguments without `--skip-check REASON`, and LAND_SKIP to the reason
 # (empty when the check is not skipped). An empty reason is refused.
 land_skip_check() {

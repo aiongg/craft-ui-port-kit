@@ -77,6 +77,9 @@ base = "aaaa"
 app_base = "bbbb"
 [track]
 how_served = "terminal only"
+[look]
+driver = "{W}/look/driver.py"
+production_binary = "{W}/look/production"
 [[areas]]
 id = "core"
 code = "co"
@@ -96,6 +99,10 @@ track("round", "0", "--pass", "5", "--fail", "0")
 track("status", "setup-build", "blocked", "--on", "lead")
 expect(1, False, "blocked or failed: setup-build")
 track("status", "setup-build", "done")
+expect(1, False, "look.driver: no file")
+(W / "look").mkdir()
+(W / "look/driver.py").write_text("")
+(W / "look/production").write_text("")
 out = expect(1, True, "read now, in full:")
 if "02-inventory-and-map.md" not in out or "- [ ]" not in out:
     fail(f"phase 1 pass did not print its runbook and exit list:\n{out}")
@@ -110,6 +117,16 @@ expect(2, False, "areas.json only: extra")
 (W / "port-map/core.md").write_text("# core\n")
 expect(2, False, "README.md")
 (W / "port-map/README.md").write_text("# index\n")
+(W / "port-map/core.md").write_text("# core\n\n## C1. Core panel\n\n- **States**: default\n\n"
+                                   "## C2. Settings model\n\n- **States**: none: no surface\n")
+expect(2, False, "no state names the section (look states AREA SECTION): core C1")
+(W / "look/states").mkdir()
+(W / "look/states/CorePanel.json").write_text(json.dumps({"states": [{"id": "default", "steps": [], "map": "core C1"}]}))
+expect(2, False, "CorePanel default: no production shot")
+page = W / "track/site/look/CorePanel"
+page.mkdir(parents=True)
+(page / "up-default.png").write_text("")
+(page / "manifest.json").write_text(json.dumps({"states": [{"id": "default", "up": {"shot": "up-default.png"}}]}))
 os.utime(W / "STATE.md", (0, 0))
 r = track("phase", "2")
 if r.returncode != 1 or "was not written since the phase began" not in r.stderr:

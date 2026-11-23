@@ -62,7 +62,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from portkit import config, track  # noqa: E402
-from portkit.look import calibrate, differences, page, states  # noqa: E402
+from portkit.look import calibrate, differences, page, procs, states  # noqa: E402
 
 SIDES = ("up", "port")
 SIDE_KEY = {"up": "look.production_binary", "port": "look.port_binary"}
@@ -328,6 +328,17 @@ def _pair_one(cfg, driver, pixels, panel, sides, binaries, only, rec) -> int:
         rec.result(text, data=data, ok=ok, links=links)
 
 
+def begin_run(cfg) -> None:
+    """Record this run's processes in <look.run_dir>/procs, stop those of runs that died (Xvfb servers, apps), and empty
+    the launch workdirs no live process uses."""
+    run_dir = cfg.path("look.run_dir")
+    run_dir.mkdir(parents=True, exist_ok=True)
+    procs.use(run_dir)
+    if stopped := procs.reap():
+        print(f"look: stopped {len(stopped)} process(es) of an earlier run that died: {', '.join(stopped)}", flush=True)
+    procs.prune_workdirs(run_dir)
+
+
 def cmd_pair(cfg, a) -> int:
     if not a.panels and not a.all:
         raise Fail("pair: name one or more panels, or --all")
@@ -337,6 +348,7 @@ def cmd_pair(cfg, a) -> int:
         raise Fail(f"pair: no states files in {sdir} (write them with `look states`)")
     pixels = need_pixels()
     driver = load_driver(cfg.path("look.driver"))
+    begin_run(cfg)
     sides = list(SIDES) if a.side == "both" else [a.side]
     binaries = {}
     for side in sides:
@@ -433,6 +445,7 @@ def _calibrate(cfg, a):
     if not binaries:
         raise Fail("calibrate: neither look.production_binary nor look.port_binary is an executable file")
     driver = load_driver(cfg.path("look.driver"))
+    begin_run(cfg)
     window = list(states.parse_window(cfg.get("look.window"), "look.window"))
     bare = {"id": "calibrate", "title": "the app as it opens", "steps": [], "setup": [], "setup_key": None,
             "reset": [], "theme": None, "window": window, "crop": None}

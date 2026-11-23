@@ -54,6 +54,9 @@ Exit codes: `0` every state captured; `1` a capture failed (the page shows the e
 | `<track.out_dir>/look/<Panel>/manifest.json` | What the page shows: sides with build time, port commit and capture scale (`scale`: image pixels per window pixel), every state's images, errors and differences. Each state's `port` entry carries `head`: `{"app": sha, "framework": sha, "dirty": bool}`, the HEAD of both integration trees when the run started, which the phase gate compares with the trees' current HEAD. `look crops` redraws the page from it. |
 | `<track.out_dir>/look/index.html` | Every panel with its counts and the time of its last run |
 | `<look.run_dir>/<Panel>/<side>/` | Each app instance's work dir (its log is `app.log`) |
+| `<look.run_dir>/procs/<pid>.json` | One record per Xvfb server and app a run started (`portkit.look.display` and `control.launch` write it, `Display.stop` and `App.quit` remove it) |
+
+`look pair` and `look calibrate` start by stopping the processes of earlier runs that died (records whose `look` process is gone) and by emptying every work dir no live process uses, except its `app.log` and `shots/`. A killed capture therefore leaves no display, app or session directory after the next start.
 
 Pages go under the dashboard's output directory, so they are served the same way as the dashboard (tools/track.md, "Viewing the page"). They read the dashboard's stylesheet, follow the light or dark setting, work at phone width, and also work opened as files.
 
@@ -215,7 +218,7 @@ def stop(app): ...                                 # always called, also after a
 |---|---|
 | `side` | `"up"` (production) or `"port"` |
 | `binary` | `look.production_binary` or `look.port_binary` |
-| `workdir` | `<look.run_dir>/<Panel>/<side>/`, created and kept between runs. The driver may clear what it owns in it. |
+| `workdir` | `<look.run_dir>/<Panel>/<side>/`, created and kept between runs; `look` empties it (except `app.log` and `shots/`) at the next start. The driver may clear what it owns in it. |
 | `window` | `[width, height]`: the first state's window in `start`, the state's in `shoot` |
 | `state` | The state resolved for the side: `id`, `title`, `steps` (this side's), `setup` (a step list, empty when none), `setup_key` (a string naming the setup, or `None`), `reset`, `theme`, `window`, `crop`, and every other field of the state |
 | `out_png` | Where `shoot` writes the full-window PNG |

@@ -26,6 +26,8 @@ import subprocess
 import time
 from pathlib import Path
 
+from . import procs
+
 LISTENING = r"control server listening on 127\.0\.0\.1:(\d+)"
 
 
@@ -88,6 +90,7 @@ class App:
             except OSError:
                 pass
             self.proc.wait()
+        procs.forget(self.proc.pid)
 
 
 def launch(side: str, argv: list[str], workdir: Path, env: dict | None = None, token_file: Path | None = None,
@@ -102,6 +105,7 @@ def launch(side: str, argv: list[str], workdir: Path, env: dict | None = None, t
     proc = subprocess.Popen([str(a) for a in argv], env={**os.environ, **(env or {})}, stdout=log,
                             stderr=subprocess.STDOUT, start_new_session=True, cwd=workdir)
     log.close()
+    procs.record("app", proc.pid, workdir)
     app = App(side, proc, workdir, log_path)
     pat = re.compile(ready)
     port = None

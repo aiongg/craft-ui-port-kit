@@ -18,6 +18,8 @@ import subprocess
 import sys
 import time
 
+from . import procs
+
 
 class DisplayError(RuntimeError):
     pass
@@ -68,12 +70,14 @@ class Display:
             raise
         finally:
             os.close(r)
+        procs.record("xvfb", self.proc.pid)
         self.name = ":" + buf.split(b"\n", 1)[0].decode().strip()
         return {"DISPLAY": self.name}
 
     def stop(self) -> None:
         if self.proc is None:
             return
+        procs.forget(self.proc.pid)
         self.proc.terminate()
         try:
             self.proc.wait(timeout=5)

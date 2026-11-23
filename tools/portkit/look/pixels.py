@@ -5,6 +5,10 @@ Needs Pillow and numpy (tools/look re-runs itself under `uv run --with pillow --
 A pixel differs visibly when one colour channel differs by more than the threshold (look.threshold, default 16 of
 255). Shots of different sizes are compared over their shared area; the pixels outside it count as visibly
 different.
+
+Region crops are at the shots' own pixels, never enlarged or shrunk, and each fits in the reader limit
+(look.reader_max_px): the production and port halves sit side by side when that fits, else one above the other,
+and a region too large for either is cut into tiles that fit, each written as its own crop.
 """
 from __future__ import annotations
 
@@ -14,7 +18,6 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-ZOOM = 2                  # region crops are enlarged this much, nearest neighbour
 PAD_FILL = (70, 70, 70)   # outside the smaller of two differently sized shots
 SHEET_GAP = 8             # pixels between the production and port halves of a region crop
 SHEET_FILL = (255, 0, 255)
@@ -121,26 +124,46 @@ def _padded(path: Path, w: int, h: int) -> Image.Image:
     return out
 
 
-def region_crops(up_png: Path, port_png: Path, out_dir: Path, sid: str, threshold: int,
+def tiles(box, limit: int) -> list[tuple[list[int], str]]:
+    """Cut box (x0, y0, x1, y1) into boxes whose two-half crop fits in limit x limit; each with its layout,
+    `side` (production left, port right) or `stacked` (production above port)."""
+    x0, y0, x1, y1 = box
+    w, h = x1 - x0, y1 - y0
+    half = max(1, (limit - SHEET_GAP) // 2)
+    if 2 * w + SHEET_GAP <= limit and h <= limit:
+        return [(list(box), "side")]
+    if w <= limit and 2 * h + SHEET_GAP <= limit:
+        return [(list(box), "stacked")]
+    tw, th, layout = (min(w, limit), half, "stacked") if w >= h else (half, min(h, limit), "side")
+    return [([x, y, min(x + tw, x1), min(y + th, y1)], layout)
+            for y in range(y0, y1, th) for x in range(x0, x1, tw)]
+
+
+def region_crops(up_png: Path, port_png: Path, out_dir: Path, sid: str, threshold: int, limit: int,
                  gap: int = 12, pad: int = 6, most: int = 20) -> tuple[int, list[dict]]:
-    """Write `crop-<sid>-<n>.png` (production left, port right, enlarged) for the largest visibly differing
-    regions. Returns (number of regions, [{file, box, px}] of the ones written, largest first)."""
+    """Write `crop-<sid>-<n>.png` (production and port halves, at native scale, within limit x limit) for the
+    largest visibly differing regions, a region too large cut into tiles. Returns (number of regions and tiles,
+    [{file, box, px, layout}] of the ones written, largest first)."""
     a, b = _rgb(up_png), _rgb(port_png)
     mask = _delta(a, b) > threshold
     if not mask.any():
         return 0, []
-    boxes = regions(mask, gap, pad)
-    boxes.sort(key=lambda bx: -int(mask[bx[1]:bx[3], bx[0]:bx[2]].sum()))
+    boxes = [tile for bx in regions(mask, gap, pad) for tile in tiles(bx, limit)]
+    boxes = [(bx, lay, int(mask[bx[1]:bx[3], bx[0]:bx[2]].sum())) for bx, lay in boxes]
+    boxes = sorted((t for t in boxes if t[2]), key=lambda t: -t[2])
     h, w = mask.shape
     ia, ib = _padded(up_png, w, h), _padded(port_png, w, h)
     out = []
-    for n, (x0, y0, x1, y1) in enumerate(boxes[:most], 1):
+    for n, ((x0, y0, x1, y1), layout, px) in enumerate(boxes[:most], 1):
         ca, cb = (im.crop((x0, y0, x1, y1)) for im in (ia, ib))
-        ca, cb = (c.resize((c.width * ZOOM, c.height * ZOOM), Image.NEAREST) for c in (ca, cb))
-        sheet = Image.new("RGB", (ca.width * 2 + SHEET_GAP, ca.height), SHEET_FILL)
+        if layout == "side":
+            sheet = Image.new("RGB", (ca.width * 2 + SHEET_GAP, ca.height), SHEET_FILL)
+            sheet.paste(cb, (ca.width + SHEET_GAP, 0))
+        else:
+            sheet = Image.new("RGB", (ca.width, ca.height * 2 + SHEET_GAP), SHEET_FILL)
+            sheet.paste(cb, (0, ca.height + SHEET_GAP))
         sheet.paste(ca, (0, 0))
-        sheet.paste(cb, (ca.width + SHEET_GAP, 0))
         name = f"crop-{sid}-{n}.png"
         sheet.save(Path(out_dir) / name, optimize=True)
-        out.append({"file": name, "box": [x0, y0, x1, y1], "px": int(mask[y0:y1, x0:x1].sum())})
+        out.append({"file": name, "box": [x0, y0, x1, y1], "px": px, "layout": layout})
     return len(boxes), out

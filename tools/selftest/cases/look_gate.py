@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import struct
 
 from lib import FIXTURES, KIT, check, git
 
@@ -57,7 +58,10 @@ def write_page(s, drop: str | None = None, head: dict | None = None):
         states.append(st)
         for name in (f"up-{sid}.png", f"port-{sid}.png", f"diff-{sid}.png"):
             (s.page / name).write_text("")
-    (s.page / "manifest.json").write_text(json.dumps({"panel": PANEL, "title": "Layers panel", "states": states}))
+    (s.page / "up-sample.png").write_bytes(b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR" + struct.pack(">II", 2880, 1800))
+    sides = {"up": {"scale": 2.0}, "port": {"scale": 2.0}}
+    (s.page / "manifest.json").write_text(json.dumps({"panel": PANEL, "title": "Layers panel", "sides": sides,
+                                                      "states": states}))
 
 
 def phase9(s, ok: bool, needle: str):
@@ -121,7 +125,9 @@ def case_look_brief(s):
     brief = (s.work / "briefs/look-fix-row-height.md").read_text()
     for needle in ("# Task look-fix-row-height", "## Look evidence", "row height 32 (`panels/layers.rs:88`)",
                    str(s.page / "crop-sample-1.png") + ": box 10,20,74,52 (64x32), 210 px",
-                   f"tools/look pair {PANEL} --only sample`", "porting-rules.md", "contact sheet"):
+                   f"tools/look pair {PANEL} --only sample`", "porting-rules.md", "contact sheet",
+                   "one interface pixel is 2.0 image pixels on both sides",
+                   str(s.page / "up-sample.png") + " (2880x1800, page only)"):
         check(needle in brief, f"the brief lacks {needle!r}:\n{brief}")
     check("{{LOOK}}" not in brief and "## The brief" not in brief, f"the brief is not the filled block:\n{brief}")
     check("focus ring" not in brief, "a kept row of another class went into the brief")

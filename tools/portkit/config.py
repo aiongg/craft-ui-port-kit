@@ -234,7 +234,7 @@ KEYS: list[Key] = [
     K("pipeline.agent_round_turns", 100, "int", "run-area", "Turn limit of one agent-mode round in run-area."),
     K("pipeline.agent_continue_rounds", 3, "int", "run-area",
       "Continue rounds for an agent-mode set while its check names an error or it ran out of turns."),
-    K("pipeline.plancheck_max_turns", 8, "int", "port-set", "Turn limit of a plan check."),
+    K("pipeline.plancheck_max_turns", 14, "int", "port-set", "Turn limit of a plan check."),
     K("pipeline.fix_max_turns", 40, "int", "port-set fix-batch", "Turn limit of a review-fix call."),
     K("pipeline.lookup_tools", "Read,Grep,Glob,Bash(git grep:*),Bash(git show:*),Bash(git ls-files:*),Bash(track:*)", "str",
       "port-set swarm.py", "Tools a one-shot writer or plan check may use to look things up."),
@@ -327,6 +327,12 @@ KEYS: list[Key] = [
       "The port's binary as the build loop builds it in the app integration tree; side `port`."),
     K("look.window", "1440x900", "str", "look",
       "Window size `<width>x<height>` for states files that name none."),
+    K("look.installed_version", None, "str", "look portkit/gates.py",
+      "The production release the developer runs and compares with by eye: a tag, a version such as `0.18.1`, a "
+      "commit, or `none`. `look calibrate` compares the production build's revision with it."),
+    K("look.reader_max_px", 1568, "int", "look prompts",
+      "The longest edge, in pixels, that the agents' image reader keeps without shrinking. Region crops are cut to "
+      "fit it, and `look brief` marks larger images as page-only, never for acceptance.", placeholder="READER_MAX_PX"),
     K("look.port_build", None, "str", "cycle",
       "cl arguments that build look.port_binary in app.integration (for example `build <example>`). cycle runs "
       "them before `look pair`. Unset: cycle skips the look step and says so."),

@@ -187,7 +187,7 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `agent_max_turns` | int | `200` | port-set | Turn limit of `port-set agent` run on its own. Env: `PORT_KIT_PIPELINE_AGENT_MAX_TURNS`. |
 | `agent_round_turns` | int | `100` | run-area | Turn limit of one agent-mode round in run-area. Env: `PORT_KIT_PIPELINE_AGENT_ROUND_TURNS`. |
 | `agent_continue_rounds` | int | `3` | run-area | Continue rounds for an agent-mode set while its check names an error or it ran out of turns. Env: `PORT_KIT_PIPELINE_AGENT_CONTINUE_ROUNDS`. |
-| `plancheck_max_turns` | int | `8` | port-set | Turn limit of a plan check. Env: `PORT_KIT_PIPELINE_PLANCHECK_MAX_TURNS`. |
+| `plancheck_max_turns` | int | `14` | port-set | Turn limit of a plan check. Env: `PORT_KIT_PIPELINE_PLANCHECK_MAX_TURNS`. |
 | `fix_max_turns` | int | `40` | port-set, fix-batch | Turn limit of a review-fix call. Env: `PORT_KIT_PIPELINE_FIX_MAX_TURNS`. |
 | `lookup_tools` | str | `Read,Grep,Glob,Bash(git grep:*),Bash(git show:*),Bash(git ls-files:*),Bash(track:*)` | port-set, swarm.py | Tools a one-shot writer or plan check may use to look things up. Env: `PORT_KIT_PIPELINE_LOOKUP_TOOLS`. |
 | `job_max_turns` | int | `300` | swarm.py | Turn limit of one swarm.py job. Env: `PORT_KIT_PIPELINE_JOB_MAX_TURNS`. |
@@ -262,6 +262,8 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `production_binary` | path | unset | look, portkit/gates.py | Production build with the control hooks (process/01-setup.md, step 6a); side `up`. Env: `PORT_KIT_LOOK_PRODUCTION_BINARY`. |
 | `port_binary` | path | unset | look | The port's binary as the build loop builds it in the app integration tree; side `port`. Env: `PORT_KIT_LOOK_PORT_BINARY`. |
 | `window` | str | `1440x900` | look | Window size `<width>x<height>` for states files that name none. Env: `PORT_KIT_LOOK_WINDOW`. |
+| `installed_version` | str | unset | look, portkit/gates.py | The production release the developer runs and compares with by eye: a tag, a version such as `0.18.1`, a commit, or `none`. `look calibrate` compares the production build's revision with it. Env: `PORT_KIT_LOOK_INSTALLED_VERSION`. |
+| `reader_max_px` | int | `1568` | look, prompts | The longest edge, in pixels, that the agents' image reader keeps without shrinking. Region crops are cut to fit it, and `look brief` marks larger images as page-only, never for acceptance. Placeholder `{{READER_MAX_PX}}`. Env: `PORT_KIT_LOOK_READER_MAX_PX`. |
 | `port_build` | str | unset | cycle | cl arguments that build look.port_binary in app.integration (for example `build <example>`). cycle runs them before `look pair`. Unset: cycle skips the look step and says so. Env: `PORT_KIT_LOOK_PORT_BUILD`. |
 | `threshold` | int | `16` | look | A pixel differs visibly when one colour channel differs by more than this (of 255). Smaller differences show in the difference image but make no crop. Env: `PORT_KIT_LOOK_THRESHOLD`. |
 | `differences` | path | `{work.dir}/look/differences.md` | look, portkit/gates.py | The differences file: one row per look difference with its judgement, class and outcome (tools/look.md, "The differences file"). `look brief` and the phase 8 gate read it. Env: `PORT_KIT_LOOK_DIFFERENCES`. |
@@ -344,6 +346,7 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `{{APP_PLAN_BASE}}` | `plan.app_base` |
 | `{{FW_REF}}` | `racheck.fw_base` |
 | `{{APP_REF}}` | `racheck.app_base` |
+| `{{READER_MAX_PX}}` | `look.reader_max_px` |
 | `{{AREA}}` | Area id (an `[[areas]]` id) (per call) |
 | `{{AREA_CODE}}` | The area's two-letter contract code (per call) |
 | `{{SET}}` | Set id, `<area>-w<n>` (per call) |

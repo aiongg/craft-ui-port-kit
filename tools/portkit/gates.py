@@ -444,6 +444,23 @@ def x_look_setup(ctx):
     return "; ".join(bad) or None
 
 
+def x_look_calibrated(ctx):
+    f = ctx.cfg.path("look.run_dir") / "calibrate.json"
+    try:
+        rep = json.loads(f.read_text())
+    except (OSError, json.JSONDecodeError):
+        return f"no {f.name} in look.run_dir (run `look calibrate --side up`)"
+    up = (rep.get("sides") or {}).get("up")
+    b = ctx.cfg.path("look.production_binary") if ctx.cfg.get("look.production_binary") else None
+    if not up or not b or not b.is_file():
+        return "calibrate.json has no production side"
+    st = b.stat()
+    if up.get("binary") != str(b) or up.get("size") != st.st_size or up.get("mtime") != st.st_mtime:
+        return "calibrate.json is from another production build (run `look calibrate` again)"
+    probs = rep.get("problems") or []
+    return f"{len(probs)} problem(s): {probs[0]}" if probs else None
+
+
 def x_look_states(ctx):
     from .look import states as S
     named = {str(st.get("map", "")).lower() for doc in _look_files(ctx).values() for st in doc.get("states", [])}
@@ -535,6 +552,7 @@ PHASE_EXITS: list[ExitCheck] = [
     ExitCheck(0, "work.baseline_failures exists and the baseline counts are on the dashboard", x_baseline),
     ExitCheck(0, "Every setup task on the board is done", x_setup_done),
     ExitCheck(0, "The look driver and the production build with its control hooks exist", x_look_setup),
+    ExitCheck(0, "look calibrate passed on the current production build", x_look_calibrated),
     ExitCheck(1, "[[areas]] in port.toml matches areas.json", x_areas),
     ExitCheck(1, "Every area has its map; the index exists", x_maps),
     ExitCheck(1, "Every map section has a states file", x_look_states),

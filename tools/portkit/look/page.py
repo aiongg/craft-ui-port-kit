@@ -131,12 +131,14 @@ def write_page(page_dir: Path, man: dict) -> Path:
         when = f", captured {esc(s['t'])}" if s.get("t") else ", not captured yet"
         side_lines.append(f"<b>{'Production' if side == 'up' else 'Port'}</b>: {esc(labels[side])}"
                           f"{(' · <code>' + esc(s['version']) + '</code>') if s.get('version') else ''}{when}")
+    sc = {side: (man["sides"][side] or {}).get("scale") for side in ("up", "port")}
+    scale = (f" (production {sc['up']}×, port {sc['port']}× of the window)" if any(sc.values()) else "")
     times = ", ".join(f"{k} {v:.1f} s" for k, v in man.get("times", {}).items())
     H.append(f'<p class="meta">{"<br>".join(side_lines)}</p>')
     H.append(f'<p class="meta">Window {w}×{h}. Images are cropped to the panel; each links its full-window shot. '
              f'Difference: red where a channel differs by more than {man["threshold"]} of 255, dark amber for '
-             f'smaller differences, over the port shot in grey. Region crops show production left, port right, '
-             f'at {man.get("zoom", 2)}×. {esc(times)}. <a href="../index.html">All panels</a> · '
+             f'smaller differences, over the port shot in grey. Region crops show production left and port right, '
+             f'or production above and port below, at the capture\'s own pixels{scale}. {esc(times)}. <a href="../index.html">All panels</a> · '
              f'<a href="../../index.html">Dashboard</a></p>')
     H.append('<div class="lk-views" role="group" aria-label="View">' + "".join(
         f'<button type="button" data-v="{v}" aria-pressed="false">{esc(t)}</button>' for v, t in VIEWS) + "</div>")
@@ -192,7 +194,8 @@ def write_page(page_dir: Path, man: dict) -> Path:
 
 def write_crops_txt(page_dir: Path, man: dict) -> None:
     L = [f"{man['panel']}: boxes are pixel coordinates in the cropped up-/port- images of the page",
-         "region crops: production left, port right"]
+         "region crops at the capture's own pixels: production left and port right (side), or production above "
+         "and port below (stacked)"]
     for st in man["states"]:
         status = state_status(st)
         if status != "differs":
@@ -201,7 +204,8 @@ def write_crops_txt(page_dir: Path, man: dict) -> None:
         L.append(f"{st['id']}: {st.get('regions', 0)} region(s), {st['diff']['visible']:.2f} % visible")
         for cr in st.get("crops", []):
             x0, y0, x1, y1 = cr["box"]
-            L.append(f"  {cr['file']}  box {x0},{y0},{x1},{y1} ({x1 - x0}x{y1 - y0})  {cr['px']} px")
+            L.append(f"  {cr['file']}  box {x0},{y0},{x1},{y1} ({x1 - x0}x{y1 - y0})  {cr['px']} px"
+                     f"  {cr.get('layout', 'side')}")
     (Path(page_dir) / "crops.txt").write_text("\n".join(L) + "\n")
 
 

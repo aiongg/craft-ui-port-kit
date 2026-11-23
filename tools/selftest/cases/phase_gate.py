@@ -103,6 +103,15 @@ expect(1, False, "look.driver: no file")
 (W / "look").mkdir()
 (W / "look/driver.py").write_text("")
 (W / "look/production").write_text("")
+expect(1, False, "no calibrate.json in look.run_dir")
+prod = W / "look/production"
+cal = {"sides": {"up": {"binary": str(prod), "size": prod.stat().st_size, "mtime": prod.stat().st_mtime}},
+       "problems": ["look.installed_version is not set"]}
+(W / "look/run").mkdir()
+(W / "look/run/calibrate.json").write_text(json.dumps(cal))
+expect(1, False, "1 problem(s): look.installed_version is not set")
+cal["problems"] = []
+(W / "look/run/calibrate.json").write_text(json.dumps(cal))
 out = expect(1, True, "read now, in full:")
 if "02-inventory-and-map.md" not in out or "- [ ]" not in out:
     fail(f"phase 1 pass did not print its runbook and exit list:\n{out}")

@@ -133,6 +133,7 @@ The port is compared with production state by state from its first compile on, s
 3. Build production once with the profile the comparison uses, as a background task, and set `look.production_binary` to it. Rebuild it only when the hooks change.
 4. Write the app's driver, starting from `examples/photocraft/look-driver/driver.py` (its README lists what to change), and set `look.driver` to it. Set `look.port_binary` to the port's binary in the app integration tree's target dir; it exists after the first compile.
 5. Check production with one hand-written states file for one small panel with one state: `tools/look pair <Panel> --side up`. The page must show the state, not a driver error. The port side waits for the first compile.
+6. Calibrate before any pair is trusted. Ask the developer which production release they run and compare with by eye, and set `look.installed_version` (a tag, a version, a commit, or `none`). Run `tools/look calibrate --side up`. It reports the capture's scale, whether the build embedded the craft-fonts interface faces (from the build's own warnings) and production's revision against that release ([tools/look.md](../tools/look.md), "look calibrate"). Fix each problem it lists: a build without the interface faces is rebuilt with `CRAFT_FONTS_DIR` naming a craft-fonts checkout that has them; a scale the window does not explain is fixed in the driver. Tell the developer when production's revision differs from their release. Run it again with both sides once the port first compiles; the two sides' scales and fonts must agree.
 
 ## 7. Record the baseline test runs
 
@@ -189,6 +190,7 @@ Check each item, then record `tools/track phase 1 "inventory"` and go to [02-inv
 - [ ] The snapshots and the production reference exist at their commits.
 - [ ] `cl doctor` is clean after the warm build.
 - [ ] The look driver and the production build with its control hooks exist, and production reached one state ([step 6a](#6a-set-up-the-look-comparison)).
+- [ ] `look calibrate --side up` reports no problem for the current production build ([step 6a](#6a-set-up-the-look-comparison)).
 - [ ] `work.baseline_failures` exists and the baseline counts are on the dashboard; the framework baseline (`baseline-fw`) is running or done.
 - [ ] Both racheck daemons answered a check.
 - [ ] Both sqlite indexes answer a query.

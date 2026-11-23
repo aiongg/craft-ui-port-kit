@@ -43,7 +43,7 @@ Not in this task (outside the goal): <one line each, or "none">.
 
 ## Done when
 - Trials: <behaviour trials by name, or "none: <reason>">.
-- Pairs: <for a look fix: every state under Look evidence, through the `look pair` calls listed there; otherwise element, view, mode on the compare page `<track.out_dir>/look/<Panel>/`, made with `{{KIT}}/tools/look pair <Panel> --only <ids>`>. Judge them on the full-size images, never a contact sheet ({{KIT}}/process/09-look-and-behaviour.md).
+- Pairs: <for a look fix: every state under Look evidence, through the `look pair` calls listed there; otherwise element, view, mode on the compare page `<track.out_dir>/look/<Panel>/`, made with `{{KIT}}/tools/look pair <Panel> --only <ids>`>. Judge them one image at a time: one crop per region at native scale, and the shots that fit in {{READER_MAX_PX}} px; never a montage, a contact sheet or a downscaled page. Sizes are image pixels at the scale <the capture scale, from Look evidence or the page> ({{KIT}}/tools/look.md, "Judging at full size").
 - Verify by driving: <user actions and the expected result, if any>.
 - Crate tests: <packages, with the base counts>.
 

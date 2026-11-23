@@ -5,13 +5,15 @@ usage:
   look [--config PORT.TOML] pair PANEL... | --all  [--side up|port|both] [--only ID[,ID...]]
   look [--config PORT.TOML] crops PAGE... [--threshold N] [--gap N] [--pad N] [--max N]
   look [--config PORT.TOML] states AREA SECTION [--panel NAME] [--theme NAME] [--force]
+  look [--config PORT.TOML] calibrate [--side up|port|both]
   look [--config PORT.TOML] brief CLASS [--force]
 
 pair    For each panel, reads <look.states_dir>/<PANEL>.json, starts production (side `up`, look.production_binary)
         and the port (side `port`, look.port_binary) at the same time through the app's driver (look.driver),
         drives and shoots every state on both, and writes <track.out_dir>/look/<PANEL>/: index.html (production,
         port, blink and difference views per state), the crops of the regions that differ, crops.txt and
-        manifest.json. It also rewrites <track.out_dir>/look/index.html, the list of every panel. It builds
+        manifest.json, with each side's capture scale. Region crops are at the shots' own pixels and fit in
+        look.reader_max_px; a larger region is cut into tiles. It also rewrites <track.out_dir>/look/index.html, the list of every panel. It builds
         nothing: build the port first. With --side, the other side keeps its images from the last run. States
         with a `needs` field are listed on the page but not captured. --all takes every states file.
 crops   Recomputes the difference images and region crops of existing pages (a panel name or a page directory),
@@ -19,19 +21,27 @@ crops   Recomputes the difference images and region crops of existing pages (a p
 states  Writes the states of one area map section into <look.states_dir>/<PANEL>.json. The panel name is the
         framework panel or dialog type the section names (or --panel). States already in the file are kept
         unless --force; new ones are added, so sections on one panel share a file.
+calibrate
+        Before any pair is trusted: starts each side once (every side whose binary exists, or --side), shoots the
+        app as it opens at look.window, and reports the capture's scale, the fonts the build embedded (from the
+        craft-fonts build-script output beside the binary: the checkout and its warnings, such as no interface
+        face) and production's revision against look.installed_version. Writes <look.run_dir>/calibrate.json,
+        which the phase 0 gate reads.
 brief   Writes a look fixer's brief, <work.dir>/briefs/look-fix-<CLASS>.md: prompts/p8-task-brief.md with its Look
         evidence filled from the `fix` rows of CLASS in the differences file (look.differences): the rows, the
-        Look reference of each map section they come from, the full-size shots and region crops of each state, the
+        Look reference of each map section they come from, each side's capture scale, the shots with their sizes
+        (`page only` above look.reader_max_px) and the region crops of each state, the
         rules that decide, and the fixer's own `look pair PANEL --only IDS` calls. The lead fills the rest. An
         existing brief is kept unless --force.
 
 Dashboard: each `pair` run posts one `look` event on the task look-<PANEL>, with the page as its `page` link
 (relative to track.out_dir). `states` posts a `look-states` event on the same task, which creates it. `brief`
-posts a `look-brief` event on the task look-fix-<CLASS>, which creates it.
+posts a `look-brief` event on the task look-fix-<CLASS>, which creates it. `calibrate` posts a
+`look-calibrate` event on the task setup-look.
 
 pair and crops need Pillow and numpy; without them, look runs itself again under
 `uv run --with pillow --with numpy` when uv is installed.
-Exit: 0 done; 1 a capture failed (the page shows the error); 2 usage, config, states-file or differences-file error.
+Exit: 0 done; 1 a capture failed (the page shows the error), or calibrate found a problem; 2 usage, config, states-file or differences-file error.
 Reference: tools/look.md.
 """
 from __future__ import annotations
@@ -52,7 +62,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from portkit import config, track  # noqa: E402
-from portkit.look import differences, page, states  # noqa: E402
+from portkit.look import calibrate, differences, page, states  # noqa: E402
 
 SIDES = ("up", "port")
 SIDE_KEY = {"up": "look.production_binary", "port": "look.port_binary"}
@@ -155,6 +165,18 @@ def run_side(driver, side: str, binary: Path, workdir: Path, shots: Path, todo: 
     return out
 
 
+def capture_scale(shots: dict, todo: list[dict]) -> float | None:
+    """Image pixels per window pixel of the side's first full-window shot, from its PNG header."""
+    for st in todo:
+        shot = shots.get(st["id"])
+        if isinstance(shot, Path):
+            try:
+                return calibrate.scale(calibrate.png_size(shot), st["window"])
+            except (OSError, ValueError):
+                return None
+    return None
+
+
 def diff_all(pixels, page_dir: Path, man: dict, gap: int, pad: int, most: int) -> None:
     """Difference image, region count and crops of every state that has both shots."""
     for old in list(page_dir.glob("crop-*.png")) + list(page_dir.glob("diff-*.png")):
@@ -172,8 +194,8 @@ def diff_all(pixels, page_dir: Path, man: dict, gap: int, pad: int, most: int) -
         d = pixels.compare(a, b, page_dir / f"diff-{st['id']}.png", man["threshold"])
         d["file"] = f"diff-{st['id']}.png"
         st["diff"] = d
-        st["regions"], st["crops"] = pixels.region_crops(a, b, page_dir, st["id"], man["threshold"], gap, pad, most)
-    man["zoom"] = pixels.ZOOM
+        st["regions"], st["crops"] = pixels.region_crops(a, b, page_dir, st["id"], man["threshold"],
+                                                         man["reader_max_px"], gap, pad, most)
 
 
 def write_pages(page_dir: Path, look_dir: Path, man: dict) -> None:
@@ -239,12 +261,14 @@ def _pair_one(cfg, driver, pixels, panel, sides, binaries, only, rec) -> int:
         old_states = {s["id"]: s for s in old.get("states", [])}
         stamp = now_iso()
         man = {"panel": panel, "title": doc.get("title", panel), "generated": stamp, "window": list(window),
-               "threshold": cfg.get("look.threshold"), "states_file": str(cfg.path("look.states_dir") / f"{panel}.json"),
+               "threshold": cfg.get("look.threshold"), "reader_max_px": cfg.get("look.reader_max_px"),
+               "states_file": str(cfg.path("look.states_dir") / f"{panel}.json"),
                "sides": {}, "states": [], "times": {}}
         for side in SIDES:
             if side in sides:
                 man["sides"][side] = {"label": "production" if side == "up" else "port", "t": stamp,
-                                      "version": version(cfg, side, binaries[side], port_head)}
+                                      "version": version(cfg, side, binaries[side], port_head),
+                                      "scale": capture_scale(got[side], todo[side])}
                 if side == "port":
                     man["sides"][side]["head"] = port_head
             else:
@@ -338,6 +362,7 @@ def cmd_crops(cfg, a) -> int:
         except (OSError, json.JSONDecodeError) as e:
             raise Fail(f"crops: no readable manifest.json in {page_dir} ({e})")
         man["threshold"] = a.threshold if a.threshold is not None else cfg.get("look.threshold")
+        man["reader_max_px"] = cfg.get("look.reader_max_px")
         diff_all(pixels, page_dir, man, a.gap, a.pad, a.max)
         write_pages(page_dir, page_dir.parent, man)
         c = page.counts(man)
@@ -387,6 +412,80 @@ def cmd_states(cfg, a) -> int:
     return 0
 
 
+def cmd_calibrate(cfg, a) -> int:
+    with track.recorded("look-calibrate", task="setup-look") as rec:
+        rc, text, data = _calibrate(cfg, a)
+        rec.result(text, data=data, ok=rc == 0, links={"report": str(cfg.path("look.run_dir") / "calibrate.json")})
+        return rc
+
+
+def _calibrate(cfg, a):
+    """Capture one bare state per side and report scale, fonts and production revision (tools/look.md)."""
+    want = list(SIDES) if a.side in (None, "both") else [a.side]
+    binaries, sides = {}, {}
+    for side in want:
+        v = cfg.get(SIDE_KEY[side])
+        b = cfg.path(SIDE_KEY[side]) if v else None
+        if b and b.is_file() and os.access(b, os.X_OK):
+            binaries[side] = b
+        elif a.side:
+            raise Fail(f"{SIDE_KEY[side]}: not an executable file: {b}")
+    if not binaries:
+        raise Fail("calibrate: neither look.production_binary nor look.port_binary is an executable file")
+    driver = load_driver(cfg.path("look.driver"))
+    window = list(states.parse_window(cfg.get("look.window"), "look.window"))
+    bare = {"id": "calibrate", "title": "the app as it opens", "steps": [], "setup": [], "setup_key": None,
+            "reset": [], "theme": None, "window": window, "crop": None}
+    work = cfg.path("look.run_dir") / "calibrate"
+    (work / "shots").mkdir(parents=True, exist_ok=True)
+    with cf.ThreadPoolExecutor(len(binaries)) as ex:
+        futs = {side: ex.submit(run_side, driver, side, b, work / side, work / "shots", [dict(bare)])
+                for side, b in binaries.items()}
+        got = {side: f.result()["calibrate"] for side, f in futs.items()}
+    for side, b in binaries.items():
+        st = b.stat()
+        d = {"binary": str(b), "size": st.st_size, "mtime": st.st_mtime, "fonts": calibrate.fonts(b)}
+        shot = got[side]
+        if isinstance(shot, Path):
+            try:
+                d["image"] = list(calibrate.png_size(shot))
+                d["scale"] = calibrate.scale(tuple(d["image"]), window)
+            except (OSError, ValueError) as e:
+                d["error"] = str(e)
+        else:
+            d["error"] = shot
+        sides[side] = d
+    installed = cfg.get("look.installed_version")
+    prod = binaries.get("up") or (cfg.path("look.production_binary") if cfg.get("look.production_binary") else None)
+    tree = calibrate.tree_of(prod) if prod else None
+    if tree is None and cfg.get("app.production"):
+        tree = cfg.path("app.production")
+    rev = calibrate.revision(tree, installed) if tree else {"installed": installed,
+                                                            "text": "no git tree holds the production build"}
+    found = calibrate.problems(sides, rev)
+    rep_ = {"generated": now_iso(), "window": window, "sides": sides, "revision": rev, "problems": found}
+    out = cfg.path("look.run_dir") / "calibrate.json"
+    out.write_text(json.dumps(rep_, indent=1) + "\n")
+    for side, d in sides.items():
+        label = "production" if side == "up" else "port"
+        cap = (f"{d['image'][0]}x{d['image'][1]} at window {window[0]}x{window[1]}: scale {d['scale']}x"
+               if d.get("image") else f"no capture ({d.get('error')})")
+        f = d["fonts"]
+        fonts_ = f["status"] + (f" from {f['checkout']}" if f.get("checkout") else "")
+        print(f"{label}: capture {cap}; fonts: {fonts_}")
+        for w in f["warnings"]:
+            print(f"  build warning: {w}")
+    print(f"revision: {rev['text']}")
+    for pr in found:
+        print(f"problem: {pr}")
+    print(f"report: {out}")
+    scales = ", ".join(f"{'production' if s == 'up' else 'port'} {d.get('scale')}x" for s, d in sides.items())
+    text = f"{scales}; {len(found)} problem(s)" + (f": {found[0]}" if found else "")
+    data = {"problems": len(found), **{f"scale_{s}": d.get("scale") for s, d in sides.items()},
+            **{f"fonts_{s}": d["fonts"]["status"] for s, d in sides.items()}}
+    return (1 if found else 0), text, data
+
+
 def _look_reference(maps: dict, cache: dict, ref: str | None) -> str:
     """The **Look reference** field of the map section a state names (`"map": "AREA SID"`)."""
     if not ref:
@@ -401,6 +500,26 @@ def _look_reference(maps: dict, cache: dict, ref: str | None) -> str:
         except (OSError, states.StatesError) as e:
             cache[ref] = f"cannot read the map section ({e})"
     return cache[ref]
+
+
+def scale_text(man: dict) -> str:
+    """The capture scale of both sides of a page, as the brief states it."""
+    sc = {side: (man.get("sides") or {}).get(side, {}).get("scale") for side in SIDES}
+    if not any(sc.values()):
+        return "not recorded (capture again with `look pair`)"
+    if sc["up"] == sc["port"]:
+        return f"one interface pixel is {sc['up']} image pixels on both sides"
+    return (f"production {sc['up']}x, port {sc['port']}x: the sides differ, so sizes do not compare "
+            f"(`look calibrate`)")
+
+
+def image_text(path: Path, limit: int) -> str:
+    """An image's path and size; `page only` when it is larger than the reader keeps at full size."""
+    try:
+        w, h = calibrate.png_size(path)
+    except (OSError, ValueError):
+        return str(path)
+    return f"{path} ({w}x{h}{', page only' if max(w, h) > limit else ''})"
 
 
 def look_evidence(cfg, cls: str, rows: list[dict]) -> str:
@@ -419,10 +538,13 @@ def look_evidence(cfg, cls: str, rows: list[dict]) -> str:
          "| Panel | State | What differs | Judgement | Cause |", "|---|---|---|---|---|"]
     L += [f"| {r['panel']} | {r['state']} | {r.get('what differs', '')} | {r.get('judgement', '')} | "
           f"{r.get('cause', '')} |" for r in rows]
-    L += ["", "Judge every state on its full-size images below: production, port, the difference, and each region "
-          "crop (production left, port right, at 2x). Contact sheets and downscaled pages are for the developer, "
-          "never for acceptance. The rules that decide: " + ph["RULES"] + "/porting-rules.md, \"Look\" and "
-          "\"Old look or standardized look\"."]
+    limit = cfg.get("look.reader_max_px")
+    L += ["", f"Judge every state image by image, each at its own size: one region crop per region, at the "
+          f"capture's native scale (production left or above, port right or below), and the production, port and "
+          f"difference images where they fit in {limit} px. An image marked `page only` is larger than your image "
+          f"reader keeps at full size: it shrinks it, so judge that state from its crops. Never judge from a "
+          f"montage, a contact sheet, stacked strips or a downscaled page: they are for the developer. The rules "
+          f"that decide: " + ph["RULES"] + "/porting-rules.md, \"Look\" and \"Old look or standardized look\"."]
     for panel, ids in panels.items():
         page_dir = look_dir / panel
         try:
@@ -431,10 +553,12 @@ def look_evidence(cfg, cls: str, rows: list[dict]) -> str:
             doc = {"states": []}
         by_id = {s["id"]: s for s in doc["states"]}
         try:
-            man = {s["id"]: s for s in json.loads((page_dir / "manifest.json").read_text())["states"]}
+            whole = json.loads((page_dir / "manifest.json").read_text())
+            man = {s["id"]: s for s in whole["states"]}
         except (OSError, ValueError, KeyError):
-            man = {}
-        L += ["", f"{panel} (page {page_dir / 'index.html'}; regions as text: {page_dir / 'crops.txt'}):"]
+            whole, man = {}, {}
+        L += ["", f"{panel} (page {page_dir / 'index.html'}; regions as text: {page_dir / 'crops.txt'}):",
+              f"- Scale: {scale_text(whole)}. Sizes below are image pixels."]
         for sid in ids:
             st, m = by_id.get(sid), man.get(sid)
             L.append(f"- `{sid}`" + (f" ({st.get('title', sid)})" if st else ": not in the states file"))
@@ -444,15 +568,19 @@ def look_evidence(cfg, cls: str, rows: list[dict]) -> str:
                 L.append("  - no capture yet: run the pair below first")
                 continue
             status = page.state_status(m)
-            shots = [f"{label} {page_dir / m[side]['shot']}" for side, label in (("up", "production"), ("port", "port"))
-                     if (m.get(side) or {}).get("shot")]
+            shots = [f"{label} {image_text(page_dir / m[side]['shot'], limit)}"
+                     for side, label in (("up", "production"), ("port", "port")) if (m.get(side) or {}).get("shot")]
             if m.get("diff"):
-                shots.append(f"difference {page_dir / m['diff']['file']}")
+                shots.append(f"difference {image_text(page_dir / m['diff']['file'], limit)}")
             L.append(f"  - {status}" + (f", {m.get('regions', 0)} region(s), {m['diff']['visible']:.2f} % visible"
                                         if status == "differs" else "") + ": " + "; ".join(shots))
             for cr in m.get("crops", []):
                 x0, y0, x1, y1 = cr["box"]
-                L.append(f"  - {page_dir / cr['file']}: box {x0},{y0},{x1},{y1} ({x1 - x0}x{y1 - y0}), {cr['px']} px")
+                L.append(f"  - {image_text(page_dir / cr['file'], limit)}: box {x0},{y0},{x1},{y1} "
+                         f"({x1 - x0}x{y1 - y0}), {cr['px']} px")
+            if m.get("regions", 0) > len(m.get("crops", [])):
+                L.append(f"  - {m['regions'] - len(m.get('crops', []))} more region(s) without a crop: run "
+                         f"`{ph['KIT']}/tools/look crops {panel} --max {m['regions']}`")
     L += ["", "Your pairs, after each build of the port in your build tree (they write the pages above):"]
     L += [f"- `{ph['KIT']}/tools/look pair {panel} --only {','.join(ids)}`" for panel, ids in panels.items()]
     return "\n".join(L)
@@ -515,13 +643,16 @@ def main(argv=None) -> int:
     p.add_argument("--panel")
     p.add_argument("--theme")
     p.add_argument("--force", action="store_true", help="replace states whose id is already in the file")
+    p = sub.add_parser("calibrate", help="report capture scale, fonts and production revision before trusting pairs")
+    p.add_argument("--side", choices=("up", "port", "both"))
     p = sub.add_parser("brief", help="write a look fixer's brief from the differences file")
     p.add_argument("cls", metavar="CLASS")
     p.add_argument("--force", action="store_true", help="replace an existing brief")
     a = ap.parse_args(argv)
     try:
         cfg = config.load(a.config)
-        return {"pair": cmd_pair, "crops": cmd_crops, "states": cmd_states, "brief": cmd_brief}[a.cmd](cfg, a)
+        return {"pair": cmd_pair, "crops": cmd_crops, "states": cmd_states, "calibrate": cmd_calibrate,
+                "brief": cmd_brief}[a.cmd](cfg, a)
     except (Fail, states.StatesError, config.ConfigError) as e:
         print(f"look: {e}", file=sys.stderr)
         return 2

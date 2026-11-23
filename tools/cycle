@@ -13,7 +13,7 @@ usage: cycle LABEL [--fixers FILE] [--tracks SRC] [--groups DIR] [--batch B] [--
   --tracks SRC   which tests each red fixer owns (groups.md, a split-failures.py directory or a TSV), for
                  compare-runs.py and diag-cut.py.
   --groups DIR   split-errors.py output: a compile or lint error that no fixer's branch touched goes to the group
-                 whose `<stem>.errors` file names its file, task `cfix-<stem>`.
+                 that owns its file (`<stem>.files`, else the files `<stem>.errors` names), task `cfix-<stem>`.
                  --fixers, --tracks and --groups default to the values of the previous cycle (its cycle.json).
   --batch B, --area A   the batch and areas the cycle serves. When they differ from the board's, cycle records
                  them (`track phase <current phase> --batch B --area A`). The areas pick the look panels.
@@ -45,7 +45,8 @@ Steps:
              is known). Skipped, and said so, while look.port_build is unset.
   6. packets One file per fixer in <work.runs>/LABEL/followup/<TASK>.md: a header with the cycle and the fixer mode
              (pipeline.fixer_mode, `auto` decided by build.warm_check_s, build.full_run_s and build.fw_trial_s), the fixer's diag-cut
-             packet, and the compile errors and lint findings in files its merged commits changed. A fixer with no
+             packet, and the compile errors and lint findings in files its group owns (--groups) or its merged
+             commits changed. A fixer with no
              failing test, no finding and no `DIAG ` line left on its branches gets no packet; its task goes to done.
   7. send    `swarm.py --follow-up TASK <packet>` for each packet, pipeline.parallel at a time, and waits for every
              fixer to hand back, at most pipeline.followup_timeout_min minutes each; a fixer past it is stalled.
@@ -435,8 +436,8 @@ class Cycle:
         unowned = []
         for repo, line in findings:
             path = line.split(": ", 1)[1].split(":", 1)[0]
-            task = next((t for t, rs in touched.items() if path in rs.get(repo, set())), None) \
-                or next((t for t, fs in groups.items() if path in fs), None)
+            task = next((t for t, fs in groups.items() if path in fs), None) \
+                or next((t for t, rs in touched.items() if path in rs.get(repo, set())), None)
             if task:
                 owned.setdefault(task, []).append(f"{repo}: {line}")
             else:
@@ -461,7 +462,8 @@ class Cycle:
                 continue
             L = [f"# Cycle {self.a.label}: your next round", "",
                  f"Fixer mode for this round: `{self.mode}`. Follow your prompt's section for this mode, on the same "
-                 f"branches as before, and hand back the same way.", ""]
+                 f"branches as before, and hand back the same way. Budget: about "
+                 f"{self.cfg.get('pipeline.fixer_calls')} tool calls for this round.", ""]
             if mine:
                 L += [f"## Compile errors and lint findings in files your commits changed ({len(mine)})", "", "```",
                       *mine, "```", ""]
@@ -476,10 +478,12 @@ class Cycle:
         return result
 
     def groups(self) -> dict[str, set]:
+        """{cfix-<stem>: the files the group owns}: its `<stem>.files` when present, else the files of its errors."""
         d = self.inherit("groups")
         if not d or not Path(d).is_dir():
             return {}
-        return {f"cfix-{f.stem}": {l.split(":", 1)[0] for l in _lines(f)} for f in sorted(Path(d).glob("*.errors"))}
+        return {f"cfix-{f.stem}": set(_lines(f.with_suffix(".files"))) if f.with_suffix(".files").is_file()
+                else {l.split(":", 1)[0] for l in _lines(f)} for f in sorted(Path(d).glob("*.errors"))}
 
     # ------------------------------------------------------------ 7. send
     def send(self, packets: dict) -> tuple[dict, list[str]]:

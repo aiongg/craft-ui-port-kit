@@ -68,3 +68,18 @@ def case_follow_up_fresh_past_context(s):
           and third["prompt"].rstrip().endswith("still failing: test a (round 3)"),
           f"job prompt, old report, packet: {third['prompt']!r}")
     check(out["session_id"] == "session-4", f"the fresh session is the job's session now: {out['session_id']}")
+
+
+def case_fixer_turns_and_model(s):
+    (s.work / "jobs.json").write_text(json.dumps([{"task": "rfix-g1", "prompt": "fix", "role": "red_fixer"},
+                                                  {"task": "other", "prompt": "look"}]))
+    p = s.run("swarm.py", "jobs.json", "--dry-run")
+    line = lambda t: next(l for l in p.stdout.splitlines() if f" {t}: would run" in l)  # noqa: E731
+    check("sonnet, max_turns 195," in line("rfix-g1") and "max_turns 300," in line("other"),
+          "a fixer role gets 1.3 times pipeline.fixer_calls, other jobs pipeline.job_max_turns", p)
+    s.config({"pipeline.fixer_mode": "build"})
+    p = s.run("swarm.py", "jobs.json", "--dry-run")
+    check("would run opus," in line("rfix-g1"), "a red fixer in build mode runs on opus", p)
+    s.config({"pipeline.fixer_mode": "build", "models.red_fixer": "sonnet"})
+    p = s.run("swarm.py", "jobs.json", "--dry-run", "--max-turns", "50")
+    check("would run sonnet, max_turns 50," in line("rfix-g1"), "a set model and --max-turns win", p)

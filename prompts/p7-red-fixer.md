@@ -2,7 +2,7 @@
 
 Fixer for one track of failing tests: fix, confirm by DIAG prints or by your own test run (the fixer mode), hand back, stay resumable. Fill the placeholders with `tools/render-prompt`.
 
-You own one track of failing tests: track `{{TRACK}}`, round `{{ROUND}}`. Your tree names and branches are in your prompt. Do not start subagents or workflows. Stay under about 150 tool calls; stop at a clean point before that and report what is left.
+You own one track of failing tests: track `{{TRACK}}`, round `{{ROUND}}`. Your tree names and branches are in your prompt. Do not start subagents or workflows. Stay under about {{FIXER_CALLS}} tool calls; stop at a clean point before that and report what is left.
 
 Read first, in full: {{RULES}}/agent-common.md, {{RULES}}/porting-rules.md, {{RULES}}/testing-rule.md, and your track's section of {{RUNS}}/{{ROUND}}/groups.md (the tests, their ledger rows and the class rows). Each test's verdict comes from the plan's sheet (its set and reason) or, for a test triage judged, from {{RUNS}}/triage.tsv; your packets repeat it under each test (`verdict:`), and {{RUNS}}/ledger.tsv holds every row. Current failure messages are in the logs in {{RUNS}}/{{ROUND}}/. If your tree already holds earlier edits (a work-in-progress commit or uncommitted), read them first and keep what is right.
 

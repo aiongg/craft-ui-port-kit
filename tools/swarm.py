@@ -35,8 +35,9 @@ Roles
 Each job
   - runs `claude -p` with the prompt on stdin, `--model`, `--output-format json`, `--strict-mcp-config`,
     `--settings templates/claude-settings.json` (read-only allowlist, rust-analyzer plugin off), `--max-turns`
-    (pipeline.job_max_turns), `--add-dir` for the kit, the workspace and the snapshots, and `--json-schema` when it
-    has a schema. Tools: Read, Grep, Glob, Bash, Write and Edit; auto-approved: pipeline.lookup_tools, Write, Edit
+    (pipeline.job_max_turns; a job of a fixer role, compile_fix, red_fixer or red_fixer_framework, gets 1.3 times
+    pipeline.fixer_calls unless --max-turns or its own max_turns says otherwise), `--add-dir` for the kit, the
+    workspace and the snapshots, and `--json-schema` when it has a schema. Tools: Read, Grep, Glob, Bash, Write and Edit; auto-approved: pipeline.lookup_tools, Write, Edit
     and the kit's track command (a job list's "tools" and "allow" replace these). The kit's tools dir is on PATH and
     PORT_KIT_CONFIG names port.toml, so `track` calls in the prompt reach the dashboard. Runs under
     build.memory_cap with --memory-gb (default 4) when the key is set.
@@ -80,6 +81,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import shlex
@@ -115,6 +117,9 @@ ROLE_TOOLS = {
     "red_fixer_framework": _FIXER + ["Bash(python3 -I {kit}/tools/diag-cut.py:*)", "Bash({kit}/tools/diag-cut.py:*)"],
     "sheet_fix": ["Bash(python3 -I {kit}/tools/coverage.py:*)", "Bash({kit}/tools/port-set:*)"],
 }
+# Roles whose prompt states a call budget (pipeline.fixer_calls): their jobs get FIXER_TURNS times that many turns.
+FIXER_ROLES = ("compile_fix", "red_fixer", "red_fixer_framework")
+FIXER_TURNS = 1.3
 TASK_IN_PROMPT = re.compile(r"\btrack\s+(?:step|status|ask)\s+([A-Za-z0-9][A-Za-z0-9._/-]{0,79})\b")
 
 
@@ -280,8 +285,8 @@ class Swarm:
         (jd / "prompt.md").write_text(job.prompt)
         (jd / "job.json").write_text(json.dumps(job.record(), indent=1))
         if self.a.dry_run:
-            self.say(f"{job.task}: would run {job.model}, {len(job.prompt)} chars{', schema' if job.schema else ''}, "
-                     f"key {job.key()} ({jd / 'prompt.md'})")
+            self.say(f"{job.task}: would run {job.model}, max_turns {self.turns(job)}, {len(job.prompt)} chars"
+                     f"{', schema' if job.schema else ''}, key {job.key()} ({jd / 'prompt.md'})")
             return None
         self.board(job, "todo", f"queued ({job.model})", new=True)
         self.wait_to_start()
@@ -322,7 +327,7 @@ class Swarm:
                 dirs += ["--add-dir", str(d)]
         cmd = [self.claude, "-p", "--model", job.model, "--output-format", "json", "--strict-mcp-config",
                "--settings", str(SETTINGS), "--tools", job.tools or TOOLS, "--allowedTools", allow,
-               "--max-turns", str(job.max_turns or self.a.max_turns), *dirs]
+               "--max-turns", str(self.turns(job)), *dirs]
         if job.schema:
             cmd += ["--json-schema", json.dumps(job.schema)]
         if resume:
@@ -331,6 +336,15 @@ class Swarm:
         if cap:
             cmd = shlex.split(cap.replace("{gb}", str(self.a.memory_gb))) + cmd
         return cmd
+
+    def turns(self, job: Job) -> int:
+        """The job's own max_turns, else --max-turns, else 1.3 times pipeline.fixer_calls for a fixer role, else
+        pipeline.job_max_turns."""
+        if job.max_turns:
+            return int(job.max_turns)
+        if getattr(self.a, "max_turns_given", False) or job.role not in FIXER_ROLES:
+            return int(self.a.max_turns)
+        return math.ceil(FIXER_TURNS * int(self.cfg.get("pipeline.fixer_calls")))
 
     def env(self) -> dict:
         env = dict(os.environ, CLAUDE_CODE_MAX_OUTPUT_TOKENS="64000")
@@ -402,7 +416,7 @@ class Swarm:
             return None, f"claude exit {p.returncode}: {tail[:200]}"
         self.usage(job, d, secs, n, tag)
         if d.get("subtype") == "error_max_turns":
-            return d, f"out of turns ({job.max_turns or self.a.max_turns})"
+            return d, f"out of turns ({self.turns(job)})"
         if d.get("is_error") or p.returncode != 0:
             return d, f"claude reported an error ({d.get('subtype') or p.returncode}): {str(d.get('result'))[:200]}"
         return d, None
@@ -492,10 +506,7 @@ if (fn) fn(agent, parallel, pipeline, phase, log, args, budget, workflow).then(
 def model_for(cfg: config.Config, opts: dict) -> str:
     if opts.get("model"):
         return str(opts["model"])
-    role = opts.get("role")
-    if role and f"models.{role}" in config.BY_PATH:
-        return cfg.get(f"models.{role}")
-    return cfg.get("models.default")
+    return cfg.model(opts.get("role"))
 
 
 def run_workflow(sw: Swarm, script: Path, args_file: Path, name: str):
@@ -641,7 +652,7 @@ def fresh_prompt(job, jd: Path, follow: str, ctx: int) -> str:
 def follow_up(cfg: config.Config, a) -> int:
     task, prompt_file = a.follow_up
     out = {"task": task, "ok": False, "value": None, "error": None, "session_id": None, "cost_usd": 0.0, "job_dir": None,
-           "context": None, "fresh": False}
+           "context": None, "fresh": False, "model": None}
 
     def done(code: int, error: str | None = None) -> int:
         out["error"] = error
@@ -664,6 +675,7 @@ def follow_up(cfg: config.Config, a) -> int:
               phase=rec.get("phase"), title=rec.get("label"), group=jd.parent.parent.name, cwd=rec.get("cwd"),
               add_dirs=rec.get("add_dirs") or [], max_turns=rec.get("max_turns"), tools=rec.get("tools"),
               allow=rec.get("allow"), role=rec.get("role"), inputs=rec.get("inputs") or [])
+    out["model"] = job.model
     n = len(list(jd.glob("followup-*.json"))) + 1
     tag = f"followup-{n}"
     ctx = sessions.last_context(sid, job.cwd or cfg.get("work.dir"))
@@ -714,6 +726,7 @@ def main(argv=None) -> int:
         os.environ[config.ENV_CONFIG] = str(Path(a.config).resolve())   # the dashboard store follows it
     par_src = (f"--parallel; pipeline.parallel is {cfg.get('pipeline.parallel')}" if a.parallel else "pipeline.parallel")
     a.parallel = a.parallel or int(cfg.get("pipeline.parallel"))
+    a.max_turns_given = bool(a.max_turns)
     a.max_turns = a.max_turns or int(cfg.get("pipeline.job_max_turns"))
     if a.follow_up:
         return follow_up(cfg, a)

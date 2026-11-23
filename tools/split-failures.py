@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Split failing tests from cargo test logs into N groups of whole clusters.
+"""Split failing tests from cargo test logs into groups of whole clusters, at least N and none over M tests.
 
-Usage: split-failures.py <out-dir> <groups> <log>... [--exclude-binary SUBSTR]...
+Usage: split-failures.py <out-dir> <groups> <log>... [--exclude-binary SUBSTR]... [--max-per-track M]
 
 A cluster is the test's module (lib and bin tests: the path minus the test name, cut at the
-`tests`/`*_tests` level) or its integration-test file (tests/it/<file>). Every group gets whole
-clusters, balanced by failure count. Writes <out-dir>/g<k>.md (each failure: binary, panic
-site, message, captured output, trimmed) and <out-dir>/index.md.
+`tests`/`*_tests` level) or its integration-test file (tests/it/<file>). Groups get whole
+clusters, balanced by failure count. No group holds more than M tests (default 25): a cluster
+larger than M is cut into parts of at most M tests (in name order), and a part that fits in no
+group opens a new one, so a long failure list gives more groups, not bigger ones. Writes
+<out-dir>/g<k>.md (each failure: binary, panic site, message, captured output, trimmed) and
+<out-dir>/index.md.
 """
 import sys as _sys
 if _sys.argv[1:2] in (["-h"], ["--help"]):
@@ -19,6 +22,13 @@ from pathlib import Path
 
 args = sys.argv[1:]
 excl = []
+cap = 25
+if '--max-per-track' in args:
+    i = args.index('--max-per-track')
+    cap = int(args[i + 1])
+    del args[i:i + 2]
+    if cap < 1:
+        sys.exit('split-failures.py: --max-per-track must be at least 1')
 while '--exclude-binary' in args:
     i = args.index('--exclude-binary')
     excl.append(args[i + 1])
@@ -77,12 +87,27 @@ clusters = collections.defaultdict(list)
 for (b, t), v in fails.items():
     clusters[cluster(b, t, v['site'])].append((b, t, v))
 
+parts = []  # (cluster label, items): clusters over the cap cut into parts of at most `cap` tests
+for c, items in clusters.items():
+    items = sorted(items, key=lambda x: x[1])
+    if len(items) <= cap:
+        parts.append((c, items))
+        continue
+    cut = [items[i:i + cap] for i in range(0, len(items), cap)]
+    parts += [(f'{c} [part {j}/{len(cut)}]', chunk) for j, chunk in enumerate(cut, 1)]
+n = max(n, -(-len(fails) // cap))
 groups = [[] for _ in range(n)]
 load = [0] * n
-for c, items in sorted(clusters.items(), key=lambda kv: -len(kv[1])):
+for c, items in sorted(parts, key=lambda kv: -len(kv[1])):
     k = load.index(min(load))
+    if load[k] + len(items) > cap:
+        groups.append([])
+        load.append(0)
+        k = len(load) - 1
     groups[k].append((c, items))
     load[k] += len(items)
+groups = [g for g in groups if g]
+load = [x for x in load if x]
 
 index = ['# Failure groups', '']
 for k, g in enumerate(groups, 1):
@@ -96,4 +121,4 @@ for k, g in enumerate(groups, 1):
             md += ['```', '']
     (out / f'g{k}.md').write_text('\n'.join(md))
 (out / 'index.md').write_text('\n'.join(index) + '\n')
-print(f'{len(fails)} failures in {len(clusters)} clusters -> {n} groups: {load}')
+print(f'{len(fails)} failures in {len(clusters)} clusters -> {len(groups)} groups of at most {cap}: {load}')

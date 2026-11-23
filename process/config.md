@@ -94,7 +94,7 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `settled` | path | `{work.plan}/settled.md` | port-set, render-prompt | Design questions settled during planning. Placeholder `{{SETTLED}}`. Env: `PORT_KIT_WORK_SETTLED`. |
 | `sets` | path | `{work.dir}/sets` | port-set, run-area, run-batch, fix-batch, combine-area, combine-lost, cross-owner, move-base, gate-classify.py, render-prompt | Per-set output dirs (bundle, edits, check.md, plancheck.md, decisions.md, review findings, base-<repo>). Placeholder `{{SETS}}`. Env: `PORT_KIT_WORK_SETS`. |
 | `decide` | path | `{work.dir}/decide` | port-set, cross-owner, gate-classify.py, render-prompt | DECIDE collection per area (`<area>.md`) and `owners.tsv`. Placeholder `{{DECIDE}}`. Env: `PORT_KIT_WORK_DECIDE`. |
-| `runs` | path | `{work.dir}/runs` | codemod, compile-gate, test-run, racheck-gate, compare-runs.py, diag-cut.py, split-failures.py | Compile and test run logs, one dir per run label. Placeholder `{{RUNS}}`. Env: `PORT_KIT_WORK_RUNS`. |
+| `runs` | path | `{work.dir}/runs` | compile-gate, test-run, racheck-gate, compare-runs.py, diag-cut.py, split-failures.py | Compile and test run logs, one dir per run label. Placeholder `{{RUNS}}`. Env: `PORT_KIT_WORK_RUNS`. |
 | `scip` | path | `{work.dir}/scip` | port-set, scip/scipdb.py, init-workspace | SCIP sqlite indexes (`fw.sqlite`, `app.sqlite`). Env: `PORT_KIT_WORK_SCIP`. |
 | `swarm` | path | `{work.dir}/swarm` | swarm.py, init-workspace | swarm.py's run dirs, one per workflow or job list: each job's prompt, reply and checked result (the resume cache), the run log and the script's return value. Env: `PORT_KIT_WORK_SWARM`. |
 | `usage_log` | path | `{work.dir}/usage.tsv` | port-set, swarm.py, track | Token and cost log of every model call. Env: `PORT_KIT_WORK_USAGE_LOG`. |
@@ -109,7 +109,7 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `repo` | str | `https://github.com/storytold/craft-libs` | land/land-framework.sh, land/early-ci.sh, land/pin-framework.py, patch-framework, sync, cycle, prompts | Framework repository URL. It must be the remote that holds plan.base: the pin names this URL and a rev only that remote has does not resolve for anyone else. Placeholder `{{FW_REPO}}`. Env: `PORT_KIT_FRAMEWORK_REPO`. |
 | `branch` | str | `next` | land/land-framework.sh, land/early-ci.sh, sync, cycle, init-workspace, prompts | Framework branch the port targets: `next` on the framework's upstream; when it does not exist there yet, the branch the framework team names. Pins and landing use it. Placeholder `{{FW_BRANCH}}`. Env: `PORT_KIT_FRAMEWORK_BRANCH`. |
 | `checkout` | path | required | move-base, patch-framework, init-workspace | Local framework clone. Branches and worktrees are made from it. Placeholder `{{FW_CHECKOUT}}`. Env: `PORT_KIT_FRAMEWORK_CHECKOUT`. |
-| `integration` | path | `{framework.checkout}` | combine-area, combine-lost, codemod, compile-gate, test-run, patch-framework, racheck-tree, racheck-gate, look, portkit/gates.py | Framework integration worktree: combines and compile gates run here. Placeholder `{{FW_INT}}`. Env: `PORT_KIT_FRAMEWORK_INTEGRATION`. |
+| `integration` | path | `{framework.checkout}` | combine-area, combine-lost, compile-gate, test-run, patch-framework, racheck-tree, racheck-gate, look, portkit/gates.py | Framework integration worktree: combines and compile gates run here. Placeholder `{{FW_INT}}`. Env: `PORT_KIT_FRAMEWORK_INTEGRATION`. |
 | `snapshot` | path | `{work.trees}/snap-fw` | init-workspace, make-snapshots, workflows, prompts | Read-only framework checkout at plan.base, read by phase 1 and 2 agents. Placeholder `{{FW}}`. Env: `PORT_KIT_FRAMEWORK_SNAPSHOT`. |
 | `writing_base` | str | `port/stubs` | port-set, combine-area, move-base, racheck.py, compile-gate, racheck-tree, racheck-gate | Framework branch the writers start from: the contract stubs (phase 3). Placeholder `{{FW_WRITING_BASE}}`. Env: `PORT_KIT_FRAMEWORK_WRITING_BASE`. |
 | `facade` | str | `craft` | port-set, prompts, feature-selection.py, racheck.py | Facade crate. App code reaches every member crate through it. Placeholder `{{FACADE}}`. Env: `PORT_KIT_FRAMEWORK_FACADE`. |
@@ -124,7 +124,7 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `name` | str | required | port-set, prompts | Display name of the app. Placeholder `{{APP}}`. Env: `PORT_KIT_APP_NAME`. |
 | `id` | str | from app.name | init-workspace, prompts | Short lowercase id for file and branch names. Default: app.name lowercased, spaces to dashes. Placeholder `{{APP_ID}}`. Env: `PORT_KIT_APP_ID`. |
 | `checkout` | path | required | init-workspace, patch-framework, land/land-app.sh | Local app clone. Branches and worktrees are made from it. Placeholder `{{APP_CHECKOUT}}`. Env: `PORT_KIT_APP_CHECKOUT`. |
-| `integration` | path | `{app.checkout}` | combine-area, combine-lost, codemod, compile-gate, test-run, patch-framework, racheck-tree, racheck-gate, gate-classify.py, feature-selection.py, look, portkit/gates.py | App integration worktree: combines, compile gates and full test runs run here. Placeholder `{{APP_INT}}`. Env: `PORT_KIT_APP_INTEGRATION`. |
+| `integration` | path | `{app.checkout}` | combine-area, combine-lost, compile-gate, test-run, patch-framework, racheck-tree, racheck-gate, gate-classify.py, feature-selection.py, look, portkit/gates.py | App integration worktree: combines, compile gates and full test runs run here. Placeholder `{{APP_INT}}`. Env: `PORT_KIT_APP_INTEGRATION`. |
 | `snapshot` | path | `{work.trees}/snap-app` | init-workspace, make-snapshots, coverage.py, workflows, prompts, render-prompt | Read-only app checkout at plan.app_base, read by phase 1 and 2 agents. Placeholder `{{APP_SRC}}`. Env: `PORT_KIT_APP_SNAPSHOT`. |
 | `production` | path | `{work.trees}/prod` | prompts, compare-runs.py, make-snapshots | Read-only checkout of the app's production main at the commit the port last merged: the behaviour reference for triage, red rounds and look work. Placeholder `{{PROD}}`. Env: `PORT_KIT_APP_PRODUCTION`. |
 | `release` | path | unset | prompts | Optional read-only checkout of the latest app release. Placeholder `{{RELEASE}}`. Env: `PORT_KIT_APP_RELEASE`. |
@@ -145,7 +145,7 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `chunk_lines` | int | `3000` | workflows/phase1-inventory-map.js, render-prompt | Target size of one inventory chunk, in lines. Env: `PORT_KIT_PLAN_CHUNK_LINES`. |
 | `chunk_map_lines` | int | `250` | render-prompt | Target size of one plan chunk, in area-map lines. Plan chunks hold whole map sections. Env: `PORT_KIT_PLAN_CHUNK_MAP_LINES`. |
 | `answer_groups_per_agent` | int | `3` | workflows/phase2-part.js | Question groups one answering agent takes. Env: `PORT_KIT_PLAN_ANSWER_GROUPS_PER_AGENT`. |
-| `max_error_rate` | float | `0.1` | workflows/phase2-final.js, workflows/phase2-reconcile.js, tools/reconcile, prompts | Sampled plan error rate above which an area is reported as over: after the confirming evaluation it goes to the lead's own read of its error classes. Reported, not a gate: no third evaluation runs. Env: `PORT_KIT_PLAN_MAX_ERROR_RATE`. |
+| `max_error_rate` | float | `0.1` | workflows/phase2-final.js, prompts | Highest sampled plan error rate that passes the evaluation. Env: `PORT_KIT_PLAN_MAX_ERROR_RATE`. |
 | `max_wrong_answers` | float | `0.1` | workflows/phase2-final.js, prompts | Highest share of wrong fact answers that passes the accuracy check. Env: `PORT_KIT_PLAN_MAX_WRONG_ANSWERS`. |
 | `build_batches` | int | unset | track | How many build batches the write order has (pilot included), set when the order is fixed (process/06-write.md). `track eta` counts the batches still to come from it. Unset: the projection counts the current batch only. Env: `PORT_KIT_PLAN_BUILD_BATCHES`. |
 
@@ -165,13 +165,15 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 
 | Key | Type | Default | Read by | Meaning |
 |---|---|---|---|---|
-| `cl` | path | `{framework.checkout}/tools/cl` | codemod, compile-gate, test-run | The framework's cl. Every cargo command goes through it. Env: `PORT_KIT_BUILD_CL`. |
-| `launcher` | str | `""` | codemod, compile-gate, test-run | Command prefix every cargo build runs under (for example a shared jobserver). Passed to cl as CL_LAUNCHER. Empty: plain cargo. Env: `PORT_KIT_BUILD_LAUNCHER`. |
-| `runner` | str | `""` | codemod, compile-gate, test-run | Command prefix the built test binaries run under. Passed to cl as CL_RUNNER. Empty: run directly. Env: `PORT_KIT_BUILD_RUNNER`. |
-| `memory_cap` | str | `""` | racheck.py, swarm.py, codemod, compile-gate, test-run | Command prefix that caps a heavy job's memory; `{gb}` is replaced with the job's GB (example: `{kit}/tools/capped {gb}`). Empty: no cap. Env: `PORT_KIT_BUILD_MEMORY_CAP`. |
-| `memory_gb` | int | `28` | codemod, compile-gate, test-run | Memory cap in GB for builds and test runs under build.memory_cap. Env: `PORT_KIT_BUILD_MEMORY_GB`. |
+| `cl` | path | `{framework.checkout}/tools/cl` | compile-gate, test-run | The framework's cl. Every cargo command goes through it. Env: `PORT_KIT_BUILD_CL`. |
+| `launcher` | str | `""` | compile-gate, test-run | Command prefix every cargo build runs under (for example a shared jobserver). Passed to cl as CL_LAUNCHER. Empty: plain cargo. Env: `PORT_KIT_BUILD_LAUNCHER`. |
+| `runner` | str | `""` | compile-gate, test-run | Command prefix the built test binaries run under. Passed to cl as CL_RUNNER. Empty: run directly. Env: `PORT_KIT_BUILD_RUNNER`. |
+| `memory_cap` | str | `""` | racheck.py, swarm.py, compile-gate, test-run | Command prefix that caps a heavy job's memory; `{gb}` is replaced with the job's GB (example: `{kit}/tools/capped {gb}`). Empty: no cap. Env: `PORT_KIT_BUILD_MEMORY_CAP`. |
+| `memory_gb` | int | `28` | compile-gate, test-run | Memory cap in GB for builds and test runs under build.memory_cap. Env: `PORT_KIT_BUILD_MEMORY_GB`. |
 | `test_threads` | int | unset | test-run | --test-threads for test binaries. Unset: test-run passes none, and cl uses the app manifest's `[workspace.metadata.cl] test_threads`. Env: `PORT_KIT_BUILD_TEST_THREADS`. |
-| `target_dir` | path | `""` | codemod, compile-gate, test-run | CARGO_TARGET_DIR for the integration trees. Empty: cl's default (`<worktree>-target` when it exists). Env: `PORT_KIT_BUILD_TARGET_DIR`. |
+| `target_dir` | path | `""` | compile-gate, test-run | CARGO_TARGET_DIR for the integration trees. Empty: cl's default (`<worktree>-target` when it exists). Env: `PORT_KIT_BUILD_TARGET_DIR`. |
+| `pool_size` | int | unset | build-pool | Build slots `build-pool make` creates: the smaller of free RAM over the measured build peak and free disk over the integration target dir's size, set in phase 0 (`build-pool size`). Unset: `make` needs N. Env: `PORT_KIT_BUILD_POOL_SIZE`. |
+| `pool_dir` | path | `{work.trees}/pool` | build-pool | Where the build pool's slots live: `<k>/fw` and `<k>/app/tree`, each with its `-target` dir beside it, and `<k>/app/.cargo/config.toml` pointing the app tree at the slot's framework tree. Env: `PORT_KIT_BUILD_POOL_DIR`. |
 | `warm_check_s` | int | unset | cycle, render-prompt | Seconds of a warm `compile-gate` of the app after a one-file change, measured in phase 0. With build.full_run_s it sets the fixer mode when pipeline.fixer_mode is `auto`. Unset: not measured. Env: `PORT_KIT_BUILD_WARM_CHECK_S`. |
 | `full_run_s` | int | unset | cycle, render-prompt | Seconds of one full `test-run --app` (build already warm), measured in phase 0. Unset: not measured. Env: `PORT_KIT_BUILD_FULL_RUN_S`. |
 | `fw_trial_s` | int | unset | cycle, render-prompt | Seconds of the slowest warm `cl test` of a framework crate the port changes, measured from the phase 0 framework baseline (process/11-build-loop.md, "Measuring the fixer mode's inputs"). Unset: counts as 0. Env: `PORT_KIT_BUILD_FW_TRIAL_S`. |
@@ -192,6 +194,7 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `fix_max_turns` | int | `40` | port-set, fix-batch | Turn limit of a review-fix call. Env: `PORT_KIT_PIPELINE_FIX_MAX_TURNS`. |
 | `lookup_tools` | str | `Read,Grep,Glob,Bash(git grep:*),Bash(git show:*),Bash(git ls-files:*),Bash(track:*)` | port-set, swarm.py | Tools a one-shot writer or plan check may use to look things up. Env: `PORT_KIT_PIPELINE_LOOKUP_TOOLS`. |
 | `job_max_turns` | int | `300` | swarm.py | Turn limit of one swarm.py job. Env: `PORT_KIT_PIPELINE_JOB_MAX_TURNS`. |
+| `fixer_calls` | int | `150` | swarm.py, cycle, prompts | Tool-call budget of one compile or red fixer round, stated in its prompt and packet. swarm.py gives jobs of the fixer roles (`compile_fix`, `red_fixer`, `red_fixer_framework`) 1.3 times this many turns. Placeholder `{{FIXER_CALLS}}`. Env: `PORT_KIT_PIPELINE_FIXER_CALLS`. |
 | `quota_command` | str | `""` | run-batch, swarm.py | Command printing the plan's current 5-hour window use as a percent. Empty: never wait on quota. Env: `PORT_KIT_PIPELINE_QUOTA_COMMAND`. |
 | `quota_cap` | int | `90` | run-batch, swarm.py | Start no new job while quota_command reports at or above this. Env: `PORT_KIT_PIPELINE_QUOTA_CAP`. |
 | `weekly_quota_command` | str | `""` | cycle, track | Command printing the plan's weekly use as a percent. cycle records it with each cycle, and `track eta` projects it to the finish. Empty: no weekly line in the projection. Env: `PORT_KIT_PIPELINE_WEEKLY_QUOTA_COMMAND`. |
@@ -239,7 +242,7 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `fix_retry` | str | `opus` | fix-batch | Fix of a set that failed twice. Env: `PORT_KIT_MODELS_FIX_RETRY`. |
 | `compile_fix` | str | `sonnet` | swarm.py | Phase 6 compile-fix groups. Env: `PORT_KIT_MODELS_COMPILE_FIX`. |
 | `triage` | str | `sonnet` | swarm.py | Phase 7 test triage; confirm by calibration before a sweep. Env: `PORT_KIT_MODELS_TRIAGE`. |
-| `red_fixer` | str | `sonnet` | swarm.py | Phase 7 red-round fixer. Env: `PORT_KIT_MODELS_RED_FIXER`. |
+| `red_fixer` | str | `opus` in build mode, `sonnet` in code-only | swarm.py, cycle | Phase 7 red-round fixer. Empty: `opus` in the fixer mode `build`, `sonnet` in `code-only` (Config.model). Env: `PORT_KIT_MODELS_RED_FIXER`. |
 | `red_fixer_framework` | str | `opus` | swarm.py | Phase 7 fixer whose failures have a framework cause. Env: `PORT_KIT_MODELS_RED_FIXER_FRAMEWORK`. |
 
 ### [track]
@@ -348,6 +351,7 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `{{APP_PLAN_BASE}}` | `plan.app_base` |
 | `{{FW_REF}}` | `racheck.fw_base` |
 | `{{APP_REF}}` | `racheck.app_base` |
+| `{{FIXER_CALLS}}` | `pipeline.fixer_calls` |
 | `{{READER_MAX_PX}}` | `look.reader_max_px` |
 | `{{AREA}}` | Area id (an `[[areas]]` id) (per call) |
 | `{{AREA_CODE}}` | The area's two-letter contract code (per call) |

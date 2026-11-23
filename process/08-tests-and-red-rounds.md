@@ -6,7 +6,7 @@ Phase 7 makes the compiled batch pass its tests. Every test already has a verdic
 |---|---|
 | Starts when | The batch compiles ([07-review-combine-compile.md](07-review-combine-compile.md)). |
 | Ends when | The exit criteria below hold. |
-| Agents | Triage agents on the calibrated model (`models.triage`); Sonnet fixers per track (`models.red_fixer`), Opus for tracks with a framework cause (`models.red_fixer_framework`). |
+| Agents | Triage agents on the calibrated model (`models.triage`); fixers per track (`models.red_fixer`: Opus in the fixer mode `build`, Sonnet in `code-only`), Opus for tracks with a framework cause (`models.red_fixer_framework`). |
 | Builds | One cycle per round in the integration trees (`tools/cycle`). Fixers build only in the fixer mode `build` ([11-build-loop.md](11-build-loop.md), rule 3). |
 | Output | Run logs and failure lists, the ledger, the stale list and the triage table, `groups.md` and a report per run, under `work.runs` (`templates/run-report.md`). |
 
@@ -57,7 +57,7 @@ A **track** is a group of failing tests with one likely cause, given to one fixe
 
 Tracks are formed from the latest run, `run-<n>`, and their fixers work from it: their prompts get `{{ROUND}} = run-<n>`, and its directory holds the logs, `groups.md` and the packets. The run the round ends with is `run-<n+1>`.
 
-1. `tools/split-failures.py <dir> <N> <logs>` clusters the failures by module or integration-test file and balances whole clusters over N groups, with each failure's panic site and message.
+1. `tools/split-failures.py <dir> <N> <logs>` clusters the failures by module or integration-test file and balances whole clusters over at least N groups, with each failure's panic site and message. No group holds more than 25 tests (`--max-per-track`): a longer list gives more tracks, not bigger ones, because a fixer works through about `pipeline.fixer_calls` tool calls per round and a larger track does not finish in one. swarm.py gives fixer jobs 1.3 times that many turns.
 2. Adjust the groups by cause, using the panic sites and the plan's verdicts: tests that share a cause belong to one track, even across modules. A track whose cause is in a framework crate gets the framework fixer model.
 3. Write `<work.runs>/run-<n>/groups.md`: one section per track with its tests, their ledger rows (set, verdict, target) and the class rows (shared causes) it names.
 4. Write a tracks file (one `TRACK_ID TITLE` per line) and put the tracks on the board: `tools/track import tracks <file>`.

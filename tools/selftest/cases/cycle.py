@@ -184,3 +184,25 @@ def case_red_round_runs_each_tracks_crates(s):
     j = json.loads((s.work / "runs" / "r2" / "cycle.json").read_text())
     check(tested == ["crate-a", "crate-b", "crate-c"] and j["tests"]["fw"].get("rest") == ["crate-c"],
           f"a green narrowed round runs the other changed crates before it reports green: {tested}", p)
+
+
+def case_compile_groups_own_files(s):
+    fw, app = setup(s)
+    s.commit(app, {f"app/src/{f}.rs": "\n" for f in ("a", "b", "shared")}, "three files")
+    errs = s.work / "errors"
+    errs.write_text("".join(f"app/src/{f}.rs:{i}:1: error[E0425]: x\n" for f, n in (("a", 4), ("b", 4), ("shared", 1))
+                            for i in range(1, n + 1)))
+    p = s.run("split-errors.py", str(errs), "2", str(s.work / "groups" / "g"))
+    owned = {t: (s.work / "groups" / f"g-{t}.files").read_text().split() for t in (1, 2)}
+    owner = next(t for t, fs in owned.items() if "app/src/shared.rs" in fs)
+    check(sum("app/src/shared.rs" in fs for fs in owned.values()) == 1, f"one owner for the shared file: {owned}", p)
+    for t, fs in owned.items():   # each group edits only its own files, the cause in shared.rs included
+        git(app, "switch", "-q", "-c", f"cfix/{t}", "main")
+        s.commit(app, {f: f"fixed by group {t}\n" for f in fs}, f"group {t}")
+    git(app, "switch", "-q", "main")
+    (s.work / "cfix.txt").write_text("".join(f"cfix-g-{t} app:cfix/{t}\n" for t in owned))
+    s.cl_log("check-all", "app/src/shared.rs:1:1: error[E0308]: mismatched types\n", 101)
+    p = s.run("cycle", "c1", "--fixers", "cfix.txt", "--groups", str(s.work / "groups"), "--no-send")
+    check(p.returncode == 1 and "merged 2/2" in p.stdout, "both groups merge without a conflict", p)
+    pk = s.work / "runs" / "c1" / "followup" / f"cfix-g-{owner}.md"
+    check(pk.is_file() and "app/src/shared.rs:1:1" in pk.read_text(), "the shared file's error goes to its owner", p)

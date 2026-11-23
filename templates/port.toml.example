@@ -70,6 +70,8 @@ ui_dirs = ["crates/ui-egui/src"]              # REQUIRED: UI source dirs to inve
 # warm_check_s = 120                         # measured in phase 0: warm compile-gate of the app after a one-file change
 # full_run_s = 60                            # measured in phase 0: one full test-run --app, build warm
 # fw_trial_s = 90                            # measured in phase 0: slowest warm cl test of a changed framework crate
+# pool_size = 3                              # set in phase 0 from `tools/build-pool size`; build slots `build-pool make` adds
+# pool_dir = "{work.trees}/pool"
 
 [pipeline]
 # batch_runner = "swarm"                      # swarm (claude CLI only) or workflow
@@ -82,6 +84,7 @@ ui_dirs = ["crates/ui-egui/src"]              # REQUIRED: UI source dirs to inve
 # agent_continue_rounds = 3
 # plancheck_max_turns = 14
 # fix_max_turns = 40
+# fixer_calls = 150                          # call budget per fixer round; fixer jobs get 1.3 times this many turns
 # lookup_tools = "Read,Grep,Glob,Bash(git grep:*),Bash(git show:*),Bash(git ls-files:*)"
 # quota_command = ""                          # prints the 5-hour window use in percent; empty: never wait
 # quota_cap = 90
@@ -124,7 +127,7 @@ ui_dirs = ["crates/ui-egui/src"]              # REQUIRED: UI source dirs to inve
 # fix_retry = "opus"
 # compile_fix = "sonnet"
 # triage = "sonnet"
-# red_fixer = "sonnet"
+# red_fixer = ""                              # empty: opus in fixer mode build, sonnet in code-only
 # red_fixer_framework = "opus"
 
 # Areas are chosen in phase 1 from the inventory. Set ids are <id>-w<n>; contract ids <code>.<Kind><n>.

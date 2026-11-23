@@ -217,6 +217,12 @@ KEYS: list[Key] = [
       "`[workspace.metadata.cl] test_threads`."),
     K("build.target_dir", "", "path", "codemod compile-gate test-run",
       "CARGO_TARGET_DIR for the integration trees. Empty: cl's default (`<worktree>-target` when it exists)."),
+    K("build.pool_size", None, "int", "build-pool",
+      "Build slots `build-pool make` creates: the smaller of free RAM over the measured build peak and free disk "
+      "over the integration target dir's size, set in phase 0 (`build-pool size`). Unset: `make` needs N."),
+    K("build.pool_dir", "{work.trees}/pool", "path", "build-pool",
+      "Where the build pool's slots live: `<k>/fw` and `<k>/app/tree`, each with its `-target` dir beside it, and "
+      "`<k>/app/.cargo/config.toml` pointing the app tree at the slot's framework tree."),
     K("build.warm_check_s", None, "int", "cycle render-prompt",
       "Seconds of a warm `compile-gate` of the app after a one-file change, measured in phase 0. With "
       "build.full_run_s it sets the fixer mode when pipeline.fixer_mode is `auto`. Unset: not measured."),
@@ -243,6 +249,10 @@ KEYS: list[Key] = [
     K("pipeline.lookup_tools", "Read,Grep,Glob,Bash(git grep:*),Bash(git show:*),Bash(git ls-files:*),Bash(track:*)", "str",
       "port-set swarm.py", "Tools a one-shot writer or plan check may use to look things up."),
     K("pipeline.job_max_turns", 300, "int", "swarm.py", "Turn limit of one swarm.py job."),
+    K("pipeline.fixer_calls", 150, "int", "swarm.py cycle prompts",
+      "Tool-call budget of one compile or red fixer round, stated in its prompt and packet. swarm.py gives jobs of the "
+      "fixer roles (`compile_fix`, `red_fixer`, `red_fixer_framework`) 1.3 times this many turns.",
+      placeholder="FIXER_CALLS"),
     K("pipeline.quota_command", "", "str", "run-batch swarm.py",
       "Command printing the plan's current 5-hour window use as a percent. Empty: never wait on quota."),
     K("pipeline.quota_cap", 90, "int", "run-batch swarm.py", "Start no new job while quota_command reports at or above this."),
@@ -298,7 +308,9 @@ KEYS: list[Key] = [
     K("models.fix_retry", "opus", "str", "fix-batch", "Fix of a set that failed twice."),
     K("models.compile_fix", "sonnet", "str", "swarm.py", "Phase 6 compile-fix groups."),
     K("models.triage", "sonnet", "str", "swarm.py", "Phase 7 test triage; confirm by calibration before a sweep."),
-    K("models.red_fixer", "sonnet", "str", "swarm.py", "Phase 7 red-round fixer."),
+    K("models.red_fixer", "", "str", "swarm.py cycle",
+      "Phase 7 red-round fixer. Empty: `opus` in the fixer mode `build`, `sonnet` in `code-only` (Config.model).",
+      default_doc="`opus` in build mode, `sonnet` in code-only"),
     K("models.red_fixer_framework", "opus", "str", "swarm.py", "Phase 7 fixer whose failures have a framework cause."),
 
 
@@ -544,6 +556,18 @@ class Config:
 
     def code_of(self, area_id: str) -> str:
         return self.area(area_id)["code"]
+
+    # ---- models
+    def model(self, role: str | None) -> str:
+        """The model of a job role: models.<role>, else models.default. An empty models.red_fixer follows the fixer
+        mode: opus in `build`, sonnet in `code-only`."""
+        if role and f"models.{role}" in BY_PATH:
+            v = self.get(f"models.{role}")
+            if v:
+                return v
+            if role == "red_fixer":
+                return "opus" if self.fixer_mode() == "build" else "sonnet"
+        return self.get("models.default")
 
     # ---- fixer mode
     def fixer_mode(self) -> str:

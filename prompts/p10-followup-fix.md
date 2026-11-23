@@ -53,7 +53,7 @@ you found. If the fix needs a design choice that is not made yet: "Stop and repo
 
 ## When to stop
 Stop, commit what is done and hand back when:
-- you reach about <N, at most 150> tool calls;
+- you reach about <N, at most {{FIXER_CALLS}}> tool calls;
 - a second distinct problem appears (another failing leg, another issue): report it, do not fix it;
 - the cause lies outside the goal or needs a design choice the brief does not make;
 - the build tree is missing, busy or cold.

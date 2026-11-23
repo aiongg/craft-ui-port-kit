@@ -27,7 +27,7 @@ log=$sets/area-$name.log
 export TOOLS sets trees sheets files_over round_turns rounds run_turns log
 
 one() {
-  s=$1; model=$2; d=$sets/$s
+  s=$1; model=$2; kind=${3:-default}; d=$sets/$s
   # A set whose plan check did not finish (cut by a limit, or no end line and no summary in its log) is not written.
   pcm=$d/plancheck.md
   if [ ! -f "$pcm" ] || grep -qiE 'usage limit|hit your .{0,20}limit' "$pcm" ||
@@ -36,7 +36,9 @@ one() {
   fi
   # Files rows of the sheet's "## Files" table.
   files=$(sed -n '/^## Files/,/^## /p' "$sheets/$s.md" | grep -c '^| `')
-  if [ "$files" -gt "$files_over" ]; then
+  # A shared-mechanism set (models.write_shared) always runs in agent mode: a one-shot Opus write runs out of turns
+  # far more often than an agent does, and its repair then runs on an empty reply.
+  if [ "$files" -gt "$files_over" ] || [ "$kind" = shared ]; then
     dirty=
     for t in "$trees/$s" "$trees/$s"-*; do
       [ -d "$t" ] && [ -n "$(git -C "$t" status --porcelain)" ] && dirty=1 &&
@@ -87,6 +89,6 @@ par=$(cfgr pipeline.parallel)
 count() { sed '/^[[:space:]]*$/d' "$1" | wc -l | tr -d ' '; }
 # The effective parallelism and models, stated once at the start: port.toml decides them, nothing else.
 echo "$(date -u +%H:%M) run-area $name: $(count "$shared") sets with $m_shared (models.write_shared), $(count "$default") with $m_default (models.write); $n at a time ($([ -n "${4:-}" ] && echo "command line; pipeline.parallel is $par" || echo pipeline.parallel))" | tee -a "$log"
-{ sed "/^[[:space:]]*\$/d; s/\$/ $m_shared/" "$shared"; sed "/^[[:space:]]*\$/d; s/\$/ $m_default/" "$default"; } |
-  xargs -r -P "$n" -L1 bash -c 'grep -q "^[0-9:]* $0 (" "$log" 2>/dev/null && exit 0; mkdir -p "$sets/$0"; one "$0" "$1" | tee -a "$log"'
+{ sed "/^[[:space:]]*\$/d; s/\$/ $m_shared shared/" "$shared"; sed "/^[[:space:]]*\$/d; s/\$/ $m_default default/" "$default"; } |
+  xargs -r -P "$n" -L1 bash -c 'grep -q "^[0-9:]* $0 (" "$log" 2>/dev/null && exit 0; mkdir -p "$sets/$0"; one "$0" "$1" "$2" | tee -a "$log"'
 echo "$(date -u +%H:%M) area $name done" | tee -a "$log"

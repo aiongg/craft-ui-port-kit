@@ -30,8 +30,8 @@ A writer that needs an item another set is writing at the same time codes agains
 
 | Bucket | Which sets | Command |
 |---|---|---|
-| One-shot | Sets with at most `pipeline.agent_files_over` Files rows | `port-set run` |
-| Agent mode | Sets with more Files rows; one-shot sets that came back BLOCKED | `port-set agent`, in rounds of `pipeline.agent_round_turns` turns; `--continue` while `check.md` names a scripted error or the last round ran out of turns, at most `pipeline.agent_continue_rounds` rounds |
+| One-shot | Sets with at most `pipeline.agent_files_over` Files rows, except `models.write_shared` sets | `port-set run` |
+| Agent mode | Sets with more Files rows; every `models.write_shared` set at any size (a one-shot Opus write runs out of turns far more often); one-shot sets that came back BLOCKED | `port-set agent`, in rounds of `pipeline.agent_round_turns` turns; `--continue` while `check.md` names a scripted error or the last round ran out of turns, at most `pipeline.agent_continue_rounds` rounds |
 
 | Model | Which sets |
 |---|---|

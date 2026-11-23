@@ -222,6 +222,8 @@ def cmd_run(a) -> Outcome:
     else:
         reply = claude(bundle, sheet, model, READ_TOOLS, turns, "write", extra=lookup)
     (od / "edits-1.md").write_text(reply.text)
+    if reply.out_of_turns and not reply.text.strip():   # nothing to apply or repair: a repair would run on an empty reply
+        return end_state(sheet, "write", out_of_turns=True)
     if (reason := blocked(sheet, reply.text)) is not None:
         return end_state(sheet, "write", reason=reason)
     report, fails = apply_edits(sheet, reply.text)
@@ -241,6 +243,8 @@ def cmd_run(a) -> Outcome:
                   + ("\n\n".join(errs) or "none") + "\n\n" + texts)
         reply = claude(prompt, sheet, model, READ_TOOLS, turns, f"repair-{n}", extra=lookup)
         (od / f"edits-{n + 1}.md").write_text(reply.text)
+        if reply.out_of_turns and not reply.text.strip():
+            return end_state(sheet, f"repair {n}", out_of_turns=True)
         if (reason := blocked(sheet, reply.text)) is not None:
             return end_state(sheet, f"repair {n}", reason=reason)
         report, fails = apply_edits(sheet, reply.text)

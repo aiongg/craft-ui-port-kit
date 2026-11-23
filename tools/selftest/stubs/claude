@@ -3,7 +3,8 @@
 
 Each call is appended to <STUB_CLAUDE_DIR>/calls.jsonl as {"argv": [...], "prompt": stdin, "cwd": ...}. The reply
 is a result object whose session_id is the `--resume` value when given, else `session-<n>` for the n-th call; its
-result text is `reply <n>`, or the content of <STUB_CLAUDE_DIR>/reply.txt when that exists. When
+result text is `reply <n>`, or the content of <STUB_CLAUDE_DIR>/reply.txt when that exists; the subtype is
+"success", or the content of <STUB_CLAUDE_DIR>/subtype.txt (`error_max_turns` for an out-of-turns call). When
 <STUB_CLAUDE_DIR>/context.txt holds a number, the call also writes the session's transcript where Claude Code keeps
 it (<CLAUDE_CONFIG_DIR>/projects/<encoded cwd>/<session id>.jsonl): one assistant record whose usage adds up to that
 number of context tokens.
@@ -24,7 +25,8 @@ with open(calls, "a") as f:
     f.write(json.dumps({"argv": argv, "prompt": prompt, "cwd": os.getcwd()}) + "\n")
 sid = argv[argv.index("--resume") + 1] if "--resume" in argv else f"session-{n}"
 reply = (d / "reply.txt").read_text() if (d / "reply.txt").exists() else f"reply {n}"
-print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "session_id": sid, "result": reply,
+subtype = (d / "subtype.txt").read_text().strip() if (d / "subtype.txt").exists() else "success"
+print(json.dumps({"type": "result", "subtype": subtype, "is_error": False, "session_id": sid, "result": reply,
                   "num_turns": 1, "total_cost_usd": 0.01, "usage": {"input_tokens": 1, "output_tokens": 1}}))
 ctx = d / "context.txt"
 if ctx.exists() and os.environ.get("CLAUDE_CONFIG_DIR"):

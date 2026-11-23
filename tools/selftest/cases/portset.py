@@ -4,7 +4,7 @@ reach the bundle and the stub audit, and contract ids the pattern misses fail th
 import os
 import sys
 
-from lib import TOOLS, check, git
+from lib import STUBS, TOOLS, check, git
 
 
 class FakeSheet:
@@ -194,3 +194,32 @@ def case_commit_failure_stops(s):
         raise AssertionError("a failing commit must stop the command")
     except SystemExit as e:
         check("hook says no" in str(e.code), f"git's error text is printed: {e.code}")
+
+
+def case_out_of_turns_write_skips_repairs(s):
+    import types
+    portset(s)
+    from portkit.portset import write
+    t = s.tree("fw", {"a.txt": "a\n"})
+    sh = FakeSheet("set-e", t, [])
+    sh.repos = lambda: ["fw"]
+    write.Sheet = lambda sid: sh
+    write.need_trees = lambda sheet: None
+    write.build_bundle = lambda sheet: "bundle"
+    (s.work / "sets" / "set-e").mkdir(parents=True)
+    (s.work / "sets" / "set-e" / "base-fw").write_text(git(t, "rev-parse", "HEAD"))
+    (s.root / "claude").mkdir()
+    (s.root / "claude" / "reply.txt").write_text("")
+    (s.root / "claude" / "subtype.txt").write_text("error_max_turns")
+    a = types.SimpleNamespace(set="set-e", model="m", max_turns=3, repairs=2, skip_plancheck=True)
+    (s.root / "bin").mkdir()
+    (s.root / "bin" / "claude").symlink_to(STUBS / "claude")
+    saved = dict(os.environ)
+    os.environ.update(PATH=f"{s.root / 'bin'}:{os.environ['PATH']}", STUB_CLAUDE_DIR=str(s.root / "claude"))
+    try:
+        out = write.cmd_run(a)
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+    check(not out.ok and "OUT OF TURNS" in out.text, f"ends OUT OF TURNS: {out}")
+    check(not (s.work / "sets" / "set-e" / "repair-1.json").exists(), "no repair call ran")

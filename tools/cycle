@@ -508,7 +508,8 @@ class Cycle:
                 j = json.loads(r.stdout.strip().splitlines()[-1])
             except (ValueError, IndexError):
                 j = {"ok": False, "error": f"exit {r.returncode}: {(r.stderr or r.stdout).strip()[-300:]}"}
-            return task, {"ok": bool(j.get("ok")), "error": j.get("error"), "cost_usd": j.get("cost_usd")}
+            return task, {"ok": bool(j.get("ok")), "error": j.get("error"), "cost_usd": j.get("cost_usd"),
+                          "fresh": bool(j.get("fresh"))}
 
         with ThreadPoolExecutor(max(1, int(self.cfg.get("pipeline.parallel")))) as ex:
             sent = dict(ex.map(one, todo))
@@ -663,6 +664,9 @@ def report(c: Cycle, code: int) -> str:
             L += ["", f"Errors and findings no fixer owns ({len(un)}): the lead groups them or fixes them.", "", "```", *un[:80], "```"]
     if o.get("stalled"):
         L += ["", f"Stalled fixers: {', '.join(o['stalled'])}. Read their logs before the next cycle."]
+    fresh = sorted(t for t, v in (o.get("sent") or {}).items() if v.get("fresh"))
+    if fresh:
+        L += ["", f"Fresh sessions (context past pipeline.follow_up_max_context): {', '.join(fresh)}."]
     if o.get("notes"):
         L += ["", "## Notes", ""] + [f"- {n}" for n in o["notes"]]
     return "\n".join(L) + "\n"

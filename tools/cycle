@@ -1,0 +1,698 @@
+#!/usr/bin/env python3
+"""cycle: one build-and-test cycle of phases 6 and 7 in one command: merge, compile, format and lint, test, look,
+cut each fixer's packet, send it to the same fixer, record the cycle.
+
+usage: cycle LABEL [--fixers FILE] [--tracks SRC] [--groups DIR] [--batch B] [--area A]...
+             [--no-merge] [--no-lint] [--no-tests] [--no-look] [--no-send] [--dry-run] [--config PORT.TOML]
+
+  LABEL          the cycle's run label (`<batch>-run-<n>`): the app run is LABEL, the framework trials LABEL-fw, the
+                 compile LABEL-compile, all under work.runs.
+  --fixers FILE  the round's fixers, one per line `TASK [fw:BRANCH] [app:BRANCH]` (# comments and blank lines
+                 skipped). TASK is the fixer's board task and swarm.py task; for a red fixer it is also its track id
+                 in the tracks file. A line with no branch means `red/<TASK>` in each integration tree that has it.
+  --tracks SRC   which tests each red fixer owns (groups.md, a split-failures.py directory or a TSV), for
+                 compare-runs.py and diag-cut.py.
+  --groups DIR   split-errors.py output: a compile or lint error that no fixer's branch touched goes to the group
+                 whose `<stem>.errors` file names its file, task `cfix-<stem>`.
+                 --fixers, --tracks and --groups default to the values of the previous cycle (its cycle.json).
+  --batch B, --area A   the batch and areas the cycle serves. When they differ from the board's, cycle records
+                 them (`track phase <current phase> --batch B --area A`). The areas pick the look panels.
+  --no-merge, --no-lint, --no-tests, --no-look, --no-send   leave that step out.
+  --dry-run      print the steps and their commands with the resolved fixers, branches, crates and fixer mode; run
+                 nothing.
+
+Steps:
+  1. merge   Refuses (exit 2) when an integration tree has uncommitted changes. `git merge --no-ff --no-edit` of
+             each fixer branch into framework.integration (fw:) or app.integration (app:). On a conflict it aborts
+             that merge, merges nothing more and stops (exit 3), naming the branch and the files.
+  2. compile `compile-gate LABEL-compile`. Its exit 2 stops the cycle.
+  3. lint    Only after a clean compile, on the crates that own files changed since framework.writing_base and
+             app.writing_base (crates under a `vendor/` directory left out): `cl cargo fmt -p <crate>...`, committed
+             as one `cycle LABEL: cargo fmt` commit per tree when it changed anything; then clippy with warnings
+             denied and the doc build with RUSTDOCFLAGS="-D warnings", through `cl cargo` on cl's own selection
+             (framework: the crates plus feature-root with the `cl features` of each crate; app: every package of
+             `[workspace.metadata.cl] selection`), so no second feature set builds. A finding in a crate that did not
+             change is listed and not counted.
+  4. tests   Only after a clean compile: `test-run LABEL-fw --fw` and `test-run LABEL --app`, then
+             `compare-runs.py LABEL --tracks SRC --out <run>/tracks.md` and `diag-cut.py LABEL --tracks SRC`.
+  5. look    When the app half compiled and look.driver is set: `cl <look.port_build>` in app.integration, then
+             `look pair` for each states file with a state of one of the cycle's areas (all of them when no area
+             is known). Skipped, and said so, while look.port_build is unset.
+  6. packets One file per fixer in <work.runs>/LABEL/followup/<TASK>.md: a header with the cycle and the fixer mode
+             (pipeline.fixer_mode, `auto` decided by build.warm_check_s and build.full_run_s), the fixer's diag-cut
+             packet, and the compile errors and lint findings in files its merged commits changed. A fixer with no
+             failing test, no finding and no `DIAG ` line left on its branches gets no packet; its task goes to done.
+  7. send    `swarm.py --follow-up TASK <packet>` for each packet, pipeline.parallel at a time, and waits for every
+             fixer to hand back, at most pipeline.followup_timeout_min minutes each; a fixer past it is stalled.
+             Nothing is sent while the board is paused.
+  8. record  <work.runs>/LABEL/report.md and cycle.json, one row in <work.runs>/cycles.tsv, one `cycle` event, and
+             in phase 6 after a clean compile `track phase 7` (the phase gate decides; a refusal is listed).
+
+Result: cycle.json, and the last stdout line
+  cycle LABEL: exit N; merged k/n; compile: ...; lint: ...; app: ...; look: ...; packets: ...; mode M; T s
+cycles.tsv columns: label, start (UTC), phase, batch, area, mode, merge_s, compile_s, lint_s, test_s, look_s,
+send_s, total_s, gap_s (start minus the previous cycle's end), errors (compile errors plus counted lint findings),
+failing (app tests failing outside work.baseline_failures), exit.
+
+Exit status: 0 green (compiles, lint clean, no failing test outside the baseline, no stalled fixer), 1 work left,
+2 a tool failure or a dirty integration tree, 3 a merge conflict.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+import time
+import tomllib
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from portkit import config, gates, track  # noqa: E402
+from portkit import track as T  # noqa: E402
+from portkit.testlog import load_tracks  # noqa: E402
+
+TOOLS = Path(__file__).resolve().parent
+REPOS = {"fw": "framework.integration", "app": "app.integration"}
+BASES = {"fw": "framework.writing_base", "app": "app.writing_base"}
+TSV_COLS = ("label", "start", "phase", "batch", "area", "mode", "merge_s", "compile_s", "lint_s", "test_s", "look_s",
+            "send_s", "total_s", "gap_s", "errors", "failing", "exit")
+EXIT_GREEN, EXIT_LEFT, EXIT_TOOL, EXIT_CONFLICT = 0, 1, 2, 3
+
+
+class Stop(Exception):
+    def __init__(self, code: int, why: str):
+        super().__init__(why)
+        self.code, self.why = code, why
+
+
+def git(tree: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+    r = subprocess.run(["git", "-C", str(tree), *args], capture_output=True, text=True)
+    if check and r.returncode != 0:
+        raise Stop(EXIT_TOOL, f"git {' '.join(args)} in {tree}: {r.stderr.strip()[:300]}")
+    return r
+
+
+def utc(t: float) -> str:
+    return datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+class Cycle:
+    def __init__(self, cfg, a):
+        self.cfg, self.a = cfg, a
+        self.runs = cfg.path("work.runs")
+        self.rd = gates.run_dir(cfg, a.label)
+        self.env = gates.cl_env(cfg)
+        self.trees = {r: cfg.path(k) for r, k in REPOS.items() if cfg.get(k)}
+        self.mode = cfg.fixer_mode()
+        self.t0 = time.time()
+        self.secs: dict[str, float] = {}
+        self.prev = self.previous()
+        self.out: dict = {"label": a.label, "start": utc(self.t0), "mode": self.mode, "notes": []}
+
+    # ------------------------------------------------------------ inputs
+    def previous(self) -> dict | None:
+        f = self.runs / "cycles.tsv"
+        if not f.is_file():
+            return None
+        rows = [l.split("\t") for l in f.read_text().splitlines()[1:] if l.strip()]
+        rows = [r for r in rows if r and r[0] != self.a.label]
+        if not rows:
+            return None
+        try:
+            return json.loads((self.runs / rows[-1][0] / "cycle.json").read_text())
+        except (OSError, ValueError):
+            return None
+
+    def inherit(self, name: str) -> str | None:
+        v = getattr(self.a, name)
+        if v:
+            return str(Path(v).resolve())
+        return (self.prev or {}).get("inputs", {}).get(name)
+
+    def fixers(self) -> list[dict]:
+        f = self.inherit("fixers")
+        if not f:
+            return []
+        out = []
+        for n, line in enumerate(Path(f).read_text().splitlines(), 1):
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            task, *specs = line.split()
+            T.check_task(task)
+            branches = {}
+            for sp in specs:
+                repo, sep, br = sp.partition(":")
+                if not sep or repo not in REPOS or not br:
+                    raise Stop(EXIT_TOOL, f"{f}:{n}: branch {sp!r}: write fw:BRANCH or app:BRANCH")
+                branches[repo] = br
+            if not specs:
+                for repo, tree in self.trees.items():
+                    if git(tree, "rev-parse", "--verify", "-q", f"refs/heads/red/{task}", check=False).returncode == 0:
+                        branches[repo] = f"red/{task}"
+            out.append({"task": task, "branches": branches})
+        return out
+
+    def board(self):
+        try:
+            s = T.open_store(self.a.config)
+            return s.state() if s else None
+        except Exception as e:   # the cycle's work does not depend on the board
+            self.out["notes"].append(f"board not read: {e}")
+            return None
+
+    # ------------------------------------------------------------ helpers
+    def timed(self, step: str, fn, *args):
+        t = time.time()
+        try:
+            return fn(*args)
+        finally:
+            self.secs[step] = self.secs.get(step, 0) + time.time() - t
+
+    def tool(self, name: str, *args: str, log: str) -> int:
+        cmd = ([sys.executable, "-I", str(TOOLS / name)] if name.endswith(".py") else [str(TOOLS / name)]) + list(args)
+        with open(self.rd / log, "wb") as f:
+            rc = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT).returncode
+        last = (self.rd / log).read_text(errors="replace").strip().splitlines()
+        print(f"{name}: exit {rc}" + (f": {last[-1][:300]}" if last else ""), flush=True)
+        return rc
+
+    def changed_crates(self, repo: str) -> list[str]:
+        tree, base = self.trees.get(repo), self.cfg.get(BASES[repo])
+        if not tree or not base:
+            return []
+        crates = set()
+        for f in gates.changed_files(tree, base):
+            if "/vendor/" in "/" + f:
+                continue
+            p = gates.package_of(tree, f)
+            if p:
+                crates.add(p)
+        return sorted(crates)
+
+    def selection(self) -> list[str]:
+        m = self.trees["app"] / "Cargo.toml"
+        try:
+            return list(tomllib.loads(m.read_text())["workspace"]["metadata"]["cl"]["selection"])
+        except (OSError, KeyError, tomllib.TOMLDecodeError) as e:
+            raise Stop(EXIT_TOOL, f"{m}: no [workspace.metadata.cl] selection ({e})")
+
+    # ------------------------------------------------------------ 1. merge
+    def merge(self, fixers: list[dict]) -> list[dict]:
+        for repo, tree in self.trees.items():
+            if git(tree, "status", "--porcelain", "-uno").stdout.strip():
+                raise Stop(EXIT_TOOL, f"{REPOS[repo]} ({tree}) has uncommitted changes; commit or remove them first")
+        done = []
+        for fx in fixers:
+            for repo, br in fx["branches"].items():
+                tree = self.trees[repo]
+                pre = git(tree, "rev-parse", "HEAD").stdout.strip()
+                files = git(tree, "diff", "--name-only", f"{pre}...{br}").stdout.split()
+                r = git(tree, "merge", "--no-ff", "--no-edit", "-m", f"cycle {self.a.label}: merge {br}", br, check=False)
+                if r.returncode != 0:
+                    conflicted = git(tree, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split()
+                    git(tree, "merge", "--abort", check=False)
+                    done.append({"task": fx["task"], "repo": repo, "branch": br, "conflict": conflicted or ["?"]})
+                    self.out["merged"] = done
+                    raise Stop(EXIT_CONFLICT, f"merge of {br} into {REPOS[repo]} conflicts in "
+                                              f"{', '.join(conflicted) or r.stderr.strip()[:200]}; resolve it on the "
+                                              f"integration branch, then run the cycle again")
+                head = git(tree, "rev-parse", "HEAD").stdout.strip()
+                done.append({"task": fx["task"], "repo": repo, "branch": br, "sha": head, "files": files,
+                             "new": head != pre})
+            track.event("merge", f"cycle {self.a.label}: merged {', '.join(fx['branches'].values()) or 'nothing'}",
+                        task=fx["task"])
+        return done
+
+    def touched(self, merged: list[dict]) -> dict[str, dict[str, set]]:
+        """{task: {repo: files its merged commits changed}}, this cycle's plus the earlier cycles'."""
+        out: dict[str, dict[str, set]] = {}
+        for task, repos in ((self.prev or {}).get("touched") or {}).items():
+            for repo, files in repos.items():
+                out.setdefault(task, {}).setdefault(repo, set()).update(files)
+        for m in merged:
+            out.setdefault(m["task"], {}).setdefault(m["repo"], set()).update(m.get("files") or [])
+        return out
+
+    # ------------------------------------------------------------ 2. compile
+    def compile(self) -> dict:
+        rc = self.tool("compile-gate", f"{self.a.label}-compile", log="compile.log")
+        try:
+            s = json.loads((self.runs / f"{self.a.label}-compile" / "summary.json").read_text())
+        except (OSError, ValueError):
+            raise Stop(EXIT_TOOL, f"compile-gate exit {rc} and no summary.json")
+        if rc == 2:
+            raise Stop(EXIT_TOOL, f"compile-gate: tool failure (exit 2); see {self.rd / 'compile.log'}")
+        fw, app = s.get("framework") or {}, s.get("app") or {}
+        d = self.runs / f"{self.a.label}-compile"
+        errs = {"fw": _lines(d / "fw.errors"), "app": _lines(d / "app.errors")}
+        return {"exit": rc, "fw_errors": fw.get("errors", 0), "app_status": app.get("status"),
+                "app_errors": app.get("errors", 0), "errors": errs}
+
+    # ------------------------------------------------------------ 3. lint
+    def lint(self) -> dict:
+        res = {"fmt": {}, "findings": {}, "outside": {}, "commands": []}
+        for repo in self.trees:
+            crates = self.changed_crates(repo)
+            if not crates:
+                continue
+            tree = self.trees[repo]
+            self.run_cl(tree, ["cargo", "fmt", *[x for c in crates for x in ("-p", c)]], f"lint-{repo}-fmt.log", res)
+            if git(tree, "status", "--porcelain", "-uno").stdout.strip():
+                git(tree, "commit", "-q", "-a", "-m", f"cycle {self.a.label}: cargo fmt")
+                res["fmt"][repo] = git(tree, "rev-parse", "HEAD").stdout.strip()
+            if repo == "fw":
+                feats = []
+                for c in crates:
+                    r = subprocess.run(gates.cl(self.cfg, ["features", c]), cwd=tree, env=self.env, capture_output=True,
+                                       text=True)
+                    feats += [f for f in r.stdout.strip().split(",") if f]
+                pk = [x for c in crates + ["feature-root"] for x in ("-p", c)] + (["--features", ",".join(feats)] if feats else [])
+                clippy = ["cargo", "clippy", *pk, "--tests"]
+                doc = ["cargo", "doc", "--no-deps", *pk]
+            else:
+                pk = [x for c in self.selection() for x in ("-p", c)]
+                clippy = ["cargo", "clippy", "--lib", "--tests", *pk]
+                doc = ["cargo", "doc", "--no-deps", *pk]
+            common = ["--keep-going", "--message-format", "short"]
+            found = []
+            for kind, args, extra in (("clippy", clippy + common + ["--", "-D", "warnings"], {}),
+                                      ("doc", doc + common, {"RUSTDOCFLAGS": "-D warnings"})):
+                log = self.rd / f"lint-{repo}-{kind}.log"
+                rc = self.run_cl(tree, args, log.name, res, extra)
+                lines = gates.error_lines(log)
+                if rc != 0 and not lines:
+                    raise Stop(EXIT_TOOL, f"{kind} in {REPOS[repo]}: exit {rc} with no error line; see {log}")
+                found += [f"{kind}: {l}" for l in lines]
+            mine = [f for f in found if gates.package_of(tree, f.split(": ", 1)[1].split(":", 1)[0]) in crates]
+            res["findings"][repo] = mine
+            res["outside"][repo] = [f for f in found if f not in mine]
+        res["count"] = sum(len(v) for v in res["findings"].values())
+        return res
+
+    def run_cl(self, tree: Path, args: list[str], log: str, res: dict, extra: dict | None = None) -> int:
+        res["commands"].append("cl " + " ".join(shlex.quote(x) for x in args))
+        f = self.rd / log
+        f.write_bytes(b"")
+        return gates.run_logged(gates.cl(self.cfg, args), tree, f, {**self.env, **(extra or {})})
+
+    # ------------------------------------------------------------ 4. tests
+    def tests(self, tracks: str | None) -> dict:
+        res = {}
+        for part, args in (("fw", [f"{self.a.label}-fw", "--fw"]), ("app", [self.a.label, "--app"])):
+            if part not in self.trees:
+                continue
+            rc = self.tool("test-run", *args, log=f"test-{part}.log")
+            if rc == 2:
+                raise Stop(EXIT_TOOL, f"test-run {args[0]}: tool failure (exit 2); see {self.rd / f'test-{part}.log'}")
+            try:
+                s = json.loads((self.runs / args[0] / "summary.json").read_text())
+            except (OSError, ValueError):
+                raise Stop(EXIT_TOOL, f"test-run {args[0]}: no summary.json")
+            failing = sorted({n for p in s.get("parts", []) for n in p.get("failing", [])})
+            bad_bins = sorted(f"{p['part']} {k}" for p in s.get("parts", []) for k, b in (p.get("binaries") or {}).items()
+                              if b.get("status") in ("crashed", "not run"))
+            statuses = sorted({p.get("status") for p in s.get("parts", [])})
+            res[part] = {"exit": rc, "failing": failing, "bad_binaries": bad_bins, "statuses": statuses,
+                         "passed": sum(p.get("passed", 0) for p in s.get("parts", []))}
+        base = set(_lines(self.cfg.path("work.baseline_failures"))) if self.cfg.get("work.baseline_failures") else set()
+        app = res.get("app", {"failing": []})
+        app["new_vs_baseline"] = [n for n in app["failing"] if n not in base]
+        before = set(((self.prev or {}).get("tests") or {}).get("app", {}).get("failing", []))
+        app["fixed"] = sorted(before - set(app["failing"])) if self.prev else []
+        app["new"] = sorted(set(app["failing"]) - before) if self.prev else []
+        if tracks and "app" in self.trees:
+            self.tool("compare-runs.py", self.a.label, "--tracks", tracks, "--out", str(self.rd / "tracks.md"),
+                      log="compare.log")
+            self.tool("diag-cut.py", self.a.label, "--tracks", tracks, log="diag-cut.log")
+        return res
+
+    # ------------------------------------------------------------ 5. look
+    def look(self, areas: list[str]) -> dict:
+        if not self.cfg.get("look.driver"):
+            return {"status": "skipped", "why": "look.driver unset"}
+        args = self.cfg.get("look.port_build")
+        if not args:
+            return {"status": "skipped", "why": "look.port_build unset"}
+        log = self.rd / "look-build.log"
+        log.write_bytes(b"")
+        rc = gates.run_logged(gates.cl(self.cfg, shlex.split(args)), self.trees["app"], log, self.env)
+        if rc != 0:
+            return {"status": "build-failed", "why": f"cl {args}: exit {rc}", "log": str(log)}
+        panels = []
+        d = self.cfg.path("look.states_dir")
+        for f in sorted(d.glob("*.json")) if d.is_dir() else []:
+            try:
+                sts = json.loads(f.read_text()).get("states") or []
+            except (OSError, ValueError):
+                sts = []
+            if not areas or any(str(st.get("map", "")).split(" ")[0] in areas for st in sts if isinstance(st, dict)):
+                panels.append(f.stem)
+        if not panels:
+            return {"status": "skipped", "why": f"no states file in {d}" + (f" for {', '.join(areas)}" if areas else "")}
+        rc = self.tool("look", "pair", *panels, log="look.log")
+        return {"status": "ok" if rc == 0 else "failed", "exit": rc, "panels": panels}
+
+    # ------------------------------------------------------------ 6. packets
+    def packets(self, fixers: list[dict], touched: dict, compile_res: dict | None, lint_res: dict | None) -> dict:
+        findings: list[tuple[str, str]] = []
+        for repo, errs in ((compile_res or {}).get("errors") or {}).items():
+            findings += [(repo, f"compile: {e}") for e in errs]
+        for repo, fs in ((lint_res or {}).get("findings") or {}).items():
+            findings += [(repo, f) for f in fs]
+        groups = self.groups()
+        owned: dict[str, list[str]] = {}
+        unowned = []
+        for repo, line in findings:
+            path = line.split(": ", 1)[1].split(":", 1)[0]
+            task = next((t for t, rs in touched.items() if path in rs.get(repo, set())), None) \
+                or next((t for t, fs in groups.items() if path in fs), None)
+            if task:
+                owned.setdefault(task, []).append(f"{repo}: {line}")
+            else:
+                unowned.append(f"{repo}: {line}")
+        diag_dir = self.rd / "packets"
+        out_dir = self.rd / "followup"
+        out_dir.mkdir(exist_ok=True)
+        tasks = [f["task"] for f in fixers] + [t for t in owned if t not in {f["task"] for f in fixers}]
+        branches = {f["task"]: f["branches"] for f in fixers}
+        result = {}
+        for task in tasks:
+            pk = diag_dir / f"{task}.md"
+            failing = _failing_in_packet(pk) if pk.is_file() else 0
+            diag_left = any(git(self.trees[r], "grep", "-q", "DIAG ", br, check=False).returncode == 0
+                            for r, br in branches.get(task, {}).items() if r in self.trees)
+            mine = owned.get(task, [])
+            if not failing and not mine and not diag_left:
+                result[task] = {"packet": None, "failing": 0, "findings": 0}
+                track.status(task, "done", f"cycle {self.a.label}: nothing left on its list")
+                continue
+            L = [f"# Cycle {self.a.label}: your next round", "",
+                 f"Fixer mode for this round: `{self.mode}`. Follow your prompt's section for this mode, on the same "
+                 f"branches as before, and hand back the same way.", ""]
+            if mine:
+                L += [f"## Compile errors and lint findings in files your commits changed ({len(mine)})", "", "```",
+                      *mine, "```", ""]
+            if pk.is_file():
+                L += [pk.read_text()]
+            elif diag_left:
+                L += ["Every test of your list passes. Remove the `DIAG ` prints you left, in one commit."]
+            f = out_dir / f"{task}.md"
+            f.write_text("\n".join(L).rstrip() + "\n")
+            result[task] = {"packet": str(f), "failing": failing, "findings": len(mine)}
+        result["_unowned"] = unowned
+        return result
+
+    def groups(self) -> dict[str, set]:
+        d = self.inherit("groups")
+        if not d or not Path(d).is_dir():
+            return {}
+        return {f"cfix-{f.stem}": {l.split(":", 1)[0] for l in _lines(f)} for f in sorted(Path(d).glob("*.errors"))}
+
+    # ------------------------------------------------------------ 7. send
+    def send(self, packets: dict) -> tuple[dict, list[str]]:
+        todo = [(t, p["packet"]) for t, p in packets.items() if not t.startswith("_") and p.get("packet")]
+        if not todo:
+            return {}, []
+        st = self.board()
+        if st and (st.get("paused") or {}).get("on"):
+            self.out["notes"].append("the board is paused: no packet sent; send them with swarm.py --follow-up")
+            return {t: {"ok": False, "error": "paused"} for t, _ in todo}, []
+        timeout = int(self.cfg.get("pipeline.followup_timeout_min")) * 60
+
+        def one(item):
+            task, packet = item
+            cmd = [sys.executable, "-I", str(TOOLS / "swarm.py"), "--follow-up", task, packet]
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            except subprocess.TimeoutExpired:
+                return task, {"ok": False, "error": f"stalled: no hand-back in {timeout // 60} min", "stalled": True}
+            try:
+                j = json.loads(r.stdout.strip().splitlines()[-1])
+            except (ValueError, IndexError):
+                j = {"ok": False, "error": f"exit {r.returncode}: {(r.stderr or r.stdout).strip()[-300:]}"}
+            return task, {"ok": bool(j.get("ok")), "error": j.get("error"), "cost_usd": j.get("cost_usd")}
+
+        with ThreadPoolExecutor(max(1, int(self.cfg.get("pipeline.parallel")))) as ex:
+            sent = dict(ex.map(one, todo))
+        return sent, sorted(t for t, v in sent.items() if v.get("stalled"))
+
+    # ------------------------------------------------------------ 8. board and records
+    def phase(self, st: dict | None, batch: str | None, areas: list[str], compiled: bool) -> list[str]:
+        if st is None:
+            return []
+        ph = st.get("phase") or {}
+        cur, notes = ph.get("n"), []
+        area = ",".join(areas) if areas else None
+        if cur is not None and ((batch and batch != ph.get("batch")) or (area and area != ph.get("area"))):
+            self.track_cmd("phase", str(cur), *(["--batch", batch] if batch else []), *(["--area", area] if area else []))
+        if cur == 6 and compiled:
+            r = self.track_cmd("phase", "7", "tests and red rounds")
+            notes.append("phase 7 recorded" if r.returncode == 0 else
+                         "phase 7 refused: " + "; ".join(l.strip("- ").strip() for l in r.stderr.splitlines()[1:-1]))
+        return notes
+
+    def track_cmd(self, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run([sys.executable, "-I", str(TOOLS / "track"), *args], capture_output=True, text=True)
+
+    def weekly(self) -> float | None:
+        cmd = self.cfg.get("pipeline.weekly_quota_command")
+        if not cmd:
+            return None
+        r = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
+        m = re.search(r"\d+(?:\.\d+)?", r.stdout)
+        return float(m.group()) if r.returncode == 0 and m else None
+
+
+def _lines(f: Path) -> list[str]:
+    try:
+        return [l.strip() for l in Path(f).read_text(errors="replace").splitlines() if l.strip()]
+    except OSError:
+        return []
+
+
+def _failing_in_packet(f: Path) -> int:
+    m = re.search(r"^(\d+) of the \d+ tests on your list still fail", f.read_text(), re.M)
+    return int(m.group(1)) if m else 0
+
+
+def summary_line(c: Cycle, code: int) -> str:
+    o = c.out
+    parts = [f"cycle {o['label']}: exit {code}"]
+    if "merged" in o:
+        ok = [m for m in o["merged"] if "conflict" not in m]
+        parts.append(f"merged {len(ok)}/{len(o['merged'])}")
+    if "compile" in o:
+        k = o["compile"]
+        parts.append("compile: ok" if k["exit"] == 0 else f"compile: {k['fw_errors']} framework, {k['app_errors']} app errors")
+    if "lint" in o:
+        parts.append(f"lint: {o['lint']['count']} findings" + (", formatted" if o["lint"]["fmt"] else ""))
+    if "tests" in o and "app" in o["tests"]:
+        t = o["tests"]["app"]
+        parts.append(f"app: {t['passed']} passed, {len(t['failing'])} failing ({len(t['new_vs_baseline'])} outside the "
+                     f"baseline; -{len(t['fixed'])} fixed, +{len(t['new'])} new)")
+    if "look" in o:
+        lk = o["look"]
+        parts.append(f"look: {lk['status']}" + (f" ({lk['why']})" if lk.get("why") else
+                                                 f" ({len(lk.get('panels', []))} panels)"))
+    if "sent" in o:
+        ok = sum(1 for v in o["sent"].values() if v.get("ok"))
+        parts.append(f"packets: {len(o['sent'])} sent ({ok} ok" + (f", stalled: {', '.join(o['stalled'])}" if o.get("stalled") else "") + ")")
+    parts.append(f"mode {o['mode']}")
+    parts.append(f"{o.get('total_s', 0):.0f} s")
+    if o.get("stop"):
+        parts.append(f"STOPPED: {o['stop']}")
+    return "; ".join(parts)
+
+
+def report(c: Cycle, code: int) -> str:
+    o = c.out
+    L = [f"# Cycle {o['label']} report", "", summary_line(c, code), "",
+         f"Started {o['start']}; phase {o.get('phase')}, batch {o.get('batch') or '-'}, area {o.get('area') or '-'}; "
+         f"fixer mode {o['mode']}.", "", "## Times", "", "| step | seconds |", "|---|---|"]
+    L += [f"| {k} | {v:.0f} |" for k, v in c.secs.items()] + [f"| total | {o.get('total_s', 0):.0f} |", ""]
+    L += ["## Merges", ""]
+    for m in o.get("merged", []):
+        L.append(f"- {m['task']}: {m['repo']} `{m['branch']}` "
+                 + (f"CONFLICT in {', '.join(m['conflict'])}" if "conflict" in m else
+                    f"-> {m['sha'][:10]}" + ("" if m.get("new") else " (nothing new)")))
+    if not o.get("merged"):
+        L.append("- none")
+    if "compile" in o:
+        k = o["compile"]
+        L += ["", "## Compile", "", f"compile-gate exit {k['exit']}: {k['fw_errors']} framework errors, app "
+              f"{k['app_status']} with {k['app_errors']} errors. Logs: {c.runs / (o['label'] + '-compile')}."]
+    if "lint" in o:
+        lt = o["lint"]
+        L += ["", "## Format and lint", ""]
+        L += [f"- formatted {r}: {sha[:10]}" for r, sha in lt["fmt"].items()]
+        for r, fs in lt["findings"].items():
+            L += [f"- {r}: {len(fs)} findings in changed crates"] + [f"  - `{x}`" for x in fs[:40]]
+        for r, fs in lt["outside"].items():
+            if fs:
+                L += [f"- {r}: {len(fs)} findings outside the changed crates (not counted)"]
+    if "tests" in o:
+        L += ["", "## Tests", ""]
+        for part, t in o["tests"].items():
+            L.append(f"- {part}: exit {t['exit']}, {t['passed']} passed, {len(t['failing'])} failing"
+                     + (f", binaries crashed or not run: {', '.join(t['bad_binaries'])}" if t["bad_binaries"] else ""))
+        app = o["tests"].get("app")
+        if app:
+            L += [f"- fixed since the last cycle: {', '.join(app['fixed']) or 'none'}",
+                  f"- new since the last cycle: {', '.join(app['new']) or 'none'}"]
+        if (c.rd / "tracks.md").is_file():
+            L.append(f"- per track: {c.rd / 'tracks.md'}")
+    if "look" in o:
+        L += ["", "## Look", "", f"{o['look']['status']}" + (f": {o['look'].get('why')}" if o["look"].get("why") else "")
+              + (f"; panels {', '.join(o['look'].get('panels', []))}" if o["look"].get("panels") else "")]
+    if "packets" in o:
+        L += ["", "## Packets", ""]
+        for t, p in o["packets"].items():
+            if t == "_unowned":
+                continue
+            s = (o.get("sent") or {}).get(t)
+            L.append(f"- {t}: " + (f"{p['failing']} failing, {p['findings']} findings, {p['packet']}" if p["packet"] else "nothing left; done")
+                     + (f"; sent: {'ok' if s['ok'] else s.get('error')}" if s else ""))
+        un = o["packets"].get("_unowned") or []
+        if un:
+            L += ["", f"Errors and findings no fixer owns ({len(un)}): the lead groups them or fixes them.", "", "```", *un[:80], "```"]
+    if o.get("stalled"):
+        L += ["", f"Stalled fixers: {', '.join(o['stalled'])}. Read their logs before the next cycle."]
+    if o.get("notes"):
+        L += ["", "## Notes", ""] + [f"- {n}" for n in o["notes"]]
+    return "\n".join(L) + "\n"
+
+
+def tsv_row(c: Cycle, code: int) -> None:
+    f = c.runs / "cycles.tsv"
+    o = c.out
+    gap = ""
+    if c.prev and c.prev.get("end"):
+        gap = f"{max(0.0, c.t0 - T.parse_t(c.prev['end']).timestamp()):.0f}"
+    o["gap_s"] = float(gap) if gap else None
+    t = (o.get("tests") or {}).get("app") or {}
+    vals = {"label": o["label"], "start": o["start"], "phase": o.get("phase") or "", "batch": o.get("batch") or "",
+            "area": o.get("area") or "", "mode": o["mode"], "total_s": f"{o['total_s']:.0f}", "gap_s": gap,
+            "errors": str((o.get("compile") or {}).get("fw_errors", 0) + (o.get("compile") or {}).get("app_errors", 0)
+                          + (o.get("lint") or {}).get("count", 0)),
+            "failing": str(len(t.get("new_vs_baseline", []))), "exit": str(code)}
+    for step in ("merge", "compile", "lint", "test", "look", "send"):
+        vals[f"{step}_s"] = f"{c.secs[step]:.0f}" if step in c.secs else ""
+    new = not f.is_file()
+    with open(f, "a") as out:
+        if new:
+            out.write("\t".join(TSV_COLS) + "\n")
+        out.write("\t".join(vals[k] for k in TSV_COLS) + "\n")
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("label")
+    ap.add_argument("--fixers")
+    ap.add_argument("--tracks")
+    ap.add_argument("--groups")
+    ap.add_argument("--batch")
+    ap.add_argument("--area", action="append", default=[])
+    for step in ("merge", "lint", "tests", "look", "send"):
+        ap.add_argument(f"--no-{step}", action="store_true")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--config")
+    a = ap.parse_args()
+    if a.config:   # every tool the cycle runs reads the same port.toml
+        a.config = str(Path(a.config).resolve())
+        os.environ[config.ENV_CONFIG] = a.config
+    try:
+        cfg = config.load(a.config)
+        c = Cycle(cfg, a)
+        fixers = c.fixers()
+    except (config.ConfigError, T.TrackError, Stop) as e:
+        print(f"cycle: {getattr(e, 'why', e)}", file=sys.stderr)
+        return EXIT_TOOL
+    st = c.board()
+    ph = (st or {}).get("phase") or {}
+    areas = a.area or ([x for x in str(ph.get("area") or "").split(",") if x])
+    tracks = c.inherit("tracks")
+    c.out.update(phase=ph.get("n"), batch=a.batch or ph.get("batch"), area=",".join(areas) or None,
+                 inputs={"fixers": c.inherit("fixers"), "tracks": tracks, "groups": c.inherit("groups")})
+    if a.dry_run:
+        print(f"cycle {a.label} (dry run): fixer mode {c.mode}; phase {ph.get('n')}, batch {c.out['batch']}, areas "
+              f"{', '.join(areas) or '-'}")
+        for fx in fixers:
+            print(f"  fixer {fx['task']}: " + (", ".join(f"{r}:{b}" for r, b in fx["branches"].items()) or "no branch"))
+        steps = [("merge", not a.no_merge, "git merge --no-ff of each fixer branch"),
+                 ("compile", True, f"compile-gate {a.label}-compile"),
+                 ("lint", not a.no_lint, "cl cargo fmt / clippy -D warnings / doc on " +
+                  "; ".join(f"{r}: {', '.join(c.changed_crates(r)) or 'no changed crate'}" for r in c.trees)),
+                 ("tests", not a.no_tests, f"test-run {a.label}-fw --fw; test-run {a.label} --app"
+                  + (f"; compare-runs.py and diag-cut.py --tracks {tracks}" if tracks else "")),
+                 ("look", not a.no_look, f"cl {cfg.get('look.port_build')}; look pair" if cfg.get("look.port_build")
+                  else "skipped: look.port_build unset"),
+                 ("send", not a.no_send, f"swarm.py --follow-up per packet, {cfg.get('pipeline.parallel')} at a time, "
+                  f"timeout {cfg.get('pipeline.followup_timeout_min')} min")]
+        for name, on, what in steps:
+            print(f"  {name}: {what if on else 'off'}")
+        return 0
+
+    code = EXIT_GREEN
+    compiled = False
+    with track.recorded("cycle") as rec:
+        try:
+            merged = c.timed("merge", c.merge, fixers) if not a.no_merge else []
+            c.out["merged"] = merged
+            touched = c.touched(merged)
+            c.out["touched"] = {t: {r: sorted(fs) for r, fs in rs.items()} for t, rs in touched.items()}
+            comp = c.timed("compile", c.compile)
+            c.out["compile"] = {k: v for k, v in comp.items() if k != "errors"}
+            compiled = comp["exit"] == 0
+            lint = None
+            if compiled and not a.no_lint:
+                lint = c.timed("lint", c.lint)
+                c.out["lint"] = lint
+            if compiled and not a.no_tests:
+                c.out["tests"] = c.timed("test", c.tests, tracks)
+            if comp["app_status"] == "ok" and not a.no_look and "app" in c.trees:
+                c.out["look"] = c.timed("look", c.look, areas)
+            elif not a.no_look:
+                c.out["look"] = {"status": "skipped", "why": "the app did not compile"}
+            c.out["packets"] = c.packets(fixers, touched, comp, lint)
+            if not a.no_send:
+                c.out["sent"], c.out["stalled"] = c.timed("send", c.send, c.out["packets"])
+            t = (c.out.get("tests") or {}).get("app") or {}
+            fw = (c.out.get("tests") or {}).get("fw") or {}
+            green = (compiled and not (lint or {}).get("count") and not t.get("new_vs_baseline")
+                     and not t.get("bad_binaries") and not fw.get("failing") and not fw.get("bad_binaries")
+                     and not c.out.get("stalled") and not a.no_tests)
+            code = EXIT_GREEN if green else EXIT_LEFT
+        except Stop as e:
+            code, c.out["stop"] = e.code, e.why
+            print(f"cycle: {e.why}", file=sys.stderr)
+        c.out["notes"] += c.phase(st, a.batch, a.area, compiled)
+        c.out["weekly_pct"] = c.weekly()
+        c.out["end"] = utc(time.time())
+        c.out["total_s"] = time.time() - c.t0
+        c.out["seconds"] = {k: round(v, 1) for k, v in c.secs.items()}
+        tsv_row(c, code)
+        c.out["exit"] = code
+        (c.rd / "report.md").write_text(report(c, code))
+        (c.rd / "cycle.json").write_text(json.dumps(c.out, indent=1, ensure_ascii=False) + "\n")
+        line = summary_line(c, code)
+        t = (c.out.get("tests") or {}).get("app") or {}
+        rec.result(line, log=str(c.rd / "report.md"), ok=code == EXIT_GREEN,
+                   data={"label": a.label, "exit": code, "phase": c.out.get("phase"), "batch": c.out.get("batch"),
+                         "area": c.out.get("area"), "mode": c.mode, "total_s": round(c.out["total_s"], 1),
+                         "gap_s": c.out.get("gap_s"), "steps": c.out["seconds"],
+                         "errors": (c.out.get("compile") or {}).get("fw_errors", 0)
+                         + (c.out.get("compile") or {}).get("app_errors", 0),
+                         "failing": len(t.get("new_vs_baseline", [])), "weekly_pct": c.out["weekly_pct"]})
+    print(line)
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

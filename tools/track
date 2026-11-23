@@ -15,6 +15,8 @@ Agents (judgement):
         the move as a decision; --force on the current phase checks the exit of the phase before it again
 The lead and the developer:
   track show [TASK] [--json]          text view
+  track eta [--json]                  projection: cycles left times the median cycle, sets left over the measured
+                                      rate, the weekly quota at the finish
   track alerts [--stale-min N]        stale, blocked and failed tasks, open questions, answers waiting; exit 0 always
   track watch [--timeout MIN] [--poll SEC]   wait for a new alert (then print the digest) or the timeout; exit 0
   track md [--out PATH]               STATUS.md in the workspace (default: <work.dir>/STATUS.md; - prints it)
@@ -260,6 +262,14 @@ def cmd_show(a):
         print(json.dumps(st["tasks"].get(a.task) if a.task else st, indent=1, ensure_ascii=False))
         return
     print(T.show_text(st, a.task))
+
+
+def cmd_eta(a):
+    st = store(a).state()
+    if a.json:
+        print(json.dumps((st.get("eta") or {}).get("cycles") or {}, indent=1, ensure_ascii=False))
+        return
+    print(T.eta_text(st))
 
 
 def cmd_alerts(a):
@@ -578,6 +588,9 @@ def main(argv=None):
     c.add_argument("task", nargs="?"); c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_show)
 
+    c = sub.add_parser("eta", help="projection from the measured cycles and sets")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_eta)
     c = sub.add_parser("alerts", help="lines for a poll loop")
     c.add_argument("--stale-min", type=int)
     c.set_defaults(fn=cmd_alerts)

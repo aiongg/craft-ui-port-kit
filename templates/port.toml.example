@@ -48,6 +48,7 @@ ui_dirs = ["crates/ui-egui/src"]              # REQUIRED: UI source dirs to inve
 # answer_groups_per_agent = 3
 # max_error_rate = 0.10
 # max_wrong_answers = 0.10
+# build_batches = 4                          # build batches in the write order; track eta counts the ones to come
 
 [racheck]
 # fw_base = "{work.trees}/racheck-fw"
@@ -66,6 +67,8 @@ ui_dirs = ["crates/ui-egui/src"]              # REQUIRED: UI source dirs to inve
 # memory_gb = 28
 # test_threads = 4                           # default unset: the app manifest's [workspace.metadata.cl] test_threads applies
 # target_dir = ""                             # default: cl's <worktree>-target
+# warm_check_s = 120                         # measured in phase 0: warm compile-gate of the app after a one-file change
+# full_run_s = 60                            # measured in phase 0: one full test-run --app, build warm
 
 [pipeline]
 # batch_runner = "swarm"                      # swarm (claude CLI only) or workflow
@@ -81,6 +84,10 @@ ui_dirs = ["crates/ui-egui/src"]              # REQUIRED: UI source dirs to inve
 # lookup_tools = "Read,Grep,Glob,Bash(git grep:*),Bash(git show:*),Bash(git ls-files:*)"
 # quota_command = ""                          # prints the 5-hour window use in percent; empty: never wait
 # quota_cap = 90
+# weekly_quota_command = ""                   # prints the plan's weekly use as a percent
+# fixer_mode = "code-only"                   # code-only | build | auto (build when warm_check_s + full_run_s <= fixer_build_max_s)
+# fixer_build_max_s = 600                    # placeholder threshold until measured ports set it
+# followup_timeout_min = 120                 # cycle names a fixer stalled past this
 
 # [pipeline.bundle]                           # port-set bundle budgets
 # context = 12
@@ -117,7 +124,6 @@ ui_dirs = ["crates/ui-egui/src"]              # REQUIRED: UI source dirs to inve
 # triage = "sonnet"
 # red_fixer = "sonnet"
 # red_fixer_framework = "opus"
-# red_integrator = "sonnet"
 
 # Areas are chosen in phase 1 from the inventory. Set ids are <id>-w<n>; contract ids <code>.<Kind><n>.
 # PhotoCraft's areas:
@@ -181,5 +187,6 @@ ui_dirs = ["crates/ui-egui/src"]              # REQUIRED: UI source dirs to inve
 # states_dir = "{work.dir}/look/states"
 # run_dir = "{work.dir}/look/run"
 # window = "1440x900"
+# port_build = "build <example>"            # cl arguments that build port_binary; unset: cycle skips look
 # threshold = 16                            # channel difference (of 255) that counts as visible
 # differences = "{work.dir}/look/differences.md"   # look differences with their outcome (tools/look.md)

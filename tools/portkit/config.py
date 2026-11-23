@@ -43,6 +43,9 @@ ENV_PREFIX = "PORT_KIT_"
 ENV_AGENT = "PORT_KIT_AGENT"
 
 
+FIXER_MODES = ("code-only", "build", "auto")
+
+
 @dataclass(frozen=True)
 class Key:
     path: str                    # "section.key"
@@ -176,6 +179,9 @@ KEYS: list[Key] = [
       "Highest sampled plan error rate that passes the evaluation."),
     K("plan.max_wrong_answers", 0.10, "float", "workflows/phase2-final.js prompts",
       "Highest share of wrong fact answers that passes the accuracy check."),
+    K("plan.build_batches", None, "int", "track",
+      "How many build batches the write order has (pilot included), set when the order is fixed (process/06-write.md). "
+      "`track eta` counts the batches still to come from it. Unset: the projection counts the current batch only."),
 
     # ---- racheck: rust-analyzer daemons on read-only base checkouts
     K("racheck.fw_base", "{work.trees}/racheck-fw", "path", "racheck.py racheck-tree racheck-gate move-base port-set",
@@ -208,6 +214,11 @@ KEYS: list[Key] = [
       "`[workspace.metadata.cl] test_threads`."),
     K("build.target_dir", "", "path", "compile-gate test-run",
       "CARGO_TARGET_DIR for the integration trees. Empty: cl's default (`<worktree>-target` when it exists)."),
+    K("build.warm_check_s", None, "int", "cycle render-prompt",
+      "Seconds of a warm `compile-gate` of the app after a one-file change, measured in phase 0. With "
+      "build.full_run_s it sets the fixer mode when pipeline.fixer_mode is `auto`. Unset: not measured."),
+    K("build.full_run_s", None, "int", "cycle render-prompt",
+      "Seconds of one full `test-run --app` (build already warm), measured in phase 0. Unset: not measured."),
 
     # ---- pipeline: the writer buckets and batch runners
     K("pipeline.batch_runner", "swarm", "str", "workflows/README",
@@ -229,6 +240,20 @@ KEYS: list[Key] = [
     K("pipeline.quota_command", "", "str", "run-batch swarm.py",
       "Command printing the plan's current 5-hour window use as a percent. Empty: never wait on quota."),
     K("pipeline.quota_cap", 90, "int", "run-batch swarm.py", "Start no new job while quota_command reports at or above this."),
+    K("pipeline.weekly_quota_command", "", "str", "cycle track",
+      "Command printing the plan's weekly use as a percent. cycle records it with each cycle, and `track eta` "
+      "projects it to the finish. Empty: no weekly line in the projection."),
+    K("pipeline.fixer_mode", "code-only", "str", "cycle render-prompt",
+      "How compile and red fixers work: `code-only` (no cargo; DIAG prints where unsure), `build` (each fixer "
+      "takes a build tree and runs `cl check` or its own failing tests), or `auto` (`build` when build.warm_check_s "
+      "plus build.full_run_s is at most pipeline.fixer_build_max_s, else `code-only`). Writers are code-only in "
+      "every mode (process/11-build-loop.md, rule 3)."),
+    K("pipeline.fixer_build_max_s", 600, "int", "cycle render-prompt",
+      "The `auto` threshold in seconds on build.warm_check_s plus build.full_run_s. The default is a placeholder "
+      "until measured ports set it."),
+    K("pipeline.followup_timeout_min", 120, "int", "cycle",
+      "Minutes cycle waits for one fixer's follow-up. A fixer past it is named as stalled in the cycle's summary "
+      "and report, and the cycle ends without it."),
     K("pipeline.bundle.context", 12, "int", "port-set", "Lines of context around each line range a sheet names."),
     K("pipeline.bundle.snippet_cap", 260, "int", "port-set", "Most lines of one excerpt."),
     K("pipeline.bundle.big", 800, "int", "port-set",
@@ -266,7 +291,6 @@ KEYS: list[Key] = [
     K("models.triage", "sonnet", "str", "swarm.py", "Phase 7 test triage; confirm by calibration before a sweep."),
     K("models.red_fixer", "sonnet", "str", "swarm.py", "Phase 7 red-round fixer."),
     K("models.red_fixer_framework", "opus", "str", "swarm.py", "Phase 7 fixer whose failures have a framework cause."),
-    K("models.red_integrator", "sonnet", "str", "swarm.py", "Phase 7 red-round integrator."),
 
 
     # ---- track: the progress dashboard (tools/track.md)
@@ -301,6 +325,9 @@ KEYS: list[Key] = [
       "The port's binary as the build loop builds it in the app integration tree; side `port`."),
     K("look.window", "1440x900", "str", "look",
       "Window size `<width>x<height>` for states files that name none."),
+    K("look.port_build", None, "str", "cycle",
+      "cl arguments that build look.port_binary in app.integration (for example `build <example>`). cycle runs "
+      "them before `look pair`. Unset: cycle skips the look step and says so."),
     K("look.threshold", 16, "int", "look",
       "A pixel differs visibly when one colour channel differs by more than this (of 255). Smaller differences "
       "show in the difference image but make no crop."),
@@ -348,7 +375,8 @@ CALL_PLACEHOLDERS = {
     "LOOK": "The look evidence of one fix class, filled by `look brief`",
 }
 # Placeholders derived from the kit itself.
-KIT_PLACEHOLDERS = {"KIT": "Kit root directory", "RULES": "The kit's rules/ directory"}
+KIT_PLACEHOLDERS = {"KIT": "Kit root directory", "RULES": "The kit's rules/ directory",
+                    "FIXER_MODE": "`build` or `code-only`: pipeline.fixer_mode, with `auto` decided by the measured build times"}
 
 AREA_FIELDS = {"id": "Area id; set ids are `<id>-w<n>`", "code": "Two lowercase letters; contract ids are `<code>.<Kind><n>`",
                "description": "What the area covers", "map": "Its map file (default `{work.maps}/<id>.md`)",
@@ -496,9 +524,22 @@ class Config:
     def code_of(self, area_id: str) -> str:
         return self.area(area_id)["code"]
 
+    # ---- fixer mode
+    def fixer_mode(self) -> str:
+        """`build` or `code-only`: pipeline.fixer_mode, with `auto` decided by the measured build times."""
+        mode = self.get("pipeline.fixer_mode")
+        if mode not in FIXER_MODES:
+            raise ConfigError(f"pipeline.fixer_mode = {mode!r}: one of {', '.join(FIXER_MODES)}")
+        if mode != "auto":
+            return mode
+        check, run = self.get("build.warm_check_s"), self.get("build.full_run_s")
+        if check is None or run is None:
+            return "code-only"
+        return "build" if check + run <= self.get("pipeline.fixer_build_max_s") else "code-only"
+
     # ---- placeholders
     def placeholders(self) -> dict[str, str]:
-        out = {"KIT": str(KIT_ROOT), "RULES": str(KIT_ROOT / "rules")}
+        out = {"KIT": str(KIT_ROOT), "RULES": str(KIT_ROOT / "rules"), "FIXER_MODE": self.fixer_mode()}
         for k in KEYS:
             if k.placeholder:
                 v = self.values.get(k.path)

@@ -147,6 +147,7 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `answer_groups_per_agent` | int | `3` | workflows/phase2-part.js | Question groups one answering agent takes. Env: `PORT_KIT_PLAN_ANSWER_GROUPS_PER_AGENT`. |
 | `max_error_rate` | float | `0.1` | workflows/phase2-final.js, prompts | Highest sampled plan error rate that passes the evaluation. Env: `PORT_KIT_PLAN_MAX_ERROR_RATE`. |
 | `max_wrong_answers` | float | `0.1` | workflows/phase2-final.js, prompts | Highest share of wrong fact answers that passes the accuracy check. Env: `PORT_KIT_PLAN_MAX_WRONG_ANSWERS`. |
+| `build_batches` | int | unset | track | How many build batches the write order has (pilot included), set when the order is fixed (process/06-write.md). `track eta` counts the batches still to come from it. Unset: the projection counts the current batch only. Env: `PORT_KIT_PLAN_BUILD_BATCHES`. |
 
 ### [racheck]
 
@@ -171,6 +172,8 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `memory_gb` | int | `28` | compile-gate, test-run | Memory cap in GB for builds and test runs under build.memory_cap. Env: `PORT_KIT_BUILD_MEMORY_GB`. |
 | `test_threads` | int | unset | test-run | --test-threads for test binaries. Unset: test-run passes none, and cl uses the app manifest's `[workspace.metadata.cl] test_threads`. Env: `PORT_KIT_BUILD_TEST_THREADS`. |
 | `target_dir` | path | `""` | compile-gate, test-run | CARGO_TARGET_DIR for the integration trees. Empty: cl's default (`<worktree>-target` when it exists). Env: `PORT_KIT_BUILD_TARGET_DIR`. |
+| `warm_check_s` | int | unset | cycle, render-prompt | Seconds of a warm `compile-gate` of the app after a one-file change, measured in phase 0. With build.full_run_s it sets the fixer mode when pipeline.fixer_mode is `auto`. Unset: not measured. Env: `PORT_KIT_BUILD_WARM_CHECK_S`. |
+| `full_run_s` | int | unset | cycle, render-prompt | Seconds of one full `test-run --app` (build already warm), measured in phase 0. Unset: not measured. Env: `PORT_KIT_BUILD_FULL_RUN_S`. |
 
 ### [pipeline]
 
@@ -190,6 +193,10 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `job_max_turns` | int | `300` | swarm.py | Turn limit of one swarm.py job. Env: `PORT_KIT_PIPELINE_JOB_MAX_TURNS`. |
 | `quota_command` | str | `""` | run-batch, swarm.py | Command printing the plan's current 5-hour window use as a percent. Empty: never wait on quota. Env: `PORT_KIT_PIPELINE_QUOTA_COMMAND`. |
 | `quota_cap` | int | `90` | run-batch, swarm.py | Start no new job while quota_command reports at or above this. Env: `PORT_KIT_PIPELINE_QUOTA_CAP`. |
+| `weekly_quota_command` | str | `""` | cycle, track | Command printing the plan's weekly use as a percent. cycle records it with each cycle, and `track eta` projects it to the finish. Empty: no weekly line in the projection. Env: `PORT_KIT_PIPELINE_WEEKLY_QUOTA_COMMAND`. |
+| `fixer_mode` | str | `code-only` | cycle, render-prompt | How compile and red fixers work: `code-only` (no cargo; DIAG prints where unsure), `build` (each fixer takes a build tree and runs `cl check` or its own failing tests), or `auto` (`build` when build.warm_check_s plus build.full_run_s is at most pipeline.fixer_build_max_s, else `code-only`). Writers are code-only in every mode (process/11-build-loop.md, rule 3). Env: `PORT_KIT_PIPELINE_FIXER_MODE`. |
+| `fixer_build_max_s` | int | `600` | cycle, render-prompt | The `auto` threshold in seconds on build.warm_check_s plus build.full_run_s. The default is a placeholder until measured ports set it. Env: `PORT_KIT_PIPELINE_FIXER_BUILD_MAX_S`. |
+| `followup_timeout_min` | int | `120` | cycle | Minutes cycle waits for one fixer's follow-up. A fixer past it is named as stalled in the cycle's summary and report, and the cycle ends without it. Env: `PORT_KIT_PIPELINE_FOLLOWUP_TIMEOUT_MIN`. |
 
 ### [pipeline.bundle]
 
@@ -232,7 +239,6 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `triage` | str | `sonnet` | swarm.py | Phase 7 test triage; confirm by calibration before a sweep. Env: `PORT_KIT_MODELS_TRIAGE`. |
 | `red_fixer` | str | `sonnet` | swarm.py | Phase 7 red-round fixer. Env: `PORT_KIT_MODELS_RED_FIXER`. |
 | `red_fixer_framework` | str | `opus` | swarm.py | Phase 7 fixer whose failures have a framework cause. Env: `PORT_KIT_MODELS_RED_FIXER_FRAMEWORK`. |
-| `red_integrator` | str | `sonnet` | swarm.py | Phase 7 red-round integrator. Env: `PORT_KIT_MODELS_RED_INTEGRATOR`. |
 
 ### [track]
 
@@ -256,6 +262,7 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `production_binary` | path | unset | look, portkit/gates.py | Production build with the control hooks (process/01-setup.md, step 6a); side `up`. Env: `PORT_KIT_LOOK_PRODUCTION_BINARY`. |
 | `port_binary` | path | unset | look | The port's binary as the build loop builds it in the app integration tree; side `port`. Env: `PORT_KIT_LOOK_PORT_BINARY`. |
 | `window` | str | `1440x900` | look | Window size `<width>x<height>` for states files that name none. Env: `PORT_KIT_LOOK_WINDOW`. |
+| `port_build` | str | unset | cycle | cl arguments that build look.port_binary in app.integration (for example `build <example>`). cycle runs them before `look pair`. Unset: cycle skips the look step and says so. Env: `PORT_KIT_LOOK_PORT_BUILD`. |
 | `threshold` | int | `16` | look | A pixel differs visibly when one colour channel differs by more than this (of 255). Smaller differences show in the difference image but make no crop. Env: `PORT_KIT_LOOK_THRESHOLD`. |
 | `differences` | path | `{work.dir}/look/differences.md` | look, portkit/gates.py | The differences file: one row per look difference with its judgement, class and outcome (tools/look.md, "The differences file"). `look brief` and the phase 8 gate read it. Env: `PORT_KIT_LOOK_DIFFERENCES`. |
 
@@ -298,6 +305,7 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 |---|---|
 | `{{KIT}}` | Kit root directory |
 | `{{RULES}}` | The kit's rules/ directory |
+| `{{FIXER_MODE}}` | `build` or `code-only`: pipeline.fixer_mode, with `auto` decided by the measured build times |
 | `{{WORK}}` | `work.dir` |
 | `{{TREES}}` | `work.trees` |
 | `{{INVENTORY}}` | `work.inventory` |

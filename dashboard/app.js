@@ -307,10 +307,23 @@ function renderRounds() {
     `<details class="tbl"><summary>Table</summary><table><thead><tr><th>Round</th><th class="num">Fail</th><th class="num">Pass</th><th>When</th><th></th></tr></thead><tbody>${rows}</tbody></table></details>`
 }
 
+function cycleEtaHtml(c) {
+  if (!c || !c.cycles) return ''
+  const w = c.weekly
+  const lines = [
+    `${num(c.cycles)} cycles; median cycle ${c.period_s != null ? esc((c.period_s / 60).toFixed(1)) + ' min' : 'not measured yet'}` +
+      (c.per_batch != null ? `, ${esc(c.per_batch)} per finished batch` : '') +
+      `; batch ${num(c.batches_seen)}${c.build_batches ? ' of ' + num(c.build_batches) : ''}.`,
+    `Cycles left: <b>${c.left != null ? num(c.left) : 'unknown'}</b>${c.cycle_h != null ? ` (${esc(c.cycle_h)} h)` : ''}; sets left: ${num(c.sets_left)}${c.write_h ? ` (${esc(c.write_h)} h)` : ''}. Finish: <b>${c.finish ? esc(clock(c.finish)) : 'not yet measurable'}</b>.`,
+  ]
+  if (w) lines.push(`<span class="${w.passes ? 'fail' : ''}">Weekly quota: ${esc(w.now_pct)} % used${w.per_h != null ? `, ${esc(w.per_h)} %/h` : ''}${w.at_finish_pct != null ? `, ${esc(w.at_finish_pct)} % at the finish` : ''}${w.passes ? ': passes the allowance' : ''}.</span>`)
+  return lines.map((l) => `<p>${l}</p>`).join('') + (c.notes || []).map((n) => `<p class="meta">${esc(n)}</p>`).join('')
+}
+
 function renderEta() {
   const e = S.state.eta
   const el = $('eta')
-  if (!e || (!e.done && !e.left)) {
+  if (!e || (!e.done && !e.left && !(e.cycles && e.cycles.cycles))) {
     el.innerHTML = ''
     return
   }
@@ -318,6 +331,7 @@ function renderEta() {
   const groups = Object.entries(e.groups || {}).filter(([, g]) => g.total)
   const steps = Object.entries(e.steps || {})
   el.innerHTML = head('eta-h', 'Projection') +
+    cycleEtaHtml(e.cycles) +
     `<p>${num(e.done)} done, ${num(e.left)} left. ${e.left ? `Finish: <b>${esc(range)}</b>.` : 'All tasks done.'}</p><p class="meta">${esc(e.basis)}${e.median_task_h != null ? `; median task ${esc(e.median_task_h)} h from first running to done` : ''}.</p>` +
     (groups.length > 1 ? `<table><thead><tr><th>Group</th><th class="num">Left</th><th class="num">Total</th></tr></thead><tbody>${groups.map(([g, v]) => `<tr><td>${esc(g || '(none)')}</td><td class="num">${num(v.left)}</td><td class="num">${num(v.total)}</td></tr>`).join('')}</tbody></table>` : '') +
     (steps.length ? `<details class="tbl"><summary>Median time per step</summary><table><thead><tr><th>Step</th><th class="num">Median</th><th class="num">Measured</th></tr></thead><tbody>${steps.map(([s, v]) => `<tr><td>${esc(s)}</td><td class="num">${esc(v.median_min)} min</td><td class="num">${num(v.n)}</td></tr>`).join('')}</tbody></table></details>` : '')

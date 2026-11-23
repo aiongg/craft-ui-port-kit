@@ -199,7 +199,7 @@ class Store:
                 for r in moved:
                     self.append(r)
                 events, size, bad = self.read_events()
-            state = fold(events, now_utc(), stale_min=self.stale_min)
+            state = fold(events, now_utc(), stale_min=self.stale_min, build_batches=self.cfg.get("plan.build_batches"))
             state.update(bytes=size, bad_lines=bad, app=self.cfg.get("app.name") or "",
                          how_served=self.cfg.get("track.how_served"))
             _write_atomic(self.state_path, _dumps(state))
@@ -351,11 +351,12 @@ def summary(e: dict) -> str:
     return e.get("text", "")
 
 
-def fold(events: list[dict], now: datetime, stale_min: int = 20) -> dict:
+def fold(events: list[dict], now: datetime, stale_min: int = 20, build_batches: int | None = None) -> dict:
     """Derive the whole state from the event list, in file order."""
     tasks: dict[str, dict] = {}
     questions: list[dict] = []
     rounds: list[dict] = []
+    cycles: list[dict] = []
     heads: dict[str, dict] = {}
     phase = None
     paused = {"on": False, "note": None, "t": None}
@@ -448,6 +449,9 @@ def fold(events: list[dict], now: datetime, stale_min: int = 20) -> dict:
         elif k == "round":
             rounds.append({"n": e.get("n"), "pass": e.get("pass"), "fail": e.get("fail"), "log": e.get("log"),
                            "data": e.get("data") or {}, "t": t, "task": e.get("task")})
+        elif k == "cycle" and isinstance(e.get("data"), dict) and "total_s" in e["data"]:
+            d = e["data"]
+            cycles.append({"t": t, "ok": e.get("ok"), **{f: d.get(f) for f in CYCLE_FIELDS}})
         elif k == "phase":
             phase = {"n": e.get("n"), "name": PHASES.get(e.get("n"), ""), "note": e.get("note"), "t": t,
                      "batch": e.get("batch"), "area": e.get("area")}
@@ -477,8 +481,10 @@ def fold(events: list[dict], now: datetime, stale_min: int = 20) -> dict:
     return {
         "version": STATE_VERSION, "generated": iso(now), "events": len(events), "stale_min": stale_min,
         "phase": phase, "paused": paused, "counts": counts, "tasks": tasks, "questions": questions,
-        "rounds": rounds, "heads": heads, "stale": stale,
-        "eta": eta(tasks, first_run, done_at, spans, now), "log": list(reversed(log)),
+        "rounds": rounds, "cycles": cycles[-CYCLES_CAP:], "heads": heads, "stale": stale,
+        "eta": {**eta(tasks, first_run, done_at, spans, now),
+                "cycles": cycle_eta(cycles, tasks, first_run, done_at, now, build_batches)},
+        "log": list(reversed(log)),
     }
 
 
@@ -513,6 +519,103 @@ def eta(tasks: dict, first_run: dict, done_at: dict, spans: dict, now: datetime)
             "median_task_h": builtins.round(statistics.median(times), 2) if times else None,
             "finish_low": low, "finish_high": high, "groups": groups, "steps": steps, "since": iso(t0),
             "basis": basis}
+
+
+CYCLE_FIELDS = ("label", "exit", "phase", "batch", "area", "mode", "total_s", "gap_s", "errors", "failing", "weekly_pct")
+CYCLES_CAP = 200         # newest cycles state.json keeps
+
+
+def _median(xs: list[float]) -> float | None:
+    return statistics.median(xs) if xs else None
+
+
+def cycle_eta(cycles: list[dict], tasks: dict, first_run: dict, done_at: dict, now: datetime,
+              build_batches: int | None) -> dict:
+    """The cycle model (process/costs.md): cycles left times the median cycle period, plus the sets left over the
+    measured sets per hour, and the weekly quota projected to that finish."""
+    notes = []
+    periods = [prev["total_s"] + c["gap_s"] for prev, c in zip(cycles, cycles[1:])
+               if c.get("gap_s") is not None and c.get("batch") == prev.get("batch") and prev.get("total_s") is not None]
+    period = _median(periods)
+    per_batch: dict[str, int] = {}
+    for c in cycles:
+        per_batch[c.get("batch") or ""] = per_batch.get(c.get("batch") or "", 0) + 1
+    cur = cycles[-1] if cycles else None
+    cur_batch = (cur.get("batch") or "") if cur else None
+    finished = [n for b, n in per_batch.items() if b != cur_batch or (cur and cur.get("exit") == 0)]
+    per = _median(finished)
+    left = None
+    if cur is not None:
+        if cur.get("exit") == 0:
+            cur_left = 0
+        elif per is not None:
+            cur_left = max(1, builtins.round(per) - per_batch[cur_batch])
+        else:
+            cur_left = None
+            notes.append("no batch has finished yet, so the cycles one batch takes are not measured")
+        if build_batches:
+            later = max(0, int(build_batches) - len(per_batch))
+        else:
+            later = 0
+            notes.append("plan.build_batches unset: only the current batch is counted")
+        if cur_left is not None:
+            left = cur_left + (later * builtins.round(per) if later and per is not None else 0)
+            if later and per is None:
+                left = None
+    cycle_h = left * period / 3600 if left is not None and period is not None else None
+    sets = [i for i, tk in tasks.items() if (tk.get("links") or {}).get("sheet")]
+    sets_done = [i for i in sets if tasks[i]["state"] == "done"]
+    starts = [first_run[i] for i in sets if i in first_run]
+    rate = None
+    if sets_done and starts:
+        rate = len(sets_done) / max((max(done_at.get(i, now) for i in sets_done) - min(starts)).total_seconds() / 3600, 0.25)
+    sets_left = len(sets) - len(sets_done)
+    write_h = 0.0 if not sets_left else (sets_left / rate if rate else None)
+    total_h = cycle_h + write_h if cycle_h is not None and write_h is not None else None
+    weekly = None
+    samples = [(parse_t(c["t"]), c["weekly_pct"]) for c in cycles if c.get("weekly_pct") is not None and parse_t(c["t"])]
+    if samples:
+        since = 0
+        for i in range(1, len(samples)):
+            if samples[i][1] < samples[i - 1][1]:
+                since = i      # the allowance reset between these samples
+        s = samples[since:]
+        hours = (s[-1][0] - s[0][0]).total_seconds() / 3600
+        per_h = (s[-1][1] - s[0][1]) / hours if len(s) > 1 and hours > 0 else None
+        at_finish = s[-1][1] + per_h * total_h if per_h is not None and total_h is not None else None
+        weekly = {"now_pct": s[-1][1], "per_h": builtins.round(per_h, 2) if per_h is not None else None,
+                  "at_finish_pct": builtins.round(at_finish, 1) if at_finish is not None else None,
+                  "passes": at_finish is not None and at_finish > 100}
+    r1 = lambda x: builtins.round(x, 1) if x is not None else None  # noqa: E731
+    return {"cycles": len(cycles), "period_s": r1(period), "periods_measured": len(periods),
+            "per_batch": r1(per), "batches_seen": len(per_batch), "build_batches": build_batches,
+            "current_batch": cur_batch, "left": left, "cycle_h": r1(cycle_h), "sets_left": sets_left,
+            "sets_per_h": builtins.round(rate, 2) if rate else None, "write_h": r1(write_h), "total_h": r1(total_h),
+            "finish": iso(now + timedelta(hours=total_h)) if total_h is not None else None, "weekly": weekly,
+            "notes": notes}
+
+
+def eta_text(state: dict) -> str:
+    """The projection `track eta` prints: the cycle model, the writing left and the weekly quota line."""
+    c = (state.get("eta") or {}).get("cycles") or {}
+    L = [f"cycles: {c.get('cycles', 0)} run; median period "
+         + (f"{c['period_s'] / 60:.1f} min ({c['periods_measured']} measured)" if c.get("period_s") else "not measured")
+         + (f"; {c['per_batch']:g} per finished batch" if c.get("per_batch") is not None else "")
+         + f"; batches seen {c.get('batches_seen', 0)}" + (f" of {c['build_batches']}" if c.get("build_batches") else ""),
+         f"cycles left: {c['left'] if c.get('left') is not None else 'unknown'}"
+         + (f" = {c['cycle_h']:.1f} h" if c.get("cycle_h") is not None else ""),
+         f"sets left: {c.get('sets_left', 0)}" + (f" at {c['sets_per_h']:g}/h = {c['write_h']:.1f} h" if c.get("write_h") else ""),
+         "finish: " + (f"{c['finish']} ({c['total_h']:.1f} h)" if c.get("finish") else "not yet measurable")]
+    w = c.get("weekly")
+    if w:
+        L.append(f"weekly quota: {w['now_pct']:g} % used"
+                 + (f", {w['per_h']:g} %/h" if w.get("per_h") is not None else "")
+                 + (f", {w['at_finish_pct']:g} % at the finish" if w.get("at_finish_pct") is not None else "")
+                 + (": PASSES THE ALLOWANCE; ask the developer for a schedule or a second account" if w.get("passes") else ""))
+    else:
+        L.append("weekly quota: no samples (pipeline.weekly_quota_command unset)")
+    L += [f"note: {n}" for n in c.get("notes", [])]
+    return "\n".join(L)
 
 
 # ---------------------------------------------------------------- text views

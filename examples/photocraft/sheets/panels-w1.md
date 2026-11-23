@@ -5,6 +5,7 @@
 - Contract items it writes: pn.C1, pn.C2, pn.C3, pn.C4, pn.C5, pn.C6, pn.C7, pn.C8, pn.C9, pn.C57.
 - Contract items and PhotoCraft interfaces it calls: fx.F51 (reads `IconicColumnOutput::flyout`).
 - Map sections: panels A1, A2, A3, A4.
+- Look reference: carried by the map sections named above (their Look reference fields are not shipped in this excerpt).
 - Waits on (signatures it codes against): framework-01-w9 (`IconicColumnOutput::flyout: Option<FlyoutResize<P>>`).
 
 ## Files

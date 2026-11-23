@@ -5,6 +5,7 @@
 - Contract items it writes: pn.PC12 (the Channels and Swatches modules' `panel_rows`/`run_fired`, plus `command_states` for their framework command sets).
 - Contract items and PhotoCraft interfaces it calls: pn.C26, pn.C27, pn.C28, pn.C30 (`panel_rows()`, `states(&rows)`), the existing `ChannelsPanel`/`ChannelRow`/`ChannelKind`/`ChannelsEvent`/`ChannelsCommands::applies_to` (imaging/src/ui/channels), `ThumbSource`/`Thumbnails::in_context`/`thumb_image` (ui-contract primitives/textures/thumbnails.rs:86, 286), `SelectionOperation::from_mods`/`name` (behavior/src/geometry/selection_op.rs:36, 76), `channel_options_ui::{open, open_new_spot} -> Option<DialogId>` (dialogs-w29), `alerts::prompt_tagged::<MaskTrash>` (dialogs-w21), `dialogs::testing::{confirm, cancel}` (dialogs-w19 note 12), `PickedColor` (dialogs-w37), the `Files` fake (top-w28), cx.P1 (`COMMAND_SOURCES`), pn.PC7 (`show_panel`), panels-w31's engine swatch model (`presets.swatches: Vec<craft::color::palette::SwatchGroup>`); pn.P1.
 - Map sections: panels F1, G2; top 20 (Panel thumbnails).
+- Look reference: carried by the map sections named above (their Look reference fields are not shipped in this excerpt).
 - Waits on (signatures it codes against): panels-w6, panels-w23, panels-w31, panels-w14, hub-w1, dialogs-w19, dialogs-w21, dialogs-w29, dialogs-w37, top-w28, panels-w30 (action types in the channels tests).
 
 ## Files

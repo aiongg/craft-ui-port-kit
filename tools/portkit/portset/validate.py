@@ -46,6 +46,9 @@ def validate_sheet(s: Sheet, rows: set[str] | None, trees: bool) -> tuple[list[s
     for k in HEAD_KEYS:
         if not any(h.startswith(k) for h in s.head):
             warns.append(f"{s.id}: no `- {k}...:` head line")
+    maps = s.head.get("Map sections", "").strip().strip(".").lower()
+    if maps and maps != "none" and "Look reference" not in s.head:
+        warns.append(f"{s.id}: no `- Look reference:` head line (write `none` for a set with no visible part)")
     if ctx.cfg.areas:
         try:
             ctx.cfg.area_of(s.id)

@@ -22,8 +22,9 @@ Your prompt names area `{{AREA}}`, the side (framework or app) and the sets to r
 5. **Deletions.** Every replaced mechanism and its readers are gone. No dead code beside the new.
 6. **Tests.** Each new or changed test matches its Tests row, item by item, and follows {{RULES}}/testing-rule.md: it names a plausible regression, tests nothing trivial, asserts no exact size or string, and does not repeat the shared suite. App tests are evidence, not a specification.
 7. **The UI gallery** (framework sets). Every component or variant the set adds is registered in the gallery in the same set, with stories for its states and each named variant, at the gallery level of its architectural kind, as the sheet's `Stories` head line names them ({{RULES}}/porting-rules.md, "UI gallery"). Dialogs and windows start closed, with a button that opens the real thing. A new component that duplicates one the gallery already has is a finding: the existing one gets a named variant instead.
-8. **Bugs that a compile or a run would catch.** Logic, ordering, a wrong event mapping, a popover that never opens, duplicate `mod` lines, `// PLAN:` markers that can be resolved now, disabled-state wrappers that block input.
-9. **Where a finding comes from.** If it comes from the sheet or the contract rather than from the writer, say so: it goes back to the plan.
+8. **The look reference.** Every entry of the sheet's `Look reference` line is carried by the written code (a token, a named variant or a documented constant), or the writer left a `// PLAN:` line saying why not. A literal copied from the old code into a prop or style is a finding (see 4).
+9. **Bugs that a compile or a run would catch.** Logic, ordering, a wrong event mapping, a popover that never opens, duplicate `mod` lines, `// PLAN:` markers that can be resolved now, disabled-state wrappers that block input.
+10. **Where a finding comes from.** If it comes from the sheet or the contract rather than from the writer, say so: it goes back to the plan.
 
 ## Output
 

@@ -8,6 +8,7 @@
 - **App glue**: <what stays in the app: commands it sends, models it owns, what is deleted as the part ports>
 - **Tests**: <file (count): how many keep, how many fold into table tests, how many delete, each group with its reason>
 - **States**: <the app states to capture for the old and new comparison, in the form the control channel can reach; hooks that are missing go to the area map's hook list>
+- **Look reference**: <the literal sizes, paddings, alignments and icon sizes of the old part, and the framework variant that matches, each with `path:line` in the old code; "none" for a part with no visible surface>
 - **Depends on**: <section ids of the same area, shared gap ids, app-side change ids>
 - **Size**: S (under about 40 tool calls) | M (up to about 100) | L (about 150 or more; split before briefing).
 - **Done when**: <what the user sees and does, what code and tests are gone, which tests are rewritten>
@@ -25,6 +26,7 @@ Example:
 - **App glue**: sends `brush.set` commands; owns the brush settings model and its saved presets
 - **Tests**: brush_panel/tests.rs (42): 30 table (event family "slider edits"), 8 keep (preset save and load), 4 delete (preview cache: the framework owns previews)
 - **States**: default; tip-shape section open; dual-brush on; long preset name
+- **Look reference**: row height 32 (`panels/brush_panel.rs:88`), icon 17 (`panels/brush_panel.rs:112`), label column 96 wide, start-aligned; variant: `ListRow` compact
 - **Depends on**: G-12
 - **Size**: M
 - **Done when**: the four states match the old panel; the preview cache code and its tests are gone; kept tests are rewritten

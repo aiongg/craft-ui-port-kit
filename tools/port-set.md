@@ -92,6 +92,7 @@ The parser is `tools/portkit/portset/sheet.py`. [templates/sheet.md](../template
 | `Contract items it writes` | Contract ids (`<code>.<Kind><n>`, such as `pn.C12`); ranges such as `pn.C16-C24` count in `audit` and `validate`. |
 | `Contract items and ...` | The ids the set calls; the wording after "and" is free. |
 | `Map sections` | Area map section ids the set implements: bare ids are the set's own area's; `<area> <ids>` names another area's, until the next `;`. Read by `tools/coverage.py`. |
+| `Look reference` | The old part's literal sizes, paddings, alignments, icon sizes and framework variant, each with `path:line` in the old code, or `none`. Writers read it in the sheet head; `validate` warns when a set with map sections lacks the line. |
 | `Waits on ...` | Set ids whose signatures the set codes against. Read by `audit` (waves). |
 | `Stories` | The gallery stories of every component or variant the set adds to the framework: each type in backticks, its story names, and the stories file in backticks, such as ``- Stories: `ColorWell`: Default, Mixed, Compact variant in `crates/ui/src/controls/color_well/stories.rs`.`` The set that carries the line is the story owner. Required when the set adds a component or variant (`audit`, stories). |
 
@@ -265,7 +266,7 @@ Parses every sheet as the writing commands do. Problems:
 - a set id whose area is not in `[[areas]]` (when areas are set);
 - a stories file the `Stories` line names that is in neither the Files table nor the tree.
 
-Warnings: a head key of the template (`Contract items it writes`, `Contract items and ...`, `Map sections`, `Waits on`) the sheet lacks.
+Warnings: a head key of the template (`Contract items it writes`, `Contract items and ...`, `Map sections`, `Waits on`) the sheet lacks, and a set with map sections but no `Look reference` line.
 
 `--sheets` and `--parts` check other directories, such as the kit's example sheets. When the repos cannot be read, the path checks are skipped and the output says so; without contract parts the id checks are skipped.
 

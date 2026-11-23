@@ -5,6 +5,7 @@
 - Contract items it writes: <ids, or none>.
 - Contract items and app interfaces it calls: <ids, or none>.
 - Map sections: <area map section ids>.
+- Look reference: <for a set that ports a visible part: the literal sizes, paddings, alignments, icon sizes and framework variant from the map sections' Look reference fields, each with `path:line` in the old code; `none` for a set with no visible part>.
 - Waits on (signatures it codes against): <set ids, or none>.
 - Stories: `<Type>`: <story names> in `crates/<crate>/src/<dir>/stories.rs`. Only in a sheet that adds a framework component or variant; one entry per type, separated by `;`. The set with this line is the type's story owner (rules/porting-rules.md, "UI gallery").
 

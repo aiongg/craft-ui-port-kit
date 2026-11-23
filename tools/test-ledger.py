@@ -195,6 +195,10 @@ def triage_rows(runs: Path) -> list[list[str]]:
 
 # ---------------------------------------------------------------- build
 
+class LedgerError(Exception):
+    """The ledger cannot be built completely; the caller exits 2."""
+
+
 def build(cfg) -> tuple[list[dict], list[str]]:
     runs = cfg.path("work.runs")
     bf = runs / "baseline.json"
@@ -209,7 +213,9 @@ def build(cfg) -> tuple[list[dict], list[str]]:
             changed = {p for f in gates.changed_files(fw_tree, cfg.get("plan.base"))
                        if (p := gates.package_of(fw_tree, f))}
         except subprocess.CalledProcessError as e:
-            notes.append(f"framework parts left out: git diff {cfg.get('plan.base')} failed in {fw_tree} ({e.returncode})")
+            # A ledger without the framework parts would pass on the app alone: stop instead.
+            raise LedgerError(f"git diff {cfg.get('plan.base')} failed in {fw_tree} (exit {e.returncode}); "
+                              "fix plan.base or the framework tree, then run again") from e
     parts = [p for p in base if p == "app" or (p.startswith("fw:") and p[3:] in changed)]
     latest = latest_runs(runs)
     states = {p: run_state(runs, latest[p], p) for p in latest}
@@ -328,6 +334,9 @@ def main(argv=None) -> int:
     except SystemExit:
         print(f"test-ledger: no baseline ({cfg.path('work.runs') / 'baseline.json'}); run test-run --baseline first",
               file=sys.stderr)
+        return 2
+    except LedgerError as e:
+        print(f"test-ledger: {e}", file=sys.stderr)
         return 2
     f = write(cfg, rows)
     c = counts(rows)

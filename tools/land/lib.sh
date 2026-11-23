@@ -51,12 +51,12 @@ land_clone() {
   printf '%s\n' "$sha"
 }
 
-# land_look_gate app|framework SHA: the look rows of the phase 8 exit for the commit SHA that lands
-# (tools/land/look-gate.py). A failure stops the tool (exit 1) unless `track phase 9 --force "reason"` was recorded
+# land_exit_gate app|framework SHA: the look and tests rows of the phase 8 exit for the commit SHA that lands
+# (tools/land/exit-gate.py). A failure stops the tool (exit 1) unless `track phase 9 --force "reason"` was recorded
 # over every failing row; that decision is the only override. The framework may land before phase 8 without them.
-land_look_gate() {
-  python3 -I "$LAND/look-gate.py" "$1" "$2" || {
-    echo "Do not land: the look gate fails (process/09-look-and-behaviour.md, Exit)." >&2
+land_exit_gate() {
+  python3 -I "$LAND/exit-gate.py" "$1" "$2" || {
+    echo "Do not land: the exit gate fails (process/09-look-and-behaviour.md, Exit; tools/test-ledger.py --check)." >&2
     exit 1
   }
 }

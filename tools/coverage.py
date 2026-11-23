@@ -8,7 +8,7 @@ Six checks, each counted as gaps:
      by a writer set, or listed in --done (work already finished, one `<area> <section>` per line).
   2. Files: every .rs file under app.ui_dirs (in app.snapshot, else app.checkout at plan.app_base) has an action in
      an app set, or a plan line that says it gets no edit.
-  3. Tests: every #[test] fn in those files has a verdict (keep, rewrite, delete) or its file is deleted.
+  3. Tests: every #[test] fn in those files has a verdict (keep, rewrite, move, delete) or its file is deleted.
   4. No path is in two writer sets (directory entries included).
   5. Settled decisions carried: every row of work.settled whose id is `S-...` or `L-...` and whose text names a set
      id has that id in the set's sheet or <work.sets>/<set>/decisions.md (with --from plan: in the set's section of
@@ -345,7 +345,7 @@ def verdicts_from_sheets(sets: dict, test_index: dict, resolver: Resolver, owned
             if len(r) < 3:
                 continue
             v = r[2].strip().lower().split()[0].strip("`*.,;") if r[2].strip() else ""
-            if v not in ("keep", "rewrite", "delete"):
+            if v not in ("keep", "rewrite", "move", "delete"):
                 continue
             files = [f for ref in path_refs(r[0]) for f in resolver.resolve(ref) if f in test_index]
             names = {re.sub(r"\(.*$", "", sp.split("::")[-1]).strip() for sp in re.findall(r"`([^`]+)`", r[1])}

@@ -35,8 +35,13 @@ and the names of tests the previous run or the baseline listed that are gone. Wr
 Files in <work.runs>/LABEL/: `app.build.log`, `app.log`, `app.failed` (one failing test per line, sorted),
 `fw-<crate>.log`, `<part>.tests.tsv` (`binary<TAB>test` per listed test), `compare.md`, `summary.json`.
 
+Ledger: after an unfiltered run, when a baseline exists, test-run rebuilds <work.runs>/ledger.tsv
+(tools/test-ledger.py): every baseline test with its plan verdict and its status now. Its counts go to summary.json
+(`ledger`) and the summary line names the tests gone without a verdict, which the land gate refuses.
+
 Result for other tools: summary.json, and the last stdout line
   test-run LABEL: exit N; <part>: <status>, <n> passed, <n> failed, <n> crashed, <n> not run, <n> missing, <n> gone; ...
+  [; ledger: <n> gone without a verdict]
 summary.json: {"tool": "test-run", "label", "exit", "parts": [{"part", "filter", "status", "exit", "passed",
 "failed", "seconds", "failing": [name...], "binaries": {key: {"status", "passed", "failed", "tests"}}, "previous": label|null,
 "baseline": label|null, "missing": [binary...], "gone": [test...], "gone_vs_baseline": [test...]}]}. A part's
@@ -48,6 +53,7 @@ error. Compare two runs in detail with compare-runs.py; split a failing run into
 """
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -270,6 +276,21 @@ def timed(fn, *args) -> dict:
     return r
 
 
+def run_ledger(cfg) -> dict | None:
+    """test-ledger.py's counts after this run, or None when it could not run."""
+    env = dict(os.environ, **({config.ENV_CONFIG: str(cfg.file)} if cfg.file else {}))
+    r = subprocess.run([sys.executable, "-I", str(TOOLS / "test-ledger.py"), "--json"], capture_output=True, text=True,
+                       env=env)
+    for line in reversed(r.stdout.splitlines()):
+        if line.startswith("{"):
+            try:
+                return json.loads(line)
+            except ValueError:
+                break
+    print(f"WARNING test-ledger.py exit {r.returncode}: {(r.stderr or r.stdout).strip()[-200:]}")
+    return None
+
+
 def summary_line(label: str, code: int, parts: list[dict]) -> str:
     out = [f"test-run {label}: exit {code}"]
     for r in parts:
@@ -321,6 +342,10 @@ def main():
             app = next((r for r in parts if r["part"] == "app" and r["status"] in ("ok", "failed")), None)
             if app is not None:
                 Path(cfg.get("work.baseline_failures")).write_text("".join(n + "\n" for n in app["failing"]))
+        ledger = None
+        if not a.no_run and (cfg.path("work.runs") / "baseline.json").is_file() and any(
+                not r["filter"] and r["status"] in ("ok", "failed") for r in parts):
+            ledger = run_ledger(cfg)
         states = [r["status"] for r in parts]
         code = 2 if "tool-failure" in states else 1 if any(s != "ok" for s in states) else 0
         app = next((r for r in parts if r["part"] == "app"), None)
@@ -329,8 +354,8 @@ def main():
             with open(cfg.path("work.runs") / "rounds.tsv", "a") as f:
                 f.write(f"{n}\t{a.label}\t{app['passed']}\t{app['failed']}\n")
             track.round(n, app["passed"], app["failed"], log=str(rd / "app.log"))
-        gates.write_summary(rd, {"tool": "test-run", "label": a.label, "exit": code, "parts": parts})
-        text = summary_line(a.label, code, parts)
+        gates.write_summary(rd, {"tool": "test-run", "label": a.label, "exit": code, "parts": parts, "ledger": ledger})
+        text = summary_line(a.label, code, parts) + (f"; ledger: {ledger['refused']} gone without a verdict" if ledger else "")
         print(text)
         rec.result(text, log=str(rd), data={"label": a.label, "ok": code == 0, "exit": code}, ok=code == 0)
     sys.exit(code)

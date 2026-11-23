@@ -1,6 +1,6 @@
 # p7-failing-test-triage
 
-Read-only triage of failing app tests: keep, cut, cut-fix or move, judged from the body, the code and production. Fill the placeholders with `tools/render-prompt`.
+Read-only triage of the failing `keep` tests that red fixers marked stale (`<work.runs>/stale.tsv`, each with the fixer's reason): keep, cut, cut-fix or move, judged from the body, the code and production. Fill the placeholders with `tools/render-prompt`.
 
 Do not start subagents or workflows. Read-only: edit nothing, run no cargo, no git command that writes. Use Read and Grep freely; every verdict needs evidence from the code.
 
@@ -11,6 +11,7 @@ Read first, in full: {{RULES}}/testing-rule.md and {{RULES}}/agent-common.md.
 - The port (the tests live here): {{APP_INT}}. The framework source it builds against: {{FW_INT}}.
 - Production {{APP}}, the reference for behaviour: {{PROD}}. Use this checkout, never an older or stale one.
 - Failure output of each test: the logs in {{RUNS}}/{{ROUND}}/ (grep the test name; the panic message follows `---- <name> stdout ----`).
+- Why the fixer called the test stale: its row in {{RUNS}}/stale.tsv. That is a claim to check, not a verdict.
 
 ## The rule
 

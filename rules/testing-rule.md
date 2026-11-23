@@ -49,7 +49,8 @@ Each phase uses its own set of verdicts.
 | Verdict | Meaning | What happens |
 |---|---|---|
 | `keep` | Guards a plausible regression in code the port keeps | The test stays, updated to the new API where needed |
-| `rewrite` | The behaviour must survive, but the test is written against a replaced mechanism or asserts a detail | The set rewrites it to the behaviour, through the new mechanism. A kept test that conflicts with the planned behaviour is rewritten to the planned behaviour |
+| `rewrite` | The behaviour must survive, but the test is written against a replaced mechanism or asserts a detail | The set rewrites it to the behaviour, under the same name in the same file, through the new mechanism. A kept test that conflicts with the planned behaviour is rewritten to the planned behaviour |
+| `move` | The behaviour must survive in another test: another name or file, here or in another set (a framework trial, a merged table test) | The target set writes the target named in the Reason cell (`to <path> <test fn>`); the test goes |
 | `delete` | No plausible regression, or another test or a shared case already guards it | The set deletes it |
 | `new` | The rule asks for a test nothing covers yet | The set writes it |
 
@@ -65,6 +66,8 @@ App tests are evidence of intended behaviour, not a specification.
 | `cut` | The rule says the test goes, and the failure is about the test (its premise, a widget path, an exact label or value, a harness detail), not a behaviour difference users would see | The test is deleted |
 | `cut-fix` | The rule says the test goes, but its failure shows a real behaviour difference from production that users would see | The behaviour is fixed first; then the test is deleted |
 | `move` | Guards framework behaviour that no framework trial covers yet | A framework trial is written in the owning crate; then the app test is deleted |
+
+Triage judges only failing `keep` tests that a red fixer marked stale (`tools/test-ledger.py stale`); a test the plan gave another verdict is carried out as the plan says. The ledger (`<work.runs>/ledger.tsv`) holds every test of the baseline with its verdict and its status now.
 
 A test whose verdict was not reached is `unjudged`, never guessed.
 

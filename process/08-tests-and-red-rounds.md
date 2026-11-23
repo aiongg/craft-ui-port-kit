@@ -1,6 +1,6 @@
 # Phase 7: tests and red rounds
 
-Phase 7 makes the compiled batch pass its tests. Every failing test gets a verdict first (keep, cut, cut-fix or move), judged from its body, the code it drives and production. Then fixers work in **red rounds**: each fixer writes fixes for its whole list, one `tools/cycle` run builds every fix together and runs the tests once, and each fixer gets back the tests of its list that still fail. One build per round serves every fixer, so a round costs the same wall time for one fix as for a hundred.
+Phase 7 makes the compiled batch pass its tests. Every test already has a verdict from the plan (keep, rewrite, move or delete, in its set's sheet); the **ledger** (`<work.runs>/ledger.tsv`, `tools/test-ledger.py`) holds each test of the baseline with that verdict and its status now. Fixers carry out the plan's verdicts; triage judges only the `keep` tests a fixer marks stale. Fixers work in **red rounds**: each fixer writes fixes for its whole list, one `tools/cycle` run builds every fix together and runs the tests once, and each fixer gets back the tests of its list that still fail. One build per round serves every fixer, so a round costs the same wall time for one fix as for a hundred.
 
 | | |
 |---|---|
@@ -8,7 +8,7 @@ Phase 7 makes the compiled batch pass its tests. Every failing test gets a verdi
 | Ends when | The exit criteria below hold. |
 | Agents | Triage agents on the calibrated model (`models.triage`); Sonnet fixers per track (`models.red_fixer`), Opus for tracks with a framework cause (`models.red_fixer_framework`). |
 | Builds | One cycle per round in the integration trees (`tools/cycle`). Fixers build only in the fixer mode `build` ([11-build-loop.md](11-build-loop.md), rule 3). |
-| Output | Run logs and failure lists under `work.runs`, the triage table, `groups.md` and a report per run, under `work.runs` (`templates/run-report.md`). |
+| Output | Run logs and failure lists, the ledger, the stale list and the triage table, `groups.md` and a report per run, under `work.runs` (`templates/run-report.md`). |
 
 Record the phase: `tools/track phase 7 "tests and red rounds"`.
 
@@ -16,7 +16,7 @@ Record the phase: `tools/track phase 7 "tests and red rounds"`.
 
 Every full app run in this phase has a label, `<batch>-run-<n>` (written `run-<n>` below). The label names the run's directory under `work.runs`, where test-run writes its logs and failure list. test-run numbers the dashboard rounds itself, continuing across batches after the baseline's round 0.
 
-1. The cycle that compiled the batch ran the first full run ([07-review-combine-compile.md](07-review-combine-compile.md), step 6): the framework trials of every crate changed since `plan.base` (`test-run run-1-fw --fw`) and the app's first full run (`test-run run-1 --app`). The app run builds with `--no-run` first, then runs every test binary; the failing tests go to `<work.runs>/run-1/app.failed`. test-run records the round on the dashboard itself. Each run's `compare.md` lists, per test binary, whether it ran, crashed or went missing against the previous run and the baseline, and names every test that disappeared; a test that disappeared needs a triage row like a deleted one. Exit 2 is a tool failure, never a pass: fix the build loop and run again.
+1. The cycle that compiled the batch ran the first full run ([07-review-combine-compile.md](07-review-combine-compile.md), step 6): the framework trials of every crate changed since `plan.base` (`test-run run-1-fw --fw`) and the app's first full run (`test-run run-1 --app`). The app run builds with `--no-run` first, then runs every test binary; the failing tests go to `<work.runs>/run-1/app.failed`. test-run records the round on the dashboard itself. Each run's `compare.md` lists, per test binary, whether it ran, crashed or went missing against the previous run and the baseline, and names every test that disappeared. test-run then rebuilds the ledger and names the tests that left the suite without a `delete` verdict or a passing `move` target: each is a plan gap to settle (a sheet row) or a test to restore, and the land gate refuses them ([10-land.md](10-land.md), "The exit gate"). Exit 2 is a tool failure, never a pass: fix the build loop and run again.
 2. Compare it with the baseline (`work.baseline_failures`, from [01-setup.md](01-setup.md), step 7) with `tools/compare-runs.py`. A test that failed before the port is never charged to the port.
 3. In a framework batch, separate the **expected** failures: tests that fail on a `todo!` stub or an owed line of a set not yet written. Name the owing set for each and leave them out of the rounds; they must pass once that set lands.
 
@@ -33,13 +33,16 @@ Triage and test sweeps judge hundreds of tests. Before the first one, rate the c
 
 Calibrate once per port and prompt, not per round. `lessons.md` has the results of one calibration.
 
-## Step 3: triage the failing tests
+## Step 3: triage the tests fixers marked stale
 
-1. Split the failing tests (expected ones left out) into lists of about 25 to 30 tests, keeping a module's tests together. Each test costs a triage agent about 5 tool calls.
+Triage runs between rounds, only for `keep` tests a red fixer marked stale (`tools/test-ledger.py stale`, listed in `<work.runs>/stale.tsv`). A fixer never rewrites or deletes a `keep` test on its own. Tests the plan gave `rewrite`, `move` or `delete` are carried out as the sheet says, with no triage.
+
+1. Split the stale tests not yet in the triage table into lists of about 25 to 30 tests, keeping a module's tests together. Each test costs a triage agent about 5 tool calls.
 2. Put each list on the board (`tools/track status triage-<n> todo "<k> tests"`), render `prompts/p7-failing-test-triage.md` with `{{ROUND}} = run-<n>`, `{{TASK}}` and `{{OUT}}`, and run the agents as one background batch.
 3. Each agent writes a TSV: test, the lines it read, the verdict, evidence (the port code it guards, and production file:line where behaviour was compared), and the failure cause (port bug, stale premise, harness).
-4. Merge the TSVs into one triage table, `<work.runs>/triage.tsv`. Rerun any `unjudged` rows.
+4. Merge the TSVs into one triage table, `<work.runs>/triage.tsv`. Rerun any `unjudged` rows. The ledger reads it: a triage verdict replaces the plan's `keep` (`cut` and `cut-fix` count as `delete`). When a fixer has written a `move` row's framework trial, add its target as a 6th column, `<path> <test fn>`, so the ledger can check that it passes.
 5. Spot-check it yourself: a sample of each verdict, and every `move` and `cut-fix` row, against the code and production. A verdict taken from a test's name, module or failure message alone is invalid.
+6. The next cycle's packets carry the verdicts to the fixers (`diag-cut.py` reads the ledger).
 
 | Verdict | Meaning | What the fixer does |
 |---|---|---|
@@ -55,8 +58,8 @@ A **track** is a group of failing tests with one likely cause, given to one fixe
 Tracks are formed from the latest run, `run-<n>`, and their fixers work from it: their prompts get `{{ROUND}} = run-<n>`, and its directory holds the logs, `groups.md` and the packets. The run the round ends with is `run-<n+1>`.
 
 1. `tools/split-failures.py <dir> <N> <logs>` clusters the failures by module or integration-test file and balances whole clusters over N groups, with each failure's panic site and message.
-2. Adjust the groups by cause, using the triage table's cause column: tests that share a cause belong to one track, even across modules. A track whose cause is in a framework crate gets the framework fixer model.
-3. Write `<work.runs>/run-<n>/groups.md`: one section per track with its tests, their triage rows and the class rows (shared causes) it names.
+2. Adjust the groups by cause, using the panic sites and the plan's verdicts: tests that share a cause belong to one track, even across modules. A track whose cause is in a framework crate gets the framework fixer model.
+3. Write `<work.runs>/run-<n>/groups.md`: one section per track with its tests, their ledger rows (set, verdict, target) and the class rows (shared causes) it names.
 4. Write a tracks file (one `TRACK_ID TITLE` per line) and put the tracks on the board: `tools/track import tracks <file>`.
 5. Give each fixer its own trees, on branches `red/<track>` cut from the integration heads: code-only trees under `work.trees` (a framework tree and an app tree whose patch points at it) in the fixer mode `code-only`, build trees from the pool in the mode `build` ([11-build-loop.md](11-build-loop.md), rule 3). Name in its prompt which trees it may edit: a fixer that may not edit the framework reports framework causes instead.
 6. Write the fixers file of the round: one line per track, `<track>` (its branches are then `red/<track>`), or `<track> fw:<branch> app:<branch>`.
@@ -82,7 +85,8 @@ Whether red fixers build is the fixer mode (`pipeline.fixer_mode`), set from the
 
 ## Exit criteria
 
-- [ ] Every `keep` test passes in the full run.
+- [ ] Every `keep` test passes in the full run; every test a fixer marked stale has a triage row.
+- [ ] Every test the plan gave `rewrite` passes; every `delete` test is gone; every `move` target passes and its old test is gone. `tools/test-ledger.py --check` passes.
 - [ ] Every `cut` test is deleted; every `cut-fix` behaviour difference is fixed and its test deleted; every `move` test is a framework trial that passes, and the app test is deleted.
 - [ ] No new failure against the baseline; every remaining failure is in `work.baseline_failures` or is an expected failure owed by a named set of a later batch.
 - [ ] The framework trials of every crate the batch changed pass, and so does the shared suite over every story the batch added.

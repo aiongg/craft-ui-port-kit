@@ -2,7 +2,8 @@
 
 Problems (each stops a set from being written as planned): a sheet the parser rejects (no `Repo: fw|app`), no Files
 rows, an unknown action, a path listed twice, an edit/rewrite/keep/delete of a path in neither repo, a contract id with
-no contract row, a Tests verdict that is not keep/rewrite/delete/new, a set id whose area is not in port.toml's
+no contract row, a Tests verdict that is not keep/rewrite/move/delete/new, a `move` row whose
+Reason does not start `to <path> <test fn>`, a set id whose area is not in port.toml's
 [[areas]], a stories file in neither the Files table nor the tree. Warnings: head keys the sheet template has that the
 sheet lacks. Without readable repos (example sheets checked on their own) the path checks are skipped and said so.
 """
@@ -21,7 +22,8 @@ from .sheet import ACTIONS, ID, Sheet, SheetError, base_files
 from .write import Outcome
 
 HEAD_KEYS = ("Contract items it writes", "Contract items and", "Map sections", "Waits on")
-VERDICTS = ("keep", "rewrite", "delete", "new")
+VERDICTS = ("keep", "rewrite", "move", "delete", "new")
+MOVE_TARGET = re.compile(r"^\s*to\s+`?[\w./-]+\.rs`?(\s*\((fw|app)\))?\s+`?\w+")
 
 
 def repos_readable() -> str | None:
@@ -81,6 +83,9 @@ def validate_sheet(s: Sheet, rows: set[str] | None, trees: bool) -> tuple[list[s
         v = r[2].strip().lower().split()[0].strip("`*.,;") if r[2].strip() else ""
         if v not in VERDICTS:
             problems.append(f"{s.id}: Tests row {r[1][:60]}: verdict {r[2][:30]!r} is not {', '.join(VERDICTS)}")
+        elif v == "move" and not MOVE_TARGET.match(r[3] if len(r) > 3 else ""):
+            problems.append(f"{s.id}: Tests row {r[1][:60]}: a `move` names its target first in the Reason cell: "
+                            f"`to <path> <test fn>`")
     _, files = stories_line(s)
     owned = {p for p, _ in s.files}
     for f in sorted(files - owned):

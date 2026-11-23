@@ -4,7 +4,7 @@ Fixer for one track of failing tests: fix, confirm by DIAG prints or by your own
 
 You own one track of failing tests: track `{{TRACK}}`, round `{{ROUND}}`. Your tree names and branches are in your prompt. Do not start subagents or workflows. Stay under about 150 tool calls; stop at a clean point before that and report what is left.
 
-Read first, in full: {{RULES}}/agent-common.md, {{RULES}}/porting-rules.md, {{RULES}}/testing-rule.md, and your track's section of {{RUNS}}/{{ROUND}}/groups.md (the tests, their triage rows and the class rows). Each test's triage row (file:lines, verdict, evidence, cause) is in the triage table named in your prompt. Current failure messages are in the logs in {{RUNS}}/{{ROUND}}/. If your tree already holds earlier edits (a work-in-progress commit or uncommitted), read them first and keep what is right.
+Read first, in full: {{RULES}}/agent-common.md, {{RULES}}/porting-rules.md, {{RULES}}/testing-rule.md, and your track's section of {{RUNS}}/{{ROUND}}/groups.md (the tests, their ledger rows and the class rows). Each test's verdict comes from the plan's sheet (its set and reason) or, for a test triage judged, from {{RUNS}}/triage.tsv; your packets repeat it under each test (`verdict:`), and {{RUNS}}/ledger.tsv holds every row. Current failure messages are in the logs in {{RUNS}}/{{ROUND}}/. If your tree already holds earlier edits (a work-in-progress commit or uncommitted), read them first and keep what is right.
 
 Fixer mode: `{{FIXER_MODE}}`. A packet that names another mode for its round overrides this line.
 
@@ -24,10 +24,11 @@ Fixer mode: `{{FIXER_MODE}}`. A packet that names another mode for its round ove
 
 ## Per test, by verdict
 
-- `keep`: find the cause from the test body, the code it drives and production. A port bug: fix the code where the bug is (app or framework). A stale premise (the test reads a structure, label, helper or timing that the port replaced, while the user-visible behaviour matches production): update the test to drive and check the same behaviour through the port's own signals.
-- `cut-fix`: fix the behaviour difference the triage names, then delete the test.
-- `move`: write the behaviour as a framework trial in the crate that owns it (relations, never sizes), then delete the app test. Grep for an existing trial first; if one covers it, delete the app test.
-- `cut`: delete it.
+- `keep` (plan or triage): find the cause from the test body, the code it drives and production. A port bug: fix the code where the bug is (app or framework). Never rewrite or delete a `keep` test yourself. When its premise looks stale (it reads a structure, label, helper or timing that the port replaced, while the user-visible behaviour matches production), record it, `{{KIT}}/tools/test-ledger.py stale <test name> --task {{TASK}} "<what it reads that the port replaced>"`, leave the test as it is and go on. Triage judges it, and its verdict comes back in your next packet. A `keep` from triage that names a stale premise: rewrite the test to drive and check the same behaviour through the port's own signals, under the same name.
+- `rewrite` (plan): the test keeps its name and file and asserts what its sheet row's Reason says; make the code or the test match that row.
+- `move` (plan or triage): the target named after `to` must exist and pass; write it where it is missing (a framework trial: relations, never sizes; grep for an existing trial first), then delete the old test.
+- `delete` (plan), `cut` (triage): delete it.
+- `cut-fix` (triage): fix the behaviour difference the triage names, then delete the test.
 
 ## How to work
 

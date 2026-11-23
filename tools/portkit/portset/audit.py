@@ -659,7 +659,7 @@ def audit_tests(sheets: list[Sheet], T: Trees):
             if len(r) < 3:
                 continue
             verdict = r[2].strip().lower().split()[0].strip("`*.,;") if r[2].strip() else ""
-            if verdict not in ("keep", "rewrite", "delete"):
+            if verdict not in ("keep", "rewrite", "move", "delete"):
                 continue
             n += 1
             m = re.search(r"[\w./-]+\.rs", r[0])

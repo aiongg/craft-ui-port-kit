@@ -9,7 +9,8 @@ round's groups.md (one `## <track>` section per track) or a `track<TAB>test` TSV
 
 Fixers write `eprintln!("DIAG <test fn name>: ...")` where reading left a cause uncertain (prompts/p7-red-fixer.md).
 For each track, the packet <out>/<track>.md holds:
-  - the tests of its list that still fail, each with its binary, panic site, panic message and every
+  - the tests of its list that still fail, each with its ledger verdict (plan or triage, its set and a `move`
+    target, from <work.runs>/ledger.tsv when it exists), its binary, panic site, panic message and every
     `DIAG <test fn name>` line of the run;
   - the tests that pass now (their DIAG prints are to be removed) and the tests that did not run.
 The default out dir is <run dir>/packets. A summary line per track goes to stdout, then the DIAG idents that name
@@ -29,7 +30,24 @@ from portkit import config, track  # noqa: E402
 from portkit.testlog import find_log, load_tracks, parse, resolve, short  # noqa: E402
 
 
-def packet(t: str, label: str, names: list[str], run) -> tuple[str, dict]:
+def ledger_verdicts(runs: Path) -> dict[str, str]:
+    """{test name: "<verdict> (set <set>)[, to <target>]"} from <work.runs>/ledger.tsv (tools/test-ledger.py)."""
+    f = runs / "ledger.tsv"
+    if not f.is_file():
+        return {}
+    lines = f.read_text().splitlines()
+    cols = lines[0].split("\t") if lines else []
+    out = {}
+    for line in lines[1:]:
+        r = dict(zip(cols, line.split("\t")))
+        v = r.get("verdict") or "no verdict (keep)"
+        out[r.get("test", "")] = (f"{v}" + (f" (set {r['set']})" if r.get("set") else "")
+                                  + (f", from triage" if r.get("source") == "triage" else "")
+                                  + (f", to {r['target']}" if r.get("target") else ""))
+    return out
+
+
+def packet(t: str, label: str, names: list[str], run, verdicts: dict | None = None) -> tuple[str, dict]:
     fails = [n for n in names if run.status.get(n) == "FAILED"]
     passing = [n for n in names if run.status.get(n) == "ok"]
     ignored = [n for n in names if run.status.get(n) == "ignored"]
@@ -41,7 +59,8 @@ def packet(t: str, label: str, names: list[str], run) -> tuple[str, dict]:
     for n in fails:
         f = run.failures.get(n)
         diag = run.diag.get(short(n), [])
-        L += [f"### {n}", f"binary: {f.binary if f and f.binary else '(unknown)'}",
+        L += [f"### {n}", *([f"verdict: {verdicts[n]}"] if verdicts and n in verdicts else []),
+              f"binary: {f.binary if f and f.binary else '(unknown)'}",
               f"panic: {f.site if f and f.site else '(no panic line captured)'}",
               f"message: {f.message if f else ''}"]
         if diag:
@@ -81,8 +100,9 @@ def main(argv=None) -> int:
         out.mkdir(parents=True, exist_ok=True)
         label = log.parent.name if log.name == "app.log" else log.name
         total = 0
+        verdicts = ledger_verdicts(runs)
         for t, names in tracks.items():
-            text, n = packet(t, label, names, run)
+            text, n = packet(t, label, names, run, verdicts)
             p = out / f"{t}.md"
             p.write_text(text)
             total += n["failing"]

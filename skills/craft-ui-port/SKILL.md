@@ -41,7 +41,7 @@ Each phase has one runbook. Read it in full when the phase starts, and follow it
 | 6 | Review, combine, compile | `process/07-review-combine-compile.md` | `p6-*`, `p-rulings` | `fix-batch`, `combine-area`, `racheck-gate`, `gate-classify.py`, `cycle` (runs `compile-gate`), `split-errors.py` |
 | 7 | Tests and red rounds | `process/08-tests-and-red-rounds.md` | `p7-*` | `cycle` (runs `test-run`, `compare-runs.py`, `diag-cut.py`, `swarm.py --follow-up`), `split-failures.py`, `track eta` |
 | 8 | Look and behaviour | `process/09-look-and-behaviour.md` | `p8-task-brief` | `look pair`, `look brief` |
-| 9 | Land | `process/10-land.md` | `p9-production-merge` | `sync`, `land/scan-range.py`, `land/land-framework.sh`, `land/land-app.sh` (both run `land/look-gate.py`), `land/pin-framework.py`; during the port `land/early-ci.sh` |
+| 9 | Land | `process/10-land.md` | `p9-production-merge` | `sync`, `land/scan-range.py`, `land/land-framework.sh`, `land/land-app.sh` (both run `land/exit-gate.py`), `land/pin-framework.py`; during the port `land/early-ci.sh` |
 
 Phases 5 to 7 repeat per build batch: the pilot, then the framework-side sets as one batch (two above about 60 sets), then the app sets.
 

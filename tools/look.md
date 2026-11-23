@@ -199,7 +199,7 @@ That text fills `{{LOOK}}` in the Look evidence section of `prompts/p8-task-brie
 | 8 | Every difference is fixed or has its reason in the differences file | Every state whose pair differs has a `kept: <reason>` row and no `fix` row |
 | 8 | The lead accepted every panel | Every `look-<Panel>` task is `done` |
 
-The landing tools run the four phase 8 look rows too (`tools/land/look-gate.py`, [process/10-land.md](../process/10-land.md)). The one override for both is `track phase 9 --force "reason"`, recorded as a decision: the landing tools pass when that decision covers every row that fails at landing time.
+The landing tools run the four phase 8 look rows too (`tools/land/exit-gate.py`, with the tests rows, [process/10-land.md](../process/10-land.md)). The one override for both is `track phase 9 --force "reason"`, recorded as a decision: the landing tools pass when that decision covers every row that fails at landing time.
 
 ## Driver interface
 

@@ -219,7 +219,7 @@ What to do:
 - Delete the old code the sheet marks as going. Nothing old stays beside the new.
 - Move every reader the "Replaced mechanisms" table assigns to this set.
 - Every new public item gets a doc comment. Comments say why, never history ("now", "changed from").
-- Tests: write the `new` and `rewrite` tests as the Tests table says; remove the `delete` ones. Each trial drives what its Tests row names (through the real input path, not a direct call) and asserts something that fails when that behaviour breaks.
+- Tests: write the `new` and `rewrite` tests as the Tests table says (a `rewrite` keeps its name and file); write each `move` row's target test where its Reason names it, then remove the moved test; remove the `delete` ones. Each trial drives what its Tests row names (through the real input path, not a direct call) and asserts something that fails when that behaviour breaks.
 - A rule (a validation, a name check, an index scheme) lives in one place; callers use it. For an index scheme over several items, work one example through by hand before writing it.
 - If the sheet and the code disagree, or a contract signature cannot work, do what the sheet intends and add one line `// PLAN: <what was wrong>` at that place.
 - Never fill a `todo!` or `P3(<set>)` body whose set is not yours, and never write a caller in a file outside your Files table; if you need one, leave a `// PLAN:` line naming the owner set.

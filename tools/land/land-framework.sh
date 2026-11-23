@@ -7,8 +7,8 @@
 #   --skip-check    go on although `cl check all` cannot run or fails in the landed clone; REASON is printed and
 #                   recorded on the dashboard. Without it a failing or impossible check stops the tool.
 #
-# From phase 8 on, once REF is fetched, it runs the look gate (tools/land/look-gate.py framework REF's commit): the
-# phase 8 look rows pass with every pair captured from that commit, or `track phase 9 --force` recorded them as a
+# From phase 8 on, once REF is fetched, it runs the exit gate (tools/land/exit-gate.py framework REF's commit): the
+# phase 8 look and tests rows pass with every pair captured from that commit, or `track phase 9 --force` recorded them as a
 # decision. Before phase 8 (an early framework landing) it notes that the gate does not apply yet.
 # Fetches only REF (and its history) from the tree into <work.landing>/fw-<ref> (never touching it), fetches framework.branch from framework.repo, and
 # checks that REF is a fast-forward of it; if not, it stops and lists the upstream commits REF lacks (merge them
@@ -32,7 +32,7 @@ URL=$(cfgr framework.repo); BRANCH=$(cfgr framework.branch); VIA=$(cfg land.fram
 land_need_filter_repo
 W=$(cfgr work.landing)/fw-$(land_slug "$REF"); REPORT=$W.scan.txt
 OLD=$(land_clone "$SRC" "$W" "$REF")
-land_look_gate framework "$OLD"
+land_exit_gate framework "$OLD"
 cd "$W"
 git remote add landing-upstream "$URL"
 git fetch -q landing-upstream "$BRANCH:refs/remotes/landing-upstream/$BRANCH"

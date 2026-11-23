@@ -176,7 +176,7 @@ class ExitCheck:
         self.phase = phase            # the phase whose exit this row checks; None: every phase
         self.text = text              # the runbook item, as the lead reads it
         self.check = check            # GateContext -> None | reason
-        self.group = group            # "look": the rows the landing tools also run (land_look_check)
+        self.group = group            # "look" or "tests": the rows the landing tools also run (land_check)
 
 
 def context(store) -> GateContext:
@@ -389,9 +389,20 @@ def x_committed(ctx):
 
 
 def x_triage(ctx):
-    if not any(t.get("group") == "tracks" for t in ctx.tasks().values()):
-        return None
-    return _missing(ctx.cfg.path("work.runs") / "triage.tsv")
+    runs = ctx.cfg.path("work.runs")
+    stale = {l.split("\t", 1)[0] for l in _lines(runs / "stale.tsv")}
+    judged = {l.split("\t", 1)[0] for l in _lines(runs / "triage.tsv")}
+    left = sorted(stale - judged)
+    return f"marked stale and not triaged: {_ids(left)}" if left else None
+
+
+def _lines(p: Path) -> list[str]:
+    return [l for l in p.read_text().splitlines() if l.strip()] if p.is_file() else []
+
+
+def x_ledger(ctx):
+    rc, last = ctx.tool("test-ledger.py", "--check")
+    return None if rc == 0 else (last or f"test-ledger.py exit {rc}")
 
 
 # ---- look rows (tools/look.md): states files from the maps, pairs from the current port head, the differences file
@@ -574,13 +585,17 @@ PHASE_EXITS: list[ExitCheck] = [
     ExitCheck(7, "The last round is on the dashboard", x_round_since),
     ExitCheck(7, "git grep -n 'DIAG ' returns nothing in either integration tree", x_no_diag),
     ExitCheck(7, "Both integration branches are committed", x_committed),
-    ExitCheck(7, "The failing tests were triaged before the tracks formed (work.runs/triage.tsv)", x_triage),
+    ExitCheck(7, "Every keep test a fixer marked stale has a triage row (work.runs/stale.tsv, triage.tsv)", x_triage),
     ExitCheck(8, "Every map section has a states file", x_look_states, "look"),
     ExitCheck(8, "Every state has a pair from the current port head", x_look_pairs, "look"),
     ExitCheck(8, "Every difference is fixed or has its reason in the differences file", x_look_differences, "look"),
     ExitCheck(8, "The lead accepted every panel", x_look_accepted, "look"),
     ExitCheck(8, "The tests ran after the last fix", x_round_since),
+    ExitCheck(8, "Every test gone since the baseline has a delete verdict or a passing move target "
+                 "(tools/test-ledger.py --check)", x_ledger, "tests"),
 ]
+
+LAND_GROUPS = ("look", "tests")   # the row groups the landing tools run (tools/land/exit-gate.py)
 
 
 def exit_failures(phase: int, ctx: GateContext) -> tuple[int, list[tuple[str, str]]]:
@@ -597,20 +612,19 @@ def exit_failures(phase: int, ctx: GateContext) -> tuple[int, list[tuple[str, st
     return len(rows), out
 
 
-def land_look_check(store, which: str, sha: str) -> tuple[bool, list[str]]:
-    """The look rows for a landing tool that lands commit `sha` of the `app` or the `framework`: the pairs must come
-    from that commit. They pass, or the latest record of phase 9 was forced over every row that fails now (its
-    decision event's `forced` data). The framework may land before phase 8 without them (process/10-land.md).
-    Returns (ok, lines to print)."""
-    from . import track as T
+def land_check(store, which: str, sha: str, group: str) -> tuple[bool, list[str]]:
+    """One group of phase 8 rows (`look` or `tests`) for a landing tool that lands commit `sha` of the `app` or the
+    `framework`; the look pairs must come from that commit. They pass, or the latest record of phase 9 was forced
+    over every row that fails now (its decision event's `forced` data). The framework may land before phase 8
+    without them (process/10-land.md). Returns (ok, lines to print)."""
     st = store.state()
     cur = (st.get("phase") or {}).get("n")
     if which == "framework" and (cur is None or cur < 8):
-        return True, [f"look gate: early framework landing in phase {cur if cur is not None else 'not set'}; "
-                      "the look gate applies from phase 8"]
+        return True, [f"{group} gate: early framework landing in phase {cur if cur is not None else 'not set'}; "
+                      f"the {group} gate applies from phase 8"]
     ctx = context(store)
     ctx.heads = {which: sha}
-    rows = [r for r in PHASE_EXITS if r.group == "look"]
+    rows = [r for r in PHASE_EXITS if r.group == group]
     fails = []
     for r in rows:
         try:
@@ -620,15 +634,15 @@ def land_look_check(store, which: str, sha: str) -> tuple[bool, list[str]]:
         if why:
             fails.append((r.text, why))
     if not fails:
-        return True, [f"look gate: {len(rows)} of {len(rows)} look checks passed"]
+        return True, [f"{group} gate: {len(rows)} of {len(rows)} {group} checks passed"]
     events, _, _ = store.read_events()
     i = max((k for k, e in enumerate(events) if e.get("kind") == "phase" and e.get("n") == 9), default=-1)
     dec = events[i - 1] if i > 0 and events[i - 1].get("kind") == "decision" else {}
     forced = dec.get("forced") or {}
     if forced.get("to") == 9 and {t for t, _ in fails} <= set(forced.get("items", [])):
-        return True, [f"look gate: {len(fails)} look check(s) fail, forced by the decision of {dec.get('t')}: "
+        return True, [f"{group} gate: {len(fails)} {group} check(s) fail, forced by the decision of {dec.get('t')}: "
                       f"{forced.get('reason')}"] + [f"  - {t}: {w}" for t, w in fails]
-    lines = [f"look gate: {len(fails)} look check(s) fail:"] + [f"  - {t}: {w}" for t, w in fails]
+    lines = [f"{group} gate: {len(fails)} {group} check(s) fail:"] + [f"  - {t}: {w}" for t, w in fails]
     lines.append('Fix them, or record the decision: track phase 9 --force "<reason>"'
                  + (" (it covers only the checks failing when it is recorded)" if forced else ""))
     return False, lines

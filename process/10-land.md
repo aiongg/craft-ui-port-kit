@@ -70,13 +70,18 @@ It clones `<ref>` under `work.landing`, scans and scrubs the range since its mer
 
 It pushes only when `land.early_ci_approved` is true, the developer's standing approval from phase 0 ([01-setup.md](01-setup.md), step 3a). Otherwise it prints the commands for the developer. Each run is a row in `<work.landing>/early-ci.tsv`. A red leg is fixed on the port branch like any failure: a small red round for a test, a direct fix for a lint or a platform gap. Early CI covers the framework; the app's CI runs at landing (step 5).
 
-## The look gate
+## The exit gate
 
-Both landing tools run the phase 8 look items before they scan anything (`tools/land/look-gate.py`): every map section has a states file, every state has a pair captured from the commit being landed (and the other integration tree's head), every difference is fixed or has a `kept: <reason>` row in the differences file, and every panel is accepted ([tools/look.md](../tools/look.md), "The phase gate"). When one fails, the tool prints it and stops with exit 1.
+Both landing tools run two groups of phase 8 exit items before they scan anything (`tools/land/exit-gate.py`):
+
+- **Look:** every map section has a states file, every state has a pair captured from the commit being landed (and the other integration tree's head), every difference is fixed or has a `kept: <reason>` row in the differences file, and every panel is accepted ([tools/look.md](../tools/look.md), "The phase gate").
+- **Tests:** every test of the baseline that left the suite has a `delete` verdict or a `move` target that passes (`tools/test-ledger.py --check`; the ledger is `<work.runs>/ledger.tsv`, rebuilt by each full test run).
+
+When one fails, the tool prints it and stops with exit 1.
 
 The one override is the decision recorded with `tools/track phase 9 --force "reason"`. The landing tools pass when the latest `track phase 9` record forced every item that fails at landing time, and print that decision. An item that fails later and the decision did not cover needs a new one: `tools/track phase 9 --force "reason"` again, which checks the phase 8 items once more and records them.
 
-`land-framework.sh` runs the look gate only from phase 8 on. Before that, an early framework landing after a build batch prints that the look gate does not apply yet.
+`land-framework.sh` runs the exit gate only from phase 8 on. Before that, an early framework landing after a build batch prints that the gate does not apply yet.
 
 ## Step 2: the pre-push scrub
 
@@ -95,7 +100,7 @@ The kit repository itself uses the same idea through `tools/kit-check` and its p
 tools/land/land-framework.sh <framework tree> <ref>
 ```
 
-It fetches only `<ref>` and its history into a fresh repository under `work.landing` (never touching your trees; no other branch or tag comes along), runs the look gate from phase 8 on ([The look gate](#the-look-gate)), fetches `framework.branch` from `framework.repo`, and checks that `<ref>` is a fast-forward of it. If not, it stops and lists upstream's missing commits: sync first (step 1). Then it scans and scrubs the range `framework.branch..<ref>` (step 2), runs `cl check all` in the landed clone ([step 3a](#build-the-landed-clone-before-any-push)), and prints the landing commands. With `land.framework_via = "pr"` (the default), it prints the commands to push a branch and open one PR per build batch, which a framework maintainer fast-forwards onto `framework.branch`. With `fast-forward`, it prints the push to `framework.branch`.
+It fetches only `<ref>` and its history into a fresh repository under `work.landing` (never touching your trees; no other branch or tag comes along), runs the exit gate from phase 8 on ([The exit gate](#the-exit-gate)), fetches `framework.branch` from `framework.repo`, and checks that `<ref>` is a fast-forward of it. If not, it stops and lists upstream's missing commits: sync first (step 1). Then it scans and scrubs the range `framework.branch..<ref>` (step 2), runs `cl check all` in the landed clone ([step 3a](#build-the-landed-clone-before-any-push)), and prints the landing commands. With `land.framework_via = "pr"` (the default), it prints the commands to push a branch and open one PR per build batch, which a framework maintainer fast-forwards onto `framework.branch`. With `fast-forward`, it prints the push to `framework.branch`.
 
 You read the scan report, then push from the clone yourself (the push uses your accounts). Record it: `tools/track event landing "framework <sha> to <framework.branch>" --task land-framework`. The landing tools post their own run events.
 
@@ -111,7 +116,7 @@ Both landing tools run the framework's `cl check all` (`build.cl`) in the scrubb
 tools/land/land-app.sh <app tree> <ref> <landed framework rev>
 ```
 
-It fetches only `<ref>` into a fresh repository under `work.landing`, runs the look gate ([The look gate](#the-look-gate)), finds the merge base with production's `app.base_branch`, and scans and scrubs that range, replacing local framework paths with `land.sibling_framework`. Its last commit pins every framework dependency to the landed framework revision by git rev (`tools/land/pin-framework.py`, for every URL in `framework.patch_urls`) and drops the local framework patch block. It then runs `cl check all` in the landed clone and prints the push command to `land.push_target`, branch `land.push_branch`.
+It fetches only `<ref>` into a fresh repository under `work.landing`, runs the exit gate ([The exit gate](#the-exit-gate)), finds the merge base with production's `app.base_branch`, and scans and scrubs that range, replacing local framework paths with `land.sibling_framework`. Its last commit pins every framework dependency to the landed framework revision by git rev (`tools/land/pin-framework.py`, for every URL in `framework.patch_urls`) and drops the local framework patch block. It then runs `cl check all` in the landed clone and prints the push command to `land.push_target`, branch `land.push_branch`.
 
 1. Pin only a framework revision that is already on `framework.branch` upstream (step 3 first). An app pinned to an unpushed or scrubbed-away commit does not build for anyone else.
 2. Regenerate `Cargo.lock` in the landing clone against the pinned revision with one resolve, and commit it. The lock must name no local path and no framework URL other than `framework.repo`.
@@ -142,7 +147,7 @@ Work after landing (issues on the landed port, red CI legs, conflicts on the lan
 - [ ] The framework changes are on `framework.branch`, and the framework integration branch is at the landed head.
 - [ ] The app's landing branch pins the landed framework revision by git rev, with no local path left, and is pushed.
 - [ ] `cl check all` passed in both landed clones, or each `--skip-check` reason is in `STATE.md`.
-- [ ] The look gate passed for both landed commits, or the `track phase 9 --force` decision covers what it reported.
+- [ ] The exit gate passed for both landed commits, or the `track phase 9 --force` decision covers what it reported.
 - [ ] The developer ran the app once on each platform it ships on, and the results are in `STATE.md`.
 - [ ] CI results for both repositories are recorded on the dashboard and in `STATE.md`.
 - [ ] `tools/track md` has written `STATUS.md` in the workspace.

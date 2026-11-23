@@ -77,7 +77,7 @@ Every long-running tool posts one event to the progress dashboard when it ends, 
 
 ### Other tools
 
-`coverage.py`, `compare-runs.py`, `diag-cut.py`, `feature-selection.py`, `crate-order.py`, `swarm.py` (also `--follow-up TASK PROMPT-FILE`), `render-prompt`, `init-workspace`, `land/*` (both landing tools run the look gate, `land/look-gate.py`), `track`, `look` (also `look brief CLASS`, a look fixer's brief), `collect-logs` (packs a run's logs for review; README "Sending your run's logs"), `lead-context` (the plugin's SessionStart hook, `hooks/hooks.json`: prints the lead's context in a port workspace), `kit-check` and `check-workflow` (parses the workflow scripts as `swarm.py` loads them) are described in their own headers and in the process docs that use them; `track` and `look` also in `track.md` and `look.md`.
+`coverage.py`, `compare-runs.py`, `diag-cut.py`, `feature-selection.py`, `crate-order.py`, `swarm.py` (also `--follow-up TASK PROMPT-FILE`), `render-prompt`, `init-workspace`, `land/*` (both landing tools run the exit gate, `land/exit-gate.py`: the phase 8 look and tests rows), `test-ledger.py` (the test ledger and its check; also `stale`), `track`, `look` (also `look brief CLASS`, a look fixer's brief), `collect-logs` (packs a run's logs for review; README "Sending your run's logs"), `lead-context` (the plugin's SessionStart hook, `hooks/hooks.json`: prints the lead's context in a port workspace), `kit-check` and `check-workflow` (parses the workflow scripts as `swarm.py` loads them) are described in their own headers and in the process docs that use them; `track` and `look` also in `track.md` and `look.md`.
 
 ## Interfaces between tools
 

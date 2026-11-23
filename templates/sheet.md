@@ -29,7 +29,7 @@ Every reader that `git grep` finds at the base: production code, tests, examples
 | File | Test | Verdict | Reason; for a rewrite, what it asserts afterwards and through which driver |
 |---|---|---|---|
 
-Every test function in every file of this set, including files it deletes. Verdicts: `keep`, `rewrite`, `delete`, `new`. Judged by the testing rule (rules/testing-rule.md).
+Every test function in every file of this set, including files it deletes. Verdicts: `keep`, `rewrite` (same name, same file; what it asserts changes), `move` (the behaviour goes to another test, here or in another set's file: the Reason cell starts `to <path> <test fn>`, the path with its `(fw)` or `(app)` suffix when both repos have it), `delete`, `new`. A test whose name or file changes is a `move`. Judged by the testing rule (rules/testing-rule.md). The land gate refuses a test that leaves the suite without `delete` or a passing `move` target (tools/test-ledger.py).
 
 ## Writer notes
 

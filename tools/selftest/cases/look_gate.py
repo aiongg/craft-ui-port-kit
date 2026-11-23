@@ -28,6 +28,8 @@ def setup(s, phase: int = 8):
     for st in doc["states"]:
         st["map"] = "core A1"
     (look / "states" / f"{PANEL}.json").write_text(json.dumps(doc))
+    (s.work / "runs").mkdir(exist_ok=True)
+    (s.work / "runs" / "baseline.json").write_text("{}\n")   # an empty ledger: the tests rows pass
     f = s.config({"look.driver": str(look / "driver.py"), "look.production_binary": str(look / "production")})
     f.write_text(f.read_text() + f'[[areas]]\nid = "core"\ncode = "co"\nmap = "{s.work / "core-map.md"}"\n')
     s.run("track", "phase", "0")
@@ -71,8 +73,8 @@ def phase9(s, ok: bool, needle: str):
 
 
 def land(s, ok: bool, needle: str, which: str = "app"):
-    r = s.run("land/look-gate.py", which, s.heads["app" if which == "app" else "framework"])
-    check((r.returncode == 0) == ok and needle in r.stdout + r.stderr, f"look-gate {which}: expected {needle!r}", r)
+    r = s.run("land/exit-gate.py", which, s.heads["app" if which == "app" else "framework"])
+    check((r.returncode == 0) == ok and needle in r.stdout + r.stderr, f"exit-gate {which}: expected {needle!r}", r)
 
 
 def case_phase8_gate(s):

@@ -100,6 +100,7 @@ A `question` line is a blocking question. Questions asked without `--blocking` c
 - **`--force "reason"`** records the phase anyway, with a `decision` event naming every failing item and the reason. The event's `forced` field holds the same as data: `{"from": <phase left>, "to": N, "items": [<item texts>], "reason": ...}`.
 - **`--force` on the current phase** runs the exit items of the phase before it again and records a new decision when any fails. Use it when an item breaks after the move: the landing tools read the latest `track phase 9` record ([tools/look.md](look.md), "The phase gate").
 - **The look items** ([tools/look.md](look.md), "The phase gate"): at exit 0 the look driver and the production build exist; at exit 1 every map section has a states file and production reaches every state; at exit 8 every state has a pair from the current port head, every difference is fixed or kept with a reason, and the lead accepted every panel. The landing tools run the phase 8 look items too and accept only the phase 9 decision as an override.
+- **The test ledger:** at exit 8 every test gone since the baseline has a `delete` verdict or a passing `move` target (`tools/test-ledger.py --check`); at exit 7 every `keep` test a fixer marked stale has a triage row. The landing tools run the ledger check too (`tools/land/exit-gate.py`), with the same override.
 
 The other exit items stay the lead's to check. A new machine-checkable item is one function and one `ExitCheck` entry in `PHASE_EXITS`.
 

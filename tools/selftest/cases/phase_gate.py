@@ -210,9 +210,10 @@ expect(8, False, "DIAG lines: app.integration")
 expect(8, False, "uncommitted changes in app.integration")
 commit(app, "no diag")
 track("status", "t-1", "done", "--group", "tracks")
-expect(5, False, "triage.tsv")
 (W / "runs").mkdir(exist_ok=True)
-(W / "runs/triage.tsv").write_text("")
+(W / "runs/stale.tsv").write_text("tests::old\tt-1\treads a replaced label\n")
+expect(5, False, "marked stale and not triaged: tests::old")
+(W / "runs/triage.tsv").write_text("tests::old\tsrc/lib.rs:1-9\tcut\tlabel only\tstale premise\n")
 expect(5, True, "06-write.md", extra=("--batch", "app-1"))
 
 # ---- re-record keeps batch and runs no gate; a step back is refused

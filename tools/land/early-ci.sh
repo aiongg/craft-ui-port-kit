@@ -21,7 +21,7 @@
 #      that branch's open PR (the push updated it).
 # With land.early_ci_approved = false it prints the three commands and exits 0; the developer may run them. With
 # true it runs them. Nothing else is pushed, no PR is opened outside the fork, and every PR is a draft. It refuses
-# a fork URL equal to framework.repo, app.upstream or land.push_target. The look gate and `cl check all` do not run:
+# a fork URL equal to framework.repo, app.upstream or land.push_target. The exit gate and `cl check all` do not run:
 # the CI legs are the check. Each run appends a row to <work.landing>/early-ci.tsv (time, label, ref, scrubbed head,
 # fork, pushed | printed), which cycle reads.
 # Config: framework.repo, framework.branch, land.early_ci_fork, land.early_ci_approved, app.upstream,

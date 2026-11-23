@@ -25,7 +25,7 @@ The per-task model (one agent plans, writes, builds and gates one task) stays on
 | 4 | Plan check and decisions | Stubs compile | No DECIDE item open; audits report 0 | `sets/<set>/plancheck.md`, `decisions.md`, `decide/<area>.md` | Sonnet per set; Opus per decision part; Opus consistency pass | none | [05-plancheck-decide.md](05-plancheck-decide.md) |
 | 5 | Write | Audits clean | Every set of the batch written; each set's check has no errors; racheck errors in its own files are 0 or explained | `sets/<set>/`, set branches | Sonnet by default; Opus for shared mechanisms and retries | none (racheck only) | [06-write.md](06-write.md) |
 | 6 | Review, combine, compile | A batch is written | Each set reviewed and fixed; the integration branch compiles, framework crates first, then the app | `review-*.md`, the batch's integration branch, compile logs | Opus reviewer per area and side; Sonnet fixers | one compile per batch | [07-review-combine-compile.md](07-review-combine-compile.md) |
-| 7 | Tests and red rounds | The batch compiles | Kept tests pass; every triage verdict carried out; no `DIAG ` line left; formatted | run logs, triage TSV, round reports | Sonnet fixers per track (Opus for framework causes) | one build and one full run per round | [08-tests-and-red-rounds.md](08-tests-and-red-rounds.md) |
+| 7 | Tests and red rounds | The batch compiles | Kept tests pass; every plan and triage verdict carried out (the test ledger); no `DIAG ` line left; formatted | run logs, triage TSV, round reports | Sonnet fixers per track (Opus for framework causes) | one build and one full run per round | [08-tests-and-red-rounds.md](08-tests-and-red-rounds.md) |
 | 8 | Look and behaviour | Tests green | Every map section's states compared with the old app and accepted | states files, old/new captures | one agent per component class | incremental | [09-look-and-behaviour.md](09-look-and-behaviour.md) |
 | 9 | Land | Look accepted | Framework changes on `framework.branch`; app scrubbed and pinned to the landed framework rev; CI result recorded | scan reports, landing clones | lead | CI | [10-land.md](10-land.md) |
 
@@ -123,5 +123,6 @@ Every agent gets the rules in full, through its prompt:
 | Owed line | A line a set not yet written must provide, added on the integration branch as a marked commit so the batch compiles. |
 | Track | A group of failing tests with one likely cause, given to one fixer in a red round. |
 | Red round | One cycle of phase 7: fixers write fixes for their tracks, then one `tools/cycle` run merges all of them, builds once, runs the tests once and sends each fixer its packet. |
-| Triage verdict | The decision for a failing test: `keep` (fix the code), `cut` (delete the test), `cut-fix` (fix the bug, then delete the test), `move` (into a framework trial). |
+| Triage verdict | The decision for a failing `keep` test a fixer marked stale: `keep` (fix the code), `cut` (delete the test), `cut-fix` (fix the bug, then delete the test), `move` (into a framework trial). |
+| Test ledger | `<work.runs>/ledger.tsv`: every test of the baseline with its set, its plan or triage verdict and its status now (`tools/test-ledger.py`). The land gate refuses a test that left the suite without `delete` or a passing `move` target. |
 | `track` | The kit's dashboard command (`tools/track`). |

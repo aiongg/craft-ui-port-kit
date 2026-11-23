@@ -38,8 +38,8 @@ Each phase has one runbook. Read it in full when the phase starts, and follow it
 | 3 | Contract stubs | `process/04-contract-stubs.md` | `p3-contract-stubs-stage` | `cl check`; `scip/scipdb.py` |
 | 4 | Plan check and decisions | `process/05-plancheck-decide.md` | `p4-*` | `run-batch --plancheck`, `port-set collect`, `port-set remap`, `port-set audit` |
 | 5 | Write | `process/06-write.md` | (port-set builds its own) | `run-area`, `run-batch`, `port-set`, `racheck.py` |
-| 6 | Review, combine, compile | `process/07-review-combine-compile.md` | `p6-*`, `p-rulings` | `fix-batch`, `combine-area`, `racheck-gate`, `gate-classify.py`, `compile-gate`, `split-errors.py` |
-| 7 | Tests and red rounds | `process/08-tests-and-red-rounds.md` | `p7-*` | `test-run`, `compare-runs.py`, `split-failures.py`, `diag-cut.py` |
+| 6 | Review, combine, compile | `process/07-review-combine-compile.md` | `p6-*`, `p-rulings` | `fix-batch`, `combine-area`, `racheck-gate`, `gate-classify.py`, `cycle` (runs `compile-gate`), `split-errors.py` |
+| 7 | Tests and red rounds | `process/08-tests-and-red-rounds.md` | `p7-*` | `cycle` (runs `test-run`, `compare-runs.py`, `diag-cut.py`, `swarm.py --follow-up`), `split-failures.py`, `track eta` |
 | 8 | Look and behaviour | `process/09-look-and-behaviour.md` | `p8-task-brief` | `look pair`, `look brief` |
 | 9 | Land | `process/10-land.md` | `p9-production-merge` | `land/scan-range.py`, `land/land-framework.sh`, `land/land-app.sh` (both run `land/look-gate.py`), `land/pin-framework.py` |
 

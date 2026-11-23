@@ -1,13 +1,13 @@
 # Phase 7: tests and red rounds
 
-Phase 7 makes the compiled batch pass its tests. Every failing test gets a verdict first (keep, cut, cut-fix or move), judged from its body, the code it drives and production. Then fixers work in **red rounds**: each fixer writes code-only fixes for its whole list, the lead builds every fix together once and runs the tests once, and each fixer gets back the tests of its list that still fail. One build per round serves every fixer, so a round costs the same wall time for one fix as for a hundred.
+Phase 7 makes the compiled batch pass its tests. Every failing test gets a verdict first (keep, cut, cut-fix or move), judged from its body, the code it drives and production. Then fixers work in **red rounds**: each fixer writes fixes for its whole list, one `tools/cycle` run builds every fix together and runs the tests once, and each fixer gets back the tests of its list that still fail. One build per round serves every fixer, so a round costs the same wall time for one fix as for a hundred.
 
 | | |
 |---|---|
 | Starts when | The batch compiles ([07-review-combine-compile.md](07-review-combine-compile.md)). |
 | Ends when | The exit criteria below hold. |
-| Agents | Triage agents on the calibrated model (`models.triage`); Sonnet fixers per track (`models.red_fixer`), Opus for tracks with a framework cause (`models.red_fixer_framework`); one integrator per round if the lead delegates the merge and run (`models.red_integrator`). |
-| Builds | One compile and one full run per round, in the integration trees. Fixers never build. |
+| Agents | Triage agents on the calibrated model (`models.triage`); Sonnet fixers per track (`models.red_fixer`), Opus for tracks with a framework cause (`models.red_fixer_framework`). |
+| Builds | One cycle per round in the integration trees (`tools/cycle`). Fixers build only in the fixer mode `build` ([11-build-loop.md](11-build-loop.md), rule 3). |
 | Output | Run logs and failure lists under `work.runs`, the triage table, `groups.md` and a report per run, under `work.runs` (`templates/run-report.md`). |
 
 Record the phase: `tools/track phase 7 "tests and red rounds"`.
@@ -16,7 +16,7 @@ Record the phase: `tools/track phase 7 "tests and red rounds"`.
 
 Every full app run in this phase has a label, `<batch>-run-<n>` (written `run-<n>` below). The label names the run's directory under `work.runs`, where test-run writes its logs and failure list. test-run numbers the dashboard rounds itself, continuing across batches after the baseline's round 0.
 
-1. Run the framework trials of every crate changed since `plan.base`, then the app's first full run, as background tasks: `tools/test-run run-1-fw --fw` and `tools/test-run run-1 --app`. The app run builds with `--no-run` first, then runs every test binary; the failing tests go to `<work.runs>/run-1/app.failed`. test-run records the round on the dashboard itself. Each run's `compare.md` lists, per test binary, whether it ran, crashed or went missing against the previous run and the baseline, and names every test that disappeared; a test that disappeared needs a triage row like a deleted one. Exit 2 is a tool failure, never a pass: fix the build loop and run again.
+1. The cycle that compiled the batch ran the first full run ([07-review-combine-compile.md](07-review-combine-compile.md), step 6): the framework trials of every crate changed since `plan.base` (`test-run run-1-fw --fw`) and the app's first full run (`test-run run-1 --app`). The app run builds with `--no-run` first, then runs every test binary; the failing tests go to `<work.runs>/run-1/app.failed`. test-run records the round on the dashboard itself. Each run's `compare.md` lists, per test binary, whether it ran, crashed or went missing against the previous run and the baseline, and names every test that disappeared; a test that disappeared needs a triage row like a deleted one. Exit 2 is a tool failure, never a pass: fix the build loop and run again.
 2. Compare it with the baseline (`work.baseline_failures`, from [01-setup.md](01-setup.md), step 7) with `tools/compare-runs.py`. A test that failed before the port is never charged to the port.
 3. In a framework batch, separate the **expected** failures: tests that fail on a `todo!` stub or an owed line of a set not yet written. Name the owing set for each and leave them out of the rounds; they must pass once that set lands.
 
@@ -58,31 +58,27 @@ Tracks are formed from the latest run, `run-<n>`, and their fixers work from it:
 2. Adjust the groups by cause, using the triage table's cause column: tests that share a cause belong to one track, even across modules. A track whose cause is in a framework crate gets the framework fixer model.
 3. Write `<work.runs>/run-<n>/groups.md`: one section per track with its tests, their triage rows and the class rows (shared causes) it names.
 4. Write a tracks file (one `TRACK_ID TITLE` per line) and put the tracks on the board: `tools/track import tracks <file>`.
-5. Give each fixer its own code-only trees (a framework tree and an app tree whose patch points at it) under `work.trees`, on branches `red/<track>`, cut from the integration heads. Name in its prompt which trees it may edit: a fixer that may not edit the framework reports framework causes instead.
+5. Give each fixer its own trees, on branches `red/<track>` cut from the integration heads: code-only trees under `work.trees` (a framework tree and an app tree whose patch points at it) in the fixer mode `code-only`, build trees from the pool in the mode `build` ([11-build-loop.md](11-build-loop.md), rule 3). Name in its prompt which trees it may edit: a fixer that may not edit the framework reports framework causes instead.
+6. Write the fixers file of the round: one line per track, `<track>` (its branches are then `red/<track>`), or `<track> fw:<branch> app:<branch>`.
 
 ## Step 5: run a red round
 
-Each round has four parts. Fixers never run cargo; the lead runs one build and one full run for all of them.
+1. **Fixers write.** Start one fixer per track through `tools/swarm.py` (a job list with `"task": "<track>"`, `prompts/p7-red-fixer.md` with `{{TRACK}}`, `{{ROUND}}`, `{{TASK}}`), so later rounds can resume each one, paced over the quota window. Each fixer, for every test on its list: reads the test, the code it drives and production until it knows the cause, and writes the fix. In the fixer mode `code-only`, where reading leaves the cause uncertain, it writes its best fix and targeted prints, `eprintln!("DIAG <test_name>: ...")`, which the shared run confirms or refutes; in the mode `build` it runs its own failing tests in its build tree. It commits and hands back with a cause, fix and confidence per test, and posts one `track event fix` line per test.
+2. **One cycle.** When every fixer of the round has handed back, run the round's cycle as a background task:
 
-1. **Fixers write.** Start one fixer per track as background tasks (`prompts/p7-red-fixer.md` with `{{TRACK}}`, `{{ROUND}}`, `{{TASK}}`), paced over the quota window. Each fixer, for every test on its list: reads the test, the code it drives and production until it knows the cause, and writes the fix. Where reading leaves the cause uncertain, it writes its best fix and targeted prints, `eprintln!("DIAG <test_name>: ...")`, which the shared run will confirm or refute. It commits (prints included) and hands back with a cause, fix and confidence per test. It posts one `track event fix` line per test.
-2. **One build and one run.** When every fixer of the round has handed back, merge their branches, one at a time, into both integration trees. Where two fixers added a mechanism for the same concept, keep the one already on the integration branch and point the other fixer's caller and test at it. Then:
-   - `tools/compile-gate run-<n+1>`; fix mechanical compile errors (an import, a path) yourself;
-   - `tools/test-run run-<n+1>-fw --fw` for the framework trials of every crate changed since `plan.base` (`--fw <crate>` names crates instead);
-   - `tools/test-run run-<n+1> --app` for the one full app run;
-   - `tools/compare-runs.py run-<n+1> run-<n> --tracks <run-n>/groups.md`: per track, tests fixed, still failing, and new failures with the fixer most likely to have caused each;
-   - `tools/diag-cut.py run-<n+1> --tracks <run-n>/groups.md`: one return packet per fixer, holding the still-failing tests of its list, each with its panic line and its `DIAG <test_name>` lines.
+   ```sh
+   tools/cycle <batch>-run-<n+1> --fixers <fixers file> --tracks <work.runs>/run-<n>/groups.md
+   ```
 
-   You may give this part to one integrator agent (`prompts/p7-red-integrator.md` with `{{ROUND}} = run-<n+1>`, task `run-<n+1>`), which owns both integration trees until it reports. The integrator also runs `cargo fmt` on the changed crates only, never on vendored code. The packets still go back through you.
-3. **Report.** Write `<work.runs>/run-<n+1>/report.md` (`templates/run-report.md`): merges and conflict choices, compile fixes, counts against the previous round, the per-track table, new failures with their attribution, and the build and run times. test-run and compare-runs post the round's counts on the dashboard themselves, and diag-cut links each packet to its track's task. Record the merges: `tools/track event merge "run-<n+1>: <k> fixer branches"`.
-4. **Send each packet to the same fixer.** Resume the agent that wrote the fixes, with its packet, never a fresh one: it already knows its tests and its causes. For a `swarm.py` fixer: `tools/swarm.py --follow-up <task> <packet>` ([12-running-agents.md](12-running-agents.md), "Resuming agents"). A new failure goes to the track whose change caused it. Start a fresh agent only when the old one's context is too large, with its report and packet as its brief.
-
-Then the next round starts with part 1, from `run-<n+1>`, for the tests still failing. A fixer removes the prints of each test that passes in its next commit.
+   It merges each fixer's branches into both integration trees, compiles, formats the changed crates and commits the result, runs clippy and the doc build on them, runs the framework trials of every crate changed since `plan.base` and the one full app run, compares the run with the last one per track (`compare-runs.py`, written to `tracks.md` in the run dir), cuts one packet per fixer (`diag-cut.py`: its still-failing tests with their panic lines and `DIAG <test_name>` lines, plus compile errors and lint findings in files its commits changed), and sends each packet to the same fixer, resumed through `swarm.py --follow-up` ([12-running-agents.md](12-running-agents.md), "Resuming agents"). It waits until every fixer has handed back or passed `pipeline.followup_timeout_min`, writes `report.md` in the run dir (`templates/run-report.md` has the sections you add by hand), and ends with one summary line. Later cycles take the fixers file and the tracks from the previous cycle, so `tools/cycle <batch>-run-<n+2>` is enough.
+3. **Read the cycle's result.** Its summary line and `report.md`: merges, compile, lint, counts against the previous round, new failures with the track most likely to have caused them, stalled fixers and the errors no fixer owns. A merge conflict stops the cycle before the compile (exit 3): resolve it on the integration branch and run the cycle again. Where two fixers added a mechanism for the same concept, keep the one already on the integration branch and point the other fixer's caller and test at it. A new failure goes to the track whose change caused it.
+4. **Next round.** The fixers are working on their packets by the time the cycle ends; when they hand back, run the next cycle. Start a fresh fixer only when the old one's context is too large, with its report and packet as its brief. A fixer removes the prints of each test that passes in its next commit.
 
 **When a track stalls.** If a track's failing count does not fall for two rounds, read its failures and DIAG lines yourself. Rebrief it with what you found, give it the Opus fixer model, or send the cause back to the plan when the failures show a contract error.
 
-## Why fixers never build
+## When fixers build
 
-The first full rounds of one port showed an app rebuild after a framework change of about 12 minutes, and a full run of 15 to 17 minutes (`costs.md`, phase 7). A fixer that builds and runs for each attempt spends most of its time waiting, and several fixers in one target dir queue behind each other. Writing every fix by reading, and confirming uncertain causes through DIAG prints in one shared run, keeps one build per round for everyone. `lessons.md` has the rounds that led here.
+Whether red fixers build is the fixer mode (`pipeline.fixer_mode`), set from the build times phase 0 measured: [11-build-loop.md](11-build-loop.md), rule 3.
 
 ## Exit criteria
 
@@ -91,7 +87,7 @@ The first full rounds of one port showed an app rebuild after a framework change
 - [ ] No new failure against the baseline; every remaining failure is in `work.baseline_failures` or is an expected failure owed by a named set of a later batch.
 - [ ] The framework trials of every crate the batch changed pass, and so does the shared suite over every story the batch added.
 - [ ] `git grep -n 'DIAG '` returns nothing in either integration tree.
-- [ ] `cargo fmt` has run on the changed crates (not on vendored code), and both integration branches are committed.
+- [ ] The last cycle formatted the changed crates (not vendored code) and reports no clippy or doc finding in them; both integration branches are committed.
 - [ ] The last round's report is written and the dashboard shows its counts.
 
 Then go to the next build batch: record `tools/track phase 5 "write" --batch <batch>` and follow [06-write.md](06-write.md), "Write order". After the last app batch, record `tools/track phase 8 "look and behaviour"` and go to [09-look-and-behaviour.md](09-look-and-behaviour.md). `track phase` runs the items a script can check and refuses while one fails ([tools/track.md](../tools/track.md), "The phase gate").

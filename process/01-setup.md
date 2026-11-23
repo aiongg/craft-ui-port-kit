@@ -146,6 +146,8 @@ It writes the run's logs under `<work.runs>/baseline/`, the failing tests to `wo
 
 If the run does not finish, or most tests fail, the build loop is wrong (a missing environment variable, a scratch directory the tests expect). Fix it and run again before going on.
 
+Then record the two build times the fixer mode and the projection use, `build.warm_check_s` and `build.full_run_s`, in `port.toml` ([11-build-loop.md](11-build-loop.md), "Measuring the fixer mode's inputs").
+
 Then start the framework baseline as a background task, in the framework integration tree at `plan.base`:
 
 ```sh

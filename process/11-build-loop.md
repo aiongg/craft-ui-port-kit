@@ -8,7 +8,7 @@ A cargo workspace in which every app crate links the framework rebuilds far more
 
 1. Every cargo command goes through the framework's `cl` (`build.cl`), in the framework tree and in the app tree alike.
 2. Each build tree has its own target dir, kept warm. New target dirs are seeded from a warm one.
-3. Agents write in code-only trees. Build trees are few, and are held only to compile, run trials and capture.
+3. Writers write in code-only trees in every mode. Compile and red fixers follow the **fixer mode** (`pipeline.fixer_mode`): in `code-only` they write with no cargo and `DIAG ` prints where unsure; in `build` each takes a tree from the build pool and runs `cl check` of its group's crates or its own failing tests there; `auto` picks `build` when `build.warm_check_s` plus `build.full_run_s` is at most `pipeline.fixer_build_max_s`. Build trees are few, and are held only to compile, run trials and capture.
 4. No workspace-wide build or test locally, and no `--all-features` or `--bins`. CI runs those.
 5. A slow loop is diagnosed from `cl`'s build records, never by timing another long run.
 
@@ -94,6 +94,16 @@ Each of these makes a second copy of a crate and everything above it, or rebuild
 | Profile settings change between builds in one target dir (incremental, codegen units, opt-level overrides) | Compare the command lines in `cl.log` | Use the same settings for every build in a target dir |
 | Tests that keep a scratch reserve read a large `TMPDIR` | Test failures about free space | Set one `TMPDIR` for every command |
 
+## The cycle
+
+`tools/cycle LABEL` is one build-and-test cycle of phases 6 and 7 as one command, and the lead's one notification per cycle: it merges the round's fixer branches into the integration trees, runs `compile-gate`, formats the changed crates with `cl cargo fmt` and commits the result, runs clippy with warnings denied and the doc build with `RUSTDOCFLAGS="-D warnings"` on them, runs `test-run` for the framework trials and the app, compares the run per track, runs `look pair` for the cycle's areas when the app compiles and `look.port_build` is set, cuts one packet per fixer, sends each to the same fixer through `swarm.py --follow-up`, and waits for them to hand back. Clippy and the doc build go through `cl cargo` with cl's own selection (the crates plus `feature-root` with `cl features <crate>` in the framework, the whole `selection` in the app), so they reuse the check's builds and add no feature set. `tools/cycle --help` has every step, `tools/README.md` its outputs.
+
+Each cycle appends its seconds per step to `<work.runs>/cycles.tsv`, with the gap since the previous cycle ended: that gap is the time fixers and the lead took between cycles. `track eta` projects the finish from these numbers ([costs.md](costs.md), "The cycle model").
+
+### Measuring the fixer mode's inputs
+
+In phase 0, after the baseline, record two times in `port.toml`: `build.warm_check_s`, the seconds of `tools/compile-gate` of the app after a one-file change in the app integration tree (its `summary.json` has the app half's `seconds`), and `build.full_run_s`, the seconds of the baseline's `test-run --app` once the build is warm (its stdout and `cl.log`). They decide `pipeline.fixer_mode = "auto"`, and price a cycle before any has run.
+
 ## Target dirs and trees
 
 - **One target dir per build tree.** `cl` uses `<worktree>-target` when that directory exists beside the worktree, else `CARGO_TARGET_DIR`, else `target/`. Never share a target dir between worktrees: some tools bake the workspace root into their binaries, so a shared dir silently tests the wrong tree.
@@ -175,4 +185,4 @@ These are the targets every loop is held to. Every agent report and every lead u
 
 ## What CI covers
 
-The framework's CI runs the workspace-wide checks (format, clippy, tests with and without `--all-features`) on pushes to its main and `next` branches and on pull requests. Locally, build the crates you changed and run their trials, run `cargo fmt --all` before each push (it needs no build), and let CI run the rest. A full local CI run happens only for a specific reason (a CI failure the log cannot explain, a check CI skips), stated in the report.
+The framework's CI runs the workspace-wide checks (format, clippy, tests with and without `--all-features`) on pushes to its main and `next` branches and on pull requests. Locally, build the crates you changed and run their trials; every cycle formats the changed crates and runs clippy and the doc build on them, so CI's format, clippy and doc legs pass on what the port changed. Run `cargo fmt --all` before each push (it needs no build), and let CI run the rest. A full local CI run happens only for a specific reason (a CI failure the log cannot explain, a check CI skips), stated in the report.

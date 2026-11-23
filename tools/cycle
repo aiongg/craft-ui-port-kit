@@ -386,8 +386,10 @@ class Cycle:
         for task in tasks:
             pk = diag_dir / f"{task}.md"
             failing = _failing_in_packet(pk) if pk.is_file() else 0
-            diag_left = any(git(self.trees[r], "grep", "-q", "DIAG ", br, check=False).returncode == 0
-                            for r, br in branches.get(task, {}).items() if r in self.trees)
+            diag_left = any(git(self.trees[r], "grep", "-q", "DIAG ", br, "--", *sorted(touched[task][r]),
+                                check=False).returncode == 0
+                            for r, br in branches.get(task, {}).items()
+                            if r in self.trees and touched.get(task, {}).get(r))
             mine = owned.get(task, [])
             if not failing and not mine and not diag_left:
                 result[task] = {"packet": None, "failing": 0, "findings": 0}

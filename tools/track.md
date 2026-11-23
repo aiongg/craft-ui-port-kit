@@ -29,7 +29,7 @@ The kit never picks a host and never exposes anything itself. In phase 0 (proces
 | Your own static server or tunnel | Point it at `track.out_dir`. Any server that serves files works; the page only reads `state.json`. | No: answer in chat with the lead or with `track answer` |
 | Open the file | Open `<out_dir>/index.html` in a browser. The page loads `state.js`, because a `file://` page cannot fetch `state.json`. | No |
 | `track serve` | Serves `out_dir` on `track.serve_host:track.serve_port` (default `127.0.0.1:8765`). | Yes: option buttons and a text field on each open question |
-| Terminal only | `track show`, `track alerts` | - |
+| Terminal only | `track show`, `track eta`, `track alerts` | - |
 
 `track serve` is a plain fallback (Python's `http.server`). It binds to localhost by default; to reach it from another device, put your own tunnel in front of it. It accepts answers only as `POST /api/answer` with a JSON body and refuses requests whose `Origin` names another site.
 
@@ -55,6 +55,7 @@ Run `tools/track --help` for the summary. `--config PATH` before the command pic
 | Command | Does |
 |---|---|
 | `track show [TASK] [--json]` | Text view: phase, counts, tasks by state with age, open questions. With TASK: its history, links, questions and last tool event. |
+| `track eta [--json]` | The cycle projection: cycles run, median cycle period, cycles per finished batch, cycles left, sets left over the measured rate, the finish, and the weekly quota at the finish (`process/costs.md`, "The cycle model"). `--json` prints `eta.cycles`. |
 | `track alerts [--stale-min N]` | One line per item that needs action (below). Always exits 0, so a poll loop never stops on it. |
 | `track watch [--timeout MIN] [--poll SEC]` | Waits for the next new alert line or the timeout (below). Always exits 0. |
 | `track md [--out PATH]` | Writes STATUS.md (phase, tasks by state, questions, rounds) in the workspace. Default path: `<work.dir>/STATUS.md`; a path outside `work.dir` is refused; `--out -` prints it. |
@@ -142,6 +143,7 @@ Everything a script knows, the script records. Agents report only judgement.
 - Every long-running kit command posts one event when it ends, success or failure, with its duration, log path and key numbers. Python tools wrap their body in `track.recorded()`; shell tools run their main command through `track run`.
 - `test-run` posts `track.round()` itself for every full run (pass, fail, log); `compare-runs.py` posts the round only with `--round N`, else a `compare` event with the new failures by track.
 - `diag-cut.py` links each track's packet to its task.
+- `cycle` posts one `cycle` event per cycle (its seconds, batch, failing count and weekly use, which `track eta` reads), a `merge` event on each fixer's task, moves a fixer with nothing left to `done`, records the batch and area with `track phase`, and records phase 7 after the cycle that compiles a phase 6 batch (the phase gate decides).
 - `port-set` sets each set's task from its own exit states (OPEN, BLOCKED, OUT OF TURNS) and records each model call's tokens on the set's task.
 - `swarm.py` creates one task per job and moves it through `todo`, `running`, `done` or `failed`.
 - `track publish` derives the rest: stale tasks, branch heads that moved (`track.heads`), and a projected finish.
@@ -221,9 +223,10 @@ The store is `track.dir` (default `<workspace>/track`):
 | `tasks` | By id, in creation order: `title`, `group`, `state`, `step`, `note`, `on`, `links`, `model`, `calls`, `runs`, `created`, `updated` (last event naming it), `changed` (last state or step change), `started`, `ended`, `last` (last tool event), `history` (last 40 state changes) |
 | `questions` | `{id, task, text, options, for, t, recommend, blocking, answer: {text, by, t} or null}` |
 | `rounds` | `{n, pass, fail, log, data, t}` in order |
+| `cycles` | The newest 200 `cycle` events of `tools/cycle`: `{t, ok, label, exit, phase, batch, area, mode, total_s, gap_s, errors, failing, weekly_pct}` in order |
 | `heads` | By label: `{sha, prev, ref, path, since}` |
 | `stale` | Stale tasks at fold time (the page and `track alerts` recompute this against the clock) |
-| `eta` | Projection: `done`, `left`, `rate_recent` (tasks done per hour over the last 24 h, or since the first start when that is shorter), `rate_all`, `median_task_h` (first `running` to `done`), `finish_low` and `finish_high` (the faster and the slower rate), `groups` (left and total per group), `steps` (median minutes per step, measured from step and state changes), `basis` |
+| `eta` | Projection: `done`, `left`, `rate_recent` (tasks done per hour over the last 24 h, or since the first start when that is shorter), `rate_all`, `median_task_h` (first `running` to `done`), `finish_low` and `finish_high` (the faster and the slower rate), `groups` (left and total per group), `steps` (median minutes per step, measured from step and state changes), `basis`; `cycles`: the cycle model (`cycles`, `period_s` (median start-to-start seconds within a batch), `periods_measured`, `per_batch`, `batches_seen`, `build_batches` (`plan.build_batches`), `current_batch`, `left`, `cycle_h`, `sets_left`, `sets_per_h`, `write_h`, `total_h`, `finish`, `weekly`: `{now_pct, per_h, at_finish_pct, passes}` or null, `notes`) |
 | `log` | The newest 400 events, newest first: `{t, kind, task, text, ok, links, data, by}` |
 
 ## Config keys

@@ -61,7 +61,22 @@ The panels area ran end to end first: 18 sets (13 framework, 5 app), 7,000 frame
 2. **Phase 2.** Sets scale with map sections: PhotoCraft had about 0.6 sets per map section and about 520 lines to write per set. Phase 2 is the most quota-heavy phase per line: budget most of a subscription week for an app of PhotoCraft's size, and expect one fix round and one re-evaluation.
 3. **Phases 4-6, per set.** Plan check about $0.65; write about $1.70 for a Sonnet set (one-shot or agent mode); $3 to $9 for an Opus set; review fix about $0.85 including the test-failure round. Count the Opus sets from the sheets: framework sets that change a shared mechanism (pass, input routing, focus, layout, paint), plus retries.
 4. **Wall time of writing.** Sets / `pipeline.parallel` x 5 to 10 min per set. At 6 in parallel, about 35 to 70 sets per hour; the pilot wrote 13 sets in 15 min.
-5. **Build passes.** Wall time in phases 6 and 7 follows the number of build passes, not the number of sets: a warm incremental build costs about the same for 20 sets as for 60. Count one compile per batch plus one build and one full run per red round, and expect 5 or 6 red rounds per app batch. Price each pass from this app's own phase 0 timings (warm build, full run).
+5. **Cycles.** Wall time in phases 6 and 7 follows the number of cycles, not the number of sets: a warm incremental build costs about the same for 20 sets as for 60. Price them with "The cycle model" below.
 6. **Compare with the plan's size.** If the plan writes more than about half of what it deletes on the app side, the size audit in phase 2 should have cut it; a near one-to-one rewrite costs as much as the old code did to write.
 
 Give the developer the projection as ranges, with the measured basis next to each number. Measure the pilot and re-project before writing the remaining areas.
+
+## The cycle model
+
+Phases 6 and 7 run as cycles (`tools/cycle`, [11-build-loop.md](11-build-loop.md), "The cycle"). Wall time is the number of cycles times the cycle period, plus writing:
+
+| Term | What it is | Before the first cycle | Once cycles have run |
+|---|---|---|---|
+| Cycle period | One cycle's build, runs and packets, plus the gap until the next cycle starts: fixers working on their packets and the lead's turn | `build.warm_check_s` + `build.full_run_s`, plus the fixers' time per round (agent times above) and a few minutes for the lead | The median start-to-start time of cycles in the same batch, from `<work.runs>/cycles.tsv` |
+| Cycles per batch | Compile cycles until the batch compiles, then red rounds until it passes | A guess from the plan's size; say so | The median over finished batches |
+| Batches | The build batches of the write order (`plan.build_batches`) | From the write order | The same, minus the batches already seen |
+| Writing | Sets left over sets per hour | "Wall time of writing" above | Sets done per hour on the board |
+
+`track eta` computes these from the cycle events and the board, and the dashboard shows them. The fixer mode changes the period: in `build`, fixers confirm their fixes before they hand back, so a round's gap is longer and the cycles per batch fewer.
+
+**Quota.** The lead's own session uses the same allowance as the agents, and `work.usage_log` holds only the agents' calls. So the projection reads the account's weekly use through `pipeline.weekly_quota_command`, sampled at every cycle: the use per hour since the last reset, times the hours to the finish, gives the share at the finish. When it passes 100 %, ask the developer for a schedule or a second account before the next batch.

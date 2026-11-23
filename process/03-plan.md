@@ -116,7 +116,7 @@ Then put the sets on the board, so phases 4 to 7 have a task per set from the st
 
 ## Step 9: sizing and projection
 
-`sizing.md` gives the developer the size of the port: sets by model, files, lines to write and delete by repo and area, crates touched, test verdict totals. Add a projection for phases 3 to 7 from `costs.md` (cost per set and per call, sets per hour at the batch runner's parallelism), and propose the **pilot**: the shell plus the main-surface section with the most framework gaps, taken from the index's risk ranking ([06-write.md](06-write.md), "Write order").
+`sizing.md` gives the developer the size of the port: sets by model, files, lines to write and delete by repo and area, crates touched, test verdict totals. Add a projection for phases 3 to 7 from `costs.md` (cost per set and per call, sets per hour at the batch runner's parallelism, and the cycle model of "The cycle model" priced from phase 0's `build.warm_check_s` and `build.full_run_s`), with a weekly quota line: the share of the weekly allowance the rest of the port takes, the lead's own session included. When it passes the allowance, ask the developer for a schedule or a second account before phase 3. Then propose the **pilot**: the shell plus the main-surface section with the most framework gaps, taken from the index's risk ranking ([06-write.md](06-write.md), "Write order").
 
 ## Exit
 

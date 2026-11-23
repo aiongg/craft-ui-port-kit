@@ -7,7 +7,7 @@ Phase 6 turns a written build batch into one branch that compiles. The code is r
 | Starts when | A build batch is written ([06-write.md](06-write.md)). |
 | Ends when | Every set has a review verdict and its findings are fixed or ruled; the combined branch compiles, framework crates first, then the app; every component the batch adds has a registered story that renders. |
 | Agents | Opus reviewer per area and side (`models.review`); Sonnet fixers (`models.fix`, Opus `models.fix_retry` for a set that failed twice); Sonnet compile fixers per crate group (`models.compile_fix`). |
-| Builds | One compile per round in the integration trees, through `tools/compile-gate`. |
+| Builds | One compile per cycle in the integration trees, through `tools/cycle`. |
 | Output | `<work.sets>/<set>/review-<round>.md`, the review summaries, `<work.plan>/rulings.md`, the combined branch `area/<batch>` in each integration tree, compile logs under `work.runs`. |
 
 Record the phase: `tools/track phase 6 "review, combine, compile"`.
@@ -82,15 +82,21 @@ racheck-gate overlays the changed framework files on the framework daemon's tree
 | `mod-file` | A `mod` line with no module file | Fix: rust-analyzer reports nothing inside a missing module |
 | `downstream`, `macro` | Follow-on errors of another error, or many errors on one macro line | Fix the cause, not these |
 
-## Step 6: compile gate
+## Step 6: compile cycles
+
+From here every build runs as a **cycle**: one `tools/cycle` command that merges the fixers' branches, compiles, formats and lints the changed crates, runs the tests once the batch compiles, cuts each fixer's packet, sends it to the same fixer and waits for them to hand back ([11-build-loop.md](11-build-loop.md), "The cycle"). Run it as a background task; its last line is the one notification of the cycle.
+
+The first cycle of the batch has no fixers yet:
 
 ```sh
-tools/compile-gate <batch>
+tools/cycle <batch>-run-1 --batch <batch> --area <area>
 ```
 
-The framework half runs `cl check <crate> --keep-going` for each framework crate the batch changed and every workspace crate that depends on one, in dependency order (`tools/crate-order.py`), and never stops at a failing crate, so every independent crate's errors come back in one run. Each error is counted once and charged to the crate that owns its file; a crate that fails only on another crate's errors shows as `failed-through` that crate. The app half runs `cl check all --keep-going` in the app integration tree once the framework is clean. Logs go to `<work.runs>/<batch>/`, the result to `summary.json` there; the tool posts its own result on the dashboard. Run it as a background task.
+Its compile is `tools/compile-gate <batch>-run-1-compile`. The framework half runs `cl check <crate> --keep-going` for each framework crate the batch changed and every workspace crate that depends on one, in dependency order (`tools/crate-order.py`), and never stops at a failing crate, so every independent crate's errors come back in one run. Each error is counted once and charged to the crate that owns its file; a crate that fails only on another crate's errors shows as `failed-through` that crate. The app half runs `cl check all --keep-going` in the app integration tree once the framework is clean.
 
-Exit 1 means compile errors. Exit 2 means a tool failure: cl exited nonzero and printed no `file:line:col: error` line (a manifest, resolution or setup fault, printed by the gate). Never count exit 2 as a pass or as "0 errors"; fix the setup and run the gate again.
+A cycle that exits 2 met a tool failure: cl exited nonzero and printed no `file:line:col: error` line (a manifest, resolution or setup fault), or an integration tree was dirty. Never count it as a pass or as "0 errors"; fix the setup and run the cycle again. Exit 3 is a merge conflict: resolve it on the integration branch, then run the cycle again.
+
+When the batch compiles, the same cycle formats the changed crates, runs clippy and the doc build on them, runs the tests, and records `track phase 7` (the phase gate decides). The red rounds of [08-tests-and-red-rounds.md](08-tests-and-red-rounds.md) continue with the next cycles.
 
 ## Compile errors
 
@@ -98,8 +104,8 @@ Compile errors come in groups: one wrong signature or one missing import gives m
 
 1. Group the errors by crate, then by cause (a changed signature, a moved item, a missing re-export or trait import, a type that changed). For a long list, `tools/split-errors.py <errors> <N> <prefix>` splits it into N groups of whole files, balanced by count, keeping directories together.
 2. Small slips that rustc alone reports (a borrow, a move, a missing clone) in a framework batch: fix them yourself; they take minutes.
-3. For the rest, one compile fixer per crate group, in a worktree cut from the integration branch (`prompts/p6-compile-fix.md`, task `cfix-<group>`). Fixers write code only, by cause, lower crates first, and never touch another group's crates.
-4. Merge every group's branch onto the integration branch, then run `tools/compile-gate` once. Repeat with the remaining errors.
+3. For the rest, one compile fixer per crate group, on a branch cut from the integration branch (`prompts/p6-compile-fix.md`, task `cfix-<group>`), started through `tools/swarm.py` so the cycles can resume it. Fixers work by cause, lower crates first, never touch another group's crates, and build only in the fixer mode `build` (`pipeline.fixer_mode`, [11-build-loop.md](11-build-loop.md), rule 3).
+4. When the fixers have handed back, run the next cycle with them: `tools/cycle <batch>-run-<n> --fixers <file> --groups <dir>`, where the fixers file names each `cfix-<group>` task and its branches, and `<dir>` holds split-errors.py's `<group>.errors` files. It merges every group's branch, compiles once, and sends each group the errors left in files its commits changed or its group file names. Errors no fixer owns are in the cycle's `report.md` for you. Repeat until the batch compiles.
 
 **Stop rule.** If the errors point at the plan (a wrong contract item, a missing API, a signature that cannot work) rather than at writer slips, stop compile-fixing. Fix the plan (contract row, sheets, stubs) and send the affected sets back to their writers before any other area is written. A compile-fix agent never invents a mechanism to make wrong plan code compile.
 
@@ -129,8 +135,8 @@ Then write the app batch ([06-write.md](06-write.md)) and come back to step 1 fo
 - [ ] Every set of the batch has a review verdict; every finding is fixed, restored or ruled.
 - [ ] The batch is combined in each integration tree; combine-lost reports nothing; owed lines are marked commits; cross-owner findings are resolved.
 - [ ] The racheck gate has no `real` or `mod-file` error.
-- [ ] `tools/compile-gate` exits 0: every changed framework crate and its dependents, then the app selection.
+- [ ] The last cycle's compile (`tools/compile-gate`) exits 0: every changed framework crate and its dependents, then the app selection.
 - [ ] Every component the batch adds has stories that render, checked by the lead.
 - [ ] Plan errors found by the compile are fixed in the plan, and `STATE.md` records them.
 
-Then run the tests: record `tools/track phase 7 "tests and red rounds"` and go to [08-tests-and-red-rounds.md](08-tests-and-red-rounds.md). `track phase` runs the items a script can check and refuses while one fails ([tools/track.md](../tools/track.md), "The phase gate").
+The cycle that compiles the batch records `tools/track phase 7 "tests and red rounds"` itself; when the gate refuses, its summary names the items: fix them and record the phase. Then go to [08-tests-and-red-rounds.md](08-tests-and-red-rounds.md). `track phase` runs the items a script can check and refuses while one fails ([tools/track.md](../tools/track.md), "The phase gate").

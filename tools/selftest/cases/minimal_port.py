@@ -180,3 +180,28 @@ def case_rewrite(s):
     check(p.stdout.splitlines()[-1].startswith("minimal-port rewrite: 0 edits"), "a second rewrite changes nothing", p)
     p = s.run("minimal-port", "rewrite", "--only", "nonesuch")
     check(p.returncode == 2 and "unknown class" in p.stderr, "an unknown class is a usage error", p)
+
+
+def case_minimal_mode(s):
+    """work.mode = minimal: no phases, the hook names the minimal runbook, the landing gate wants a passed run."""
+    s.config({"work.mode": "minimal", "minimal.run_platforms": ["linux", "macos"]})
+    p = s.run("track", "phase", "0")
+    check(p.returncode == 1 and "minimal port" in p.stderr, "track phase refuses in minimal mode", p)
+    p = s.run("lead-context", "--cwd", str(s.work), stdin="")
+    check("process/minimal-port.md" in p.stdout and "steps, not phases" in p.stdout, "the hook names the minimal runbook", p)
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    p = s.run("land/exit-gate.py", "app", sha)
+    check(p.returncode == 1 and "linux: no run recorded" in p.stderr, "no run: the app may not land", p)
+    s.run("track", "event", "run", "linux checklist passed", "--data", "platform=linux", "--data", f"sha={sha[:12]}",
+          "--data", "result=pass")
+    s.run("track", "event", "run", "macOS: Cmd+Q lost changes", "--data", "platform=macos", "--data", f"sha={sha[:12]}",
+          "--data", "result=fail")
+    p = s.run("land/exit-gate.py", "app", sha)
+    check(p.returncode == 1 and "macos: the newest run" in p.stderr and "linux" not in p.stderr.split("platforms not passed")[1],
+          "a failed platform blocks; a passed one does not", p)
+    s.run("track", "event", "run", "macOS checklist passed", "--data", "platform=macos", "--data", f"sha={sha}",
+          "--data", "result=pass")
+    p = s.run("land/exit-gate.py", "app", sha)
+    check(p.returncode == 0 and "2 of 2 platforms passed" in p.stdout, "every platform passed: the app may land", p)
+    p = s.run("land/exit-gate.py", "framework", sha)
+    check(p.returncode == 0, "a framework fix lands with no run gate", p)

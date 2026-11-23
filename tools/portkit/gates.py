@@ -622,6 +622,35 @@ def exit_failures(phase: int, ctx: GateContext) -> tuple[int, list[tuple[str, st
     return len(rows), out
 
 
+def minimal_land_check(store, which: str, sha: str) -> tuple[bool, list[str]]:
+    """The landing gate of a minimal port (work.mode = minimal): the app lands only after the run step passed for
+    the commit it lands, on every platform of minimal.run_platforms. A platform passes when its newest `run` event
+    whose `sha` data names this commit (either may be the shorter prefix) has `result=pass`. Framework fixes land
+    as their own PRs to the framework branch, with no gate here. Returns (ok, lines to print)."""
+    if which == "framework":
+        return True, ["run gate: a framework fix of a minimal port lands as its own PR; no run gate"]
+    want = [str(p) for p in store.cfg.get("minimal.run_platforms") or []]
+    events, _, _ = store.read_events()
+    newest: dict[str, dict] = {}
+    for e in events:
+        d = e.get("data") or {}
+        run_sha = str(d.get("sha") or "")
+        if e.get("kind") == "run" and len(run_sha) >= 7 and (sha.startswith(run_sha) or run_sha.startswith(sha)):
+            newest[str(d.get("platform"))] = e
+    fails = []
+    for p in want:
+        e = newest.get(p)
+        if not e:
+            fails.append(f"{p}: no run recorded for {sha[:12]}")
+        elif (e.get("data") or {}).get("result") != "pass":
+            fails.append(f"{p}: the newest run for {sha[:12]} ({e.get('t')}) has result "
+                         f"{(e.get('data') or {}).get('result')!r}: {e.get('text', '')}")
+    if not fails:
+        return True, [f"run gate: {len(want)} of {len(want)} platforms passed the run of {sha[:12]}"]
+    return False, [f"run gate: {len(fails)} of {len(want)} platforms not passed (process/minimal-port.md, step 7):"] + \
+        [f"  - {f}" for f in fails]
+
+
 def land_check(store, which: str, sha: str, group: str) -> tuple[bool, list[str]]:
     """One group of phase 8 rows (`look` or `tests`) for a landing tool that lands commit `sha` of the `app` or the
     `framework`; the look pairs must come from that commit. They pass, or the latest record of phase 9 was forced

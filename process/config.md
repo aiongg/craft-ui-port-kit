@@ -102,6 +102,7 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `state` | path | `{work.dir}/STATE.md` | init-workspace, port-set | The lead's phase state file. Placeholder `{{STATE}}`. Env: `PORT_KIT_WORK_STATE`. |
 | `baseline_failures` | path | `{work.dir}/baseline-failures.txt` | test-run, compare-runs.py | Tests that fail on the unported app at the pinned framework rev (phase 0). Env: `PORT_KIT_WORK_BASELINE_FAILURES`. |
 | `landing` | path | `{work.dir}/landing` | land/land-framework.sh, land/land-app.sh | Scratch clones and scan reports of landing runs. Env: `PORT_KIT_WORK_LANDING`. |
+| `mode` | str | `full` | init-workspace, lead-context, track, land/exit-gate.py | `full`: the phased port of process/00-overview.md. `minimal`: a minimal port (process/minimal-port.md), which has steps instead of phases: `track phase` refuses, the session hook names the minimal runbook, and the landing gate skips the look and test-ledger rows. Env: `PORT_KIT_WORK_MODE`. |
 
 ### [framework]
 
@@ -246,6 +247,7 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `triage` | str | `sonnet` | swarm.py | Phase 7 test triage; confirm by calibration before a sweep. Env: `PORT_KIT_MODELS_TRIAGE`. |
 | `red_fixer` | str | `opus` in build mode, `sonnet` in code-only | swarm.py, cycle | Phase 7 red-round fixer. Empty: `opus` in the fixer mode `build`, `sonnet` in `code-only` (Config.model). Env: `PORT_KIT_MODELS_RED_FIXER`. |
 | `red_fixer_framework` | str | `opus` | swarm.py | Phase 7 fixer whose failures have a framework cause. Env: `PORT_KIT_MODELS_RED_FIXER_FRAMEWORK`. |
+| `minimal_write` | str | `opus` | swarm.py | Minimal-port writer (process/minimal-port.md); its compile and test rounds resume the same session. Env: `PORT_KIT_MODELS_MINIMAL_WRITE`. |
 
 ### [track]
 
@@ -274,6 +276,13 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `port_build` | str | unset | cycle | cl arguments that build look.port_binary in app.integration (for example `build <example>`). cycle runs them before `look pair`. Unset: cycle skips the look step and says so. Env: `PORT_KIT_LOOK_PORT_BUILD`. |
 | `threshold` | int | `16` | look | A pixel differs visibly when one colour channel differs by more than this (of 255). Smaller differences show in the difference image but make no crop. Env: `PORT_KIT_LOOK_THRESHOLD`. |
 | `differences` | path | `{work.dir}/look/differences.md` | look, portkit/gates.py | The differences file: one row per look difference with its judgement, class and outcome (tools/look.md, "The differences file"). `look brief` and the phase 8 gate read it. Env: `PORT_KIT_LOOK_DIFFERENCES`. |
+
+### [minimal]
+
+| Key | Type | Default | Read by | Meaning |
+|---|---|---|---|---|
+| `rules` | path | `{kit}/rules/minimal-port.toml` | minimal-port | Rewrites and report patterns of the minimal port, labelled with the framework revision they were written for. Env: `PORT_KIT_MINIMAL_RULES`. |
+| `run_platforms` | list | `["linux", "macos"]` | land/exit-gate.py | Platforms the run step must pass on before a minimal port lands: each needs a `run` event with `result=pass` for the landed commit (process/minimal-port.md, step 7). Add `web` for an app with a web shell. Env: `PORT_KIT_MINIMAL_RUN_PLATFORMS`. |
 
 ### [land]
 
@@ -367,3 +376,4 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | `{{STAGE}}` | Contract stub stage number (per call) |
 | `{{CRATES}}` | Framework crates of one contract stub stage, in build order (per call) |
 | `{{LOOK}}` | The look evidence of one fix class, filled by `look brief` (per call) |
+| `{{ITEMS}}` | The port items one minimal-port writer owns: `all`, `host` or `dock` (per call) |

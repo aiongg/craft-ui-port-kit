@@ -209,6 +209,10 @@ def cmd_phase(a):
     if a.n not in T.PHASES:
         die(f"phase {a.n}: the phases are 0 to {max(T.PHASES)}")
     s = store(a)
+    if s.cfg.get("work.mode") == "minimal":
+        print("track: phase refused: a minimal port (work.mode = minimal) has steps, not phases; record each step "
+              "with `track status mp-<step> ...` (process/minimal-port.md)", file=sys.stderr)
+        sys.exit(EXIT_REFUSED)
     st = s.state()
     ph = st.get("phase") or {}
     cur = ph.get("n")

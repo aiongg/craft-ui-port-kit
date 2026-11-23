@@ -12,6 +12,7 @@
 # dir = "."                                   # default: this file's directory
 # trees = "{work.dir}/trees"                  # per-set worktrees and read-only base checkouts
 # branch_prefix = "port/"                     # prefix of set, red and combine branches; one per port sharing a framework clone
+# mode = "full"                               # full (the phased port) or minimal (process/minimal-port.md)
 
 [framework]
 checkout = "../craft-libs"                    # REQUIRED: local framework clone
@@ -131,6 +132,11 @@ ui_dirs = ["crates/ui-egui/src"]              # REQUIRED: UI source dirs to inve
 # triage = "sonnet"
 # red_fixer = ""                              # empty: opus in fixer mode build, sonnet in code-only
 # red_fixer_framework = "opus"
+# minimal_write = "opus"                      # the minimal-port writer; its compile and test rounds resume it
+
+# [minimal]                                   # only for work.mode = "minimal"
+# rules = "{kit}/rules/minimal-port.toml"     # rewrites and report patterns of tools/minimal-port
+# run_platforms = ["linux", "macos"]          # where the run step must pass before landing; add "web" for a web shell
 
 # Areas are chosen in phase 1 from the inventory. Set ids are <id>-w<n>; contract ids <code>.<Kind><n>.
 # PhotoCraft's areas:

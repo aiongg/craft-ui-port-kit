@@ -28,7 +28,7 @@ Job lists
 Roles
   A job's role names its model (models.<role>, unless "model" is given) and its tools, from one table, ROLE_TOOLS
   below: every role gets Read, Grep, Glob, Bash, Write and Edit, with pipeline.lookup_tools, Write, Edit and the kit's
-  track command auto-approved, and a role in the table also gets its own commands (fixers `git add` and `git commit`, code-only fixers also `rustfmt`, every role `mkdir -p`,
+  track command auto-approved, and a role in the table also gets its own commands (fixers and the minimal-port writer `git add` and `git commit`, code-only fixers and that writer also `rustfmt`, every role `mkdir -p`,
   phase 2 sheet fixes and reconciles coverage.py and port-set). A job's own "tools" and
   "allow" replace these.
 
@@ -111,6 +111,7 @@ _FIXER = ["Bash(git add:*)", "Bash(git commit:*)", "Bash(git diff:*)", "Bash(git
 _CODE_ONLY = _FIXER + ["Bash(rustfmt:*)"]  # code-only fixers format their files; they run no cargo fmt
 ROLE_TOOLS = {
     "compile_fix": _CODE_ONLY,
+    "minimal_write": _CODE_ONLY,
     "fix": _CODE_ONLY,
     "fix_retry": _CODE_ONLY,
     "red_fixer": _FIXER + ["Bash(python3 -I {kit}/tools/diag-cut.py:*)", "Bash({kit}/tools/diag-cut.py:*)"],

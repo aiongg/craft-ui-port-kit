@@ -12,7 +12,10 @@ Runs the rows of PHASE_EXITS in tools/portkit/gates.py that belong to a landing 
 Each group passes when its rows pass, or when the latest `track phase 9 --force "reason"` was recorded over every
 row that fails now; it prints that decision. The override is that one recorded decision; the landing tools take no
 flag of their own. `framework` before phase 8 passes with a note: framework changes may land after any build batch
-(process/10-land.md). Exit 0 pass; 1 refused (one line per failing row); 2 usage or no workspace.
+(process/10-land.md).
+In a minimal port (work.mode = minimal) it runs the run gate instead: the app commit must have passed the run step
+on every platform of minimal.run_platforms (`run` events with data platform, sha and result=pass; process/minimal-port.md,
+step 7); a framework fix passes. Exit 0 pass; 1 refused (one line per failing row); 2 usage or no workspace.
 """
 from __future__ import annotations
 
@@ -32,6 +35,11 @@ def main(argv: list[str]) -> int:
     except Exception as e:
         print(f"exit-gate: {e}", file=sys.stderr)
         return 2
+    if store.cfg.get("work.mode") == "minimal":
+        ok, lines = gates.minimal_land_check(store, argv[1], argv[2])
+        for ln in lines:
+            print(ln, file=sys.stdout if ok else sys.stderr)
+        return 0 if ok else 1
     all_ok = True
     for group in gates.LAND_GROUPS:
         ok, lines = gates.land_check(store, argv[1], argv[2], group)

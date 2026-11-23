@@ -9,8 +9,9 @@
 #                  recorded on the dashboard. Without it a failing or impossible check stops the tool.
 #
 # Once REF is fetched it runs the exit gate (tools/land/exit-gate.py app REF's commit): the phase 8 look and tests rows pass with
-# every pair captured from that commit, or `track phase 9 --force` recorded them as a decision. Without either it
-# stops before anything is scanned or rewritten.
+# every pair captured from that commit, or `track phase 9 --force` recorded them as a decision; in a minimal port, the
+# run step passed for that commit on every platform of minimal.run_platforms. Without that it stops before anything
+# is scanned or rewritten.
 # Fetches only REF (and its history) from the tree into <work.landing>/app-<ref> (never touching it), fetches app.base_branch from app.upstream and takes
 # the merge base with REF. It scans base..REF (tools/land/scan-range.py) and, when there are hits, rewrites only that
 # range with git filter-repo (local framework paths become land.sibling_framework) and scans again. A last commit pins

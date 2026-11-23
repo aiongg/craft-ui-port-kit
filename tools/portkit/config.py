@@ -378,6 +378,10 @@ KEYS: list[Key] = [
     # ---- minimal: the minimal port (process/minimal-port.md)
     K("minimal.rules", "{kit}/rules/minimal-port.toml", "path", "minimal-port",
       "Rewrites and report patterns of the minimal port, labelled with the framework revision they were written for."),
+    K("minimal.run_platforms", ["linux", "macos"], "list", "land/exit-gate.py",
+      "Platforms the run step must pass on before a minimal port lands: each needs a `run` event with `result=pass` "
+      "for the landed commit (process/minimal-port.md, step 7). Add `web` for an app with a web shell.",
+      default_doc='`["linux", "macos"]`'),
 
     # ---- land: scrub and landing (the tools print push commands and never push)
     K("land.framework_via", "pr", "str", "land/land-framework.sh",
@@ -423,6 +427,7 @@ CALL_PLACEHOLDERS = {
     "STAGE": "Contract stub stage number",
     "CRATES": "Framework crates of one contract stub stage, in build order",
     "LOOK": "The look evidence of one fix class, filled by `look brief`",
+    "ITEMS": "The port items one minimal-port writer owns: `all`, `host` or `dock`",
 }
 # Placeholders derived from the kit itself.
 KIT_PLACEHOLDERS = {"KIT": "Kit root directory", "RULES": "The kit's rules/ directory",

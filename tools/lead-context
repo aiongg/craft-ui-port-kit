@@ -55,16 +55,20 @@ def context(source: str, cwd: str) -> str:
     except Exception as e:   # a broken store must not hide the rest
         L.append(f"Dashboard store not readable: {e}")
     ph = (st or {}).get("phase") or {}
-    if ph:
-        L.append(f"Now: {T.phase_label(ph)}, recorded {ph.get('t')}" + (f" ({ph['note']})" if ph.get("note") else ""))
+    if cfg.get("work.mode") == "minimal":
+        L.append("Now: a minimal port (work.mode = minimal): steps, not phases; the board's mp-* tasks show the step.")
+        rb = kit / "process" / "minimal-port.md"
     else:
-        L.append("Now: no phase recorded; phase 0 starts with process/01-setup.md.")
-    rb = gates.runbook(ph.get("n", 0))
+        if ph:
+            L.append(f"Now: {T.phase_label(ph)}, recorded {ph.get('t')}" + (f" ({ph['note']})" if ph.get("note") else ""))
+        else:
+            L.append("Now: no phase recorded; phase 0 starts with process/01-setup.md.")
+        rb = gates.runbook(ph.get("n", 0))
     L.append("Read now, in this order:")
     L.append(f"  1. {cfg.get('work.state')} (STATE.md: step, next action, running agents)")
     L.append(f"  2. `{kit}/tools/track show`")
     if rb:
-        L.append(f"  3. {rb}, in full: the runbook of the current phase")
+        L.append(f"  3. {rb}, in full: the runbook of the current " + ("port" if cfg.get("work.mode") == "minimal" else "phase"))
     L.append(f"  4. {kit}/rules/lead-rules.md, in full")
     rules = hard_rules(kit / "skills" / "craft-ui-port" / "SKILL.md")
     if rules:

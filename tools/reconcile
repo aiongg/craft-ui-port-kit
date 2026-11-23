@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""reconcile: run the phase 2 reconcile (process/03-plan.md, step 6) under swarm.py as one command.
+
+usage: reconcile [--only AREA]... [--from STAGE] [--config PORT.TOML] [-- SWARM-OPTION...]
+
+Runs the three stages of workflows/phase2-reconcile.js in order, contract, sheets and evaluate, each as
+  tools/render-prompt --workflow-args phase2-reconcile --stage S [--only AREA]... --out <work.swarm>/phase2-reconcile/args-S.json
+  tools/swarm.py workflows/phase2-reconcile.js --args <that file> [SWARM-OPTION...]
+render-prompt runs the collation (tools/plan-collate.py) before contract and sheets, and the rebuild
+(tools/plan-rebuild.py) before evaluate. A stage whose result lists failed jobs, or whose script stopped, ends the run:
+rerun the same command, and swarm runs only the jobs that failed or whose inbox changed. --from starts at a later
+stage. --only limits the evaluations to those areas. Options after `--` go to every swarm.py call (--parallel,
+--dry-run, ...).
+
+It only sequences: the stages and the scripts are the mechanism. Under the Workflow tool, run the same render-prompt
+lines and each stage yourself.
+Output: each stage's swarm output, then one line `reconcile: <stage> ...` per stage. Exit 0 when the three stages
+ran with no failed job, 1 when a stage had failed jobs or stopped, 2 for a usage or config error.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from portkit import config, track  # noqa: E402
+
+TOOLS = Path(__file__).resolve().parent
+STAGES = ("contract", "sheets", "evaluate")
+SCRIPT = config.KIT_ROOT / "workflows" / "phase2-reconcile.js"
+
+
+def area_line(e: dict) -> str:
+    return f"{e['area']} failed" if e.get("failed") else f"{e['area']} {e['error_rate']} ({e['must_fix']} must-fix)"
+
+
+def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    swarm_opts = argv[argv.index("--") + 1:] if "--" in argv else []
+    argv = argv[:argv.index("--")] if "--" in argv else argv
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--only", action="append", default=[])
+    ap.add_argument("--from", dest="start", choices=STAGES, default=STAGES[0])
+    ap.add_argument("--config")
+    a = ap.parse_args(argv)
+    try:
+        cfg = config.load(a.config)
+    except config.ConfigError as e:
+        print(f"reconcile: {e}", file=sys.stderr)
+        return 2
+    cfg_args = ["--config", a.config] if a.config else []
+    run_dir = Path(cfg.get("work.swarm")) / "phase2-reconcile"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    code = 0
+    with track.recorded("reconcile") as rec:
+        lines = []
+        for stage in STAGES[STAGES.index(a.start):]:
+            args_file = run_dir / f"args-{stage}.json"
+            only = [x for o in a.only for x in ("--only", o)]
+            r = subprocess.run([sys.executable, "-I", str(TOOLS / "render-prompt"), "--workflow-args", "phase2-reconcile",
+                                "--stage", stage, *only, "--out", str(args_file), *cfg_args])
+            if r.returncode != 0:
+                lines.append(f"reconcile: {stage}: render-prompt exit {r.returncode}")
+                code = 1
+                break
+            r = subprocess.run([sys.executable, "-I", str(TOOLS / "swarm.py"), str(SCRIPT), "--args", str(args_file), *cfg_args, *swarm_opts])
+            result = run_dir / f"result-{stage}.json"
+            try:
+                out = json.loads(result.read_text()) if r.returncode == 0 else None
+            except (OSError, ValueError):
+                out = None
+            if out is None:
+                lines.append(f"reconcile: {stage}: swarm.py exit {r.returncode}, no result in {result}")
+                code = 1
+                break
+            failed = out.get("failed") or [e["area"] for e in out.get("evaluate", []) if e.get("failed")]
+            if stage == "evaluate":
+                lines.append("reconcile: evaluate: " + ", ".join(area_line(e) for e in out.get("evaluate", [])))
+            else:
+                lines.append(f"reconcile: {stage}: {len(out.get('jobs', []))} jobs, failed: {', '.join(failed) or 'none'}; "
+                             f"{out.get('open_questions', 0)} open questions")
+            if failed:
+                code = 1
+                break
+        rec.result("; ".join(l.removeprefix("reconcile: ") for l in lines), log=str(run_dir / "log.txt"), ok=code == 0)
+    for l in lines:
+        print(l)
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

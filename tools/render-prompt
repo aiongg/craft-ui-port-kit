@@ -32,14 +32,18 @@ Workflow args
                           plan.chunk_map_lines lines, with the map's preamble; also written to <plan>/chunks.json,
                           which the phase 2 prompts read.
     phase2-*              all four also get answerGroupsPerAgent, maxErrorRate and maxWrongAnswers (the plan.* keys).
-    phase2-final          stage all (default) or evaluate (the evaluations alone, after a fix round).
+    phase2-final          stage all (default) or evaluate (the evaluations alone, after a fix round); evalSchema
+                          (templates/eval-result.schema.json).
     phase2-fix            contract: one job per part of the contract ({id, file, crates, items}); the parts are
                           <parts>/NN.md when they exist, else <plan>/contract.md is cut at its `### <crate>` headings
                           into parts of about 120 rows and written there; sheets: the sets of the ownership file in
                           jobs of four per area ({id, area, sets}); coverage: one job per gap list of
                           <plan>/eval-coverage.md ({id, scope}); fixDir: <plan>/fix.
-    phase2-reconcile      partList (the NN.md files of <parts>, with their crates), fixDir, round (2, or the next
-                          unused eval round); stage evaluate runs the rebuild and the evaluations only.
+    phase2-reconcile      --stage contract, sheets or evaluate (required). Every stage: partList (the NN.md files of
+                          <parts>, with their crates) and fixDir. Stages contract and sheets first run the collation
+                          of tools/plan-collate.py and pass its summary as collated (groups, routes, parts); stage
+                          evaluate first runs the rebuild of tools/plan-rebuild.py and passes its summary as rebuild,
+                          with evalSchema and round (2, or the next unused eval round).
   Exit 1 when an input is missing (the message names it), 2 for a usage or config error.
 """
 from __future__ import annotations
@@ -52,7 +56,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from portkit import config  # noqa: E402
+from portkit import config, planfix, schema  # noqa: E402
 
 KIT = config.KIT_ROOT
 PH = re.compile(r"\{\{([A-Z][A-Z0-9_]*)\}\}")
@@ -442,6 +446,7 @@ def phase2_final_args(cfg: config.Config, a, base: dict) -> dict:
     if a.stage not in (None, "all", "evaluate"):
         raise Missing(f"phase2-final: --stage must be all or evaluate, got {a.stage!r}")
     base["stage"] = a.stage or "all"
+    base["evalSchema"] = schema.load("eval-result.schema.json")
     return phase2_common(cfg, base)
 
 
@@ -527,19 +532,38 @@ def phase2_fix_args(cfg: config.Config, a, base: dict) -> dict:
     return phase2_common(cfg, base)
 
 
+RECONCILE_STAGES = ("contract", "sheets", "evaluate")
+
+
 def phase2_reconcile_args(cfg: config.Config, a, base: dict) -> dict:
-    if a.stage not in (None, "all", "evaluate"):
-        raise Missing(f"phase2-reconcile: --stage must be all or evaluate, got {a.stage!r}")
-    base["stage"] = a.stage or "all"
+    """Stages contract and sheets run the collation first (portkit.planfix.collate, as tools/plan-collate.py) and pass
+    its result as `collated`; stage evaluate runs the rebuild first (planfix.rebuild, as tools/plan-rebuild.py) and
+    passes its summary as `rebuild`."""
+    if a.stage not in RECONCILE_STAGES:
+        raise Missing(f"phase2-reconcile: --stage must be one of {', '.join(RECONCILE_STAGES)}, got {a.stage!r}")
     base["fixDir"] = str(cfg.path("work.plan") / "fix")
-    parts_dir = cfg.path("work.parts")
-    files = sorted(f for f in parts_dir.glob("*.md") if PART_FILE.match(f.name)) if parts_dir.is_dir() else []
+    files = planfix.part_files(cfg)
     if not files:
-        raise Missing(f"no contract parts in {parts_dir}: run phase2-fix first")
+        raise Missing(f"no contract parts in {cfg.path('work.parts')}: run phase2-fix first")
     base["partList"] = [part_job(f.name, f.read_text().split("\n")) for f in files]
-    first = cfg.areas[0]["id"] if cfg.areas else None
-    done = len(list(cfg.path("work.plan").glob(f"eval-{first}-r*.md"))) if first else 0
-    base["round"] = done + 2
+    if a.stage in ("contract", "sheets"):
+        try:
+            base["collated"] = planfix.collate(cfg)
+        except FileNotFoundError as e:
+            raise Missing(str(e))
+        c = base["collated"]
+        print(f"render-prompt: collated {sum(g['rows'] for g in c['groups'])} set rows in {len(c['groups'])} groups, "
+              f"{len(c['parts'])} contract parts, {len(c['routes'])} routing inboxes; {c['unrouted']} unrouted, "
+              f"{c['rejected']} must-fix items rejected ({c['inbox']}/unrouted.md)", file=sys.stderr)
+    else:
+        base["rebuild"] = planfix.rebuild(cfg)
+        r = base["rebuild"]
+        print(f"render-prompt: rebuilt the plan files: {len(r['checks'])} check findings, coverage gaps {r['gaps']}",
+              file=sys.stderr)
+        base["evalSchema"] = schema.load("eval-result.schema.json")
+        first = cfg.areas[0]["id"] if cfg.areas else None
+        done = len(list(cfg.path("work.plan").glob(f"eval-{first}-r*.md"))) if first else 0
+        base["round"] = done + 2
     return phase2_common(cfg, base)
 
 

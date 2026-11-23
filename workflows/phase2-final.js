@@ -28,6 +28,7 @@ export const meta = {
 //                      prompts/p2-*.md rendered from port.toml; the per-call placeholders {{AREA}} {{AREA_CODE}} {{TASK}}
 //                      are left in place and filled here
 //   areas              [{ id, code, description, map, repos }] from port.toml [[areas]]
+//   evalSchema         templates/eval-result.schema.json: what each area evaluation returns (and writes as JSON)
 //   maxErrorRate       plan.max_error_rate           maxWrongAnswers   plan.max_wrong_answers
 //   only               optional list of area ids (Area merge and the per-area evaluations)
 
@@ -44,14 +45,11 @@ const PLAN_SCHEMA = { type: 'object', required: ['sets', 'files', 'contract_item
   sets: { type: 'integer' }, files: { type: 'integer' }, contract_items: { type: 'integer' },
   write: { type: 'integer' }, delete: { type: 'integer' },
   by_model: { type: 'object', properties: { opus: { type: 'integer' }, sonnet: { type: 'integer' } } } } }
-const EVAL_SCHEMA = { type: 'object', required: ['must_fix', 'error_rate'], properties: {
-  must_fix: { type: 'integer' }, error_rate: { type: 'number' } } }
 const ACCURACY_SCHEMA = { type: 'object', required: ['sampled', 'wrong', 'wrong_share'], properties: {
   sampled: { type: 'integer' }, wrong: { type: 'integer' }, wrong_share: { type: 'number' } } }
 const COVERAGE_SCHEMA = { type: 'object', required: ['gaps', 'report'], properties: {
   gaps: { type: 'integer' }, report: { type: 'string' } } }
 
-const RETURN_EVAL = '\n\nReturn JSON: {"must_fix": <must-fix count>, "error_rate": <error rate as a fraction between 0 and 1>}.'
 const RETURN_ACCURACY = '\n\nReturn JSON: {"sampled": <answers checked>, "wrong": <answers marked wrong>, "wrong_share": <wrong over sampled, a fraction between 0 and 1>}.'
 
 const areas = pick(need(args.areas, 'areas'), 'id')
@@ -98,8 +96,8 @@ if (stage === 'all') {
 phase('Evaluate')
 const evals = await parallel([
   ...areas.map(a => () => agent(
-    fill(P().evaluate_area, { AREA: a.id, AREA_CODE: a.code, TASK: `eval-${a.id}` }) + RETURN_EVAL,
-    { label: `eval:${a.id}`, phase: 'Evaluate', schema: EVAL_SCHEMA, model: M().evaluate, task: `eval-${a.id}` })),
+    fill(P().evaluate_area, { AREA: a.id, AREA_CODE: a.code, TASK: `eval-${a.id}` }),
+    { label: `eval:${a.id}`, phase: 'Evaluate', schema: need(args.evalSchema, 'evalSchema'), model: M().evaluate, task: `eval-${a.id}` })),
   () => agent(fill(P().size_audit, { TASK: 'eval-size' }),
     { label: 'eval:size', phase: 'Evaluate', model: M().evaluate, task: 'eval-size' }),
   () => agent(fill(P().answer_accuracy, { TASK: 'eval-answers' }) + RETURN_ACCURACY,
@@ -108,7 +106,8 @@ const evals = await parallel([
     { label: 'eval:coverage', phase: 'Evaluate', schema: COVERAGE_SCHEMA, model: 'haiku', role: 'sheet_fix', task: 'eval-coverage' }),
 ])
 
-const perArea = areas.map((a, i) => ({ area: a.id, ...(evals[i] || { failed: true }) }))
+const perArea = areas.map((a, i) => (evals[i] ? { area: a.id, error_rate: evals[i].error_rate, checked: evals[i].checked,
+  must_fix: evals[i].must_fix.length, file: `${args.plan}/eval-${a.id}.json` } : { area: a.id, failed: true }))
 const n = areas.length
 const accuracy = evals[n + 1]
 const maxErr = need(args.maxErrorRate, 'maxErrorRate')

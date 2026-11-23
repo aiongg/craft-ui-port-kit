@@ -20,7 +20,7 @@ These appear in every area. Fix the class in everything you own, not only in the
 - Read-only on code: edit no code, run no cargo or build, no git command that writes. Other agents write the other parts at the same time, so edit only the files named in your job. Something another part must change goes in your requests file.
 - Plan text states the plan. No history ("changed from", "now") outside a sheet's "Changes from the consolidated plan" section.
 - A question that the rules, the code, production behaviour and {{SETTLED}} cannot decide goes in your requests file under "Open questions", with options and a recommendation. Do not guess.
-- Plan inputs: {{OWNERSHIP}}, {{PLAN}}/contract.md, {{PLAN}}/areas/<area>.md, {{PLAN}}/chunks/<chunk>/, {{PLAN}}/conflicts.md, {{SETTLED}}, {{PLAN}}/developer-questions.md, {{MAPS}}/<area>.md. Evaluation findings: {{PLAN}}/eval-<area>.md (must-fix lists and item tables), {{PLAN}}/eval-size.md (per-set cuts), {{PLAN}}/eval-coverage.md (gaps by file). Grep them for every id you own (set ids, contract ids, file paths).
+- Plan inputs: {{OWNERSHIP}}, {{PLAN}}/contract.md, {{PLAN}}/areas/<area>.md, {{PLAN}}/chunks/<chunk>/, {{PLAN}}/conflicts.md, {{SETTLED}}, {{PLAN}}/developer-questions.md, {{MAPS}}/<area>.md. Evaluation findings: {{PLAN}}/eval-<area>.md (item tables) and eval-<area>.json (the must-fix items, each addressed to a set, a contract id or `unowned`), {{PLAN}}/eval-size.md (per-set cuts), {{PLAN}}/eval-coverage.md (gaps by file). Grep them for every id you own (set ids, contract ids, file paths).
 
 ## Your job
 

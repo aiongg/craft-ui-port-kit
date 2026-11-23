@@ -8,7 +8,7 @@ Each script here is one batch of agents: it splits the work into agent calls, ru
 | `phase2-part.js` | 2 ([03](../process/03-plan.md), step 2) | Per plan chunk: questions, fact answers, chunk plan |
 | `phase2-final.js` | 2 (step 3 and 4) | Per area merge, conflict check, consolidation, independent evaluation |
 | `phase2-fix.js` | 2 (step 5) | Fix round: contract parts, set sheets, coverage gaps |
-| `phase2-reconcile.js` | 2 (step 6) | Apply requests between parts, rebuild plan files, evaluate again |
+| `phase2-reconcile.js` | 2 (step 6) | In three stages: apply requests to the contract parts and route unowned files, apply the inboxes to the sheets, evaluate again |
 
 ## Running a workflow
 
@@ -30,7 +30,8 @@ All five scripts get the common arguments from `render-prompt`: `workflow`, `sta
 | `phase2-part.js` | `chunks`: each area map cut at section boundaries into plan chunks of about `plan.chunk_map_lines` lines (`id`, `area`, `map`, `preamble`, `lines`, `sections`, `index_rows`); also written to `<plan>/chunks.json`. A chunk of a framework-only area has `map: null`: its inputs are the lead's list in `<plan>/chunks/<id>/inputs.md`. |
 | `phase2-final.js` | `stage`: `all` (default) or `evaluate` (the evaluations alone). |
 | `phase2-fix.js` | `fixDir` (`<plan>/fix`); `contract`: one job per contract part; `sheets`: the sets of the ownership file, four to a job; `coverage`: one job per gap list of `eval-coverage.md`. When `<parts>/NN.md` do not exist yet, the builder cuts `<plan>/contract.md` at its `### <crate>` headings into parts of about 120 rows and writes them. |
-| `phase2-reconcile.js` | `fixDir`; `partList` (the contract parts on disk); `round` (2 for the first re-evaluation, then the next unused number); stage `evaluate` runs the rebuild and the evaluations only. |
+| `phase2-final.js` (also) | `evalSchema`: `templates/eval-result.schema.json`, what each area evaluation returns. |
+| `phase2-reconcile.js` | `--stage contract`, `sheets` or `evaluate` (required). `fixDir`; `partList` (the contract parts on disk). Stages `contract` and `sheets`: `collated`, the summary of the collation the builder runs first (`tools/plan-collate.py`: groups, routes, parts). Stage `evaluate`: `rebuild`, the summary of the rebuild the builder runs first (`tools/plan-rebuild.py`), `evalSchema`, and `round` (2 for the first re-evaluation, then the next unused number). `tools/reconcile` runs the three stages in order under swarm. |
 
 `--only ID` limits a run: chunk ids for `phase2-part`, area ids for `phase2-final` and `phase2-reconcile`, job ids for `phase2-fix`.
 
@@ -43,7 +44,7 @@ Models come from `[models]` in `port.toml`.
 | `phase2-part.js` | per chunk: 1 question split, ceil(groups / `plan.answer_groups_per_agent`) answerers, 1 chunk plan | `questions`, `answers`, `chunk_plan` |
 | `phase2-final.js` | per area: 1 merge and 1 evaluation; once: 1 conflict check, 1 consolidation, 1 size audit, 1 answer-accuracy check, 1 coverage run | `area_merge`, `evaluate` (the coverage run uses a small model) |
 | `phase2-fix.js` | one per contract part, per group of four sets and per gap list | contract parts `chunk_plan`; sheets and coverage `sheet_fix` |
-| `phase2-reconcile.js` | 2 collations, one per contract part with requests, 2 routing jobs, one per group of four sets, 1 rebuild, one evaluation per area | `sheet_fix`, `chunk_plan`, `evaluate` |
+| `phase2-reconcile.js` | stage `contract`: one per contract part with an inbox, one per routing inbox (at most 2); stage `sheets`: one per group of four sets with inbox rows; stage `evaluate`: one per area. The collation and the rebuild are scripts. | `chunk_plan`, `sheet_fix`, `evaluate` |
 
 ## Judgement the scripts leave to the lead
 

@@ -25,10 +25,19 @@ Evaluate the plan for area `{{AREA}}` ({{PLAN}}/areas/{{AREA}}.md as consolidate
 Write {{PLAN}}/eval-{{AREA}}.md:
 
 1. A table of every item checked: item, verdict (`right`, `needs change`, `wrong`), one-line reason.
-2. The must-fix list for the plan: file, what to change.
-3. The error rate: items that are `needs change` or `wrong`, over items checked.
+2. The must-fix list for the plan: one row per change, addressed like a request between parts.
+3. The error rate: items that are `needs change` or `wrong`, over items checked, overall and by kind (contract, file, reader, verdict, rule).
 
-Return the must-fix count and the error rate. The plan passes when the error rate is at most `plan.max_error_rate` (see {{KIT}}/process/03-plan.md).
+Write the same result as JSON to {{PLAN}}/eval-{{AREA}}.json, and return that object. Its format is {{KIT}}/templates/eval-result.schema.json; the batch runner rejects a result that does not match it, and `tools/plan-collate.py` rejects each must-fix item that does not:
+
+```json
+{"error_rate": 0.12, "checked": 75, "by_kind": {"contract": 0.1, "file": 0.15, "reader": 0.2, "verdict": 0.05, "rule": 0.0},
+ "must_fix": [{"to": "<set id> | contract <id> | unowned", "path": "<file, or empty for a contract row>",
+               "kind": "contract | file | reader | verdict | rule", "what": "<the change to the plan>",
+               "evidence": "<path:line at the plan base>"}]}
+```
+
+Address each must-fix item to whoever changes the plan: the set whose sheet changes (find it in {{OWNERSHIP}} or the sheets), `contract <id>` for a contract row, `unowned` for a file no set owns. The plan passes when the error rate is at most `plan.max_error_rate` (see {{KIT}}/process/03-plan.md).
 
 ## Tracking
 

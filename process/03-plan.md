@@ -93,14 +93,24 @@ Jobs never edit a file another job owns. What another part must change goes into
 
 ## Step 6: reconcile
 
-`phase2-reconcile.js` applies the requests between parts:
+`phase2-reconcile.js` applies the requests between parts in three stages, with a script before each:
 
-1. **Contract and routing:** each contract part applies the requests addressed to it, after checking each against the code (a request can be wrong); routing jobs give every "unowned" path an owner set.
-2. **Inbox:** a script collects every request, routing decision and contract change log row per set.
-3. **Sheets:** sheet groups apply their inbox, then check that every reader row of the set appears in its Files table, every `#[test]` function of each owned file has one verdict, and the header's line totals match the Files table.
-4. **Rebuild and re-evaluate:** `ownership.md`, the joined contract, coverage and sizing are rebuilt from the sheets by script; fresh Opus evaluators sample each area again (at least 20 contract items, file rows, reader rows and test verdicts each) and report the error rate by kind.
+1. **Inbox** (`tools/plan-collate.py`): every request, routing decision, contract change-log row and must-fix item of the newest re-evaluation goes to the inbox of the set, contract part or routing job it addresses. Rows that name no sheet, part or `unowned`, and must-fix items that fail the schema, are listed in `fix/inbox/unrouted.md`.
+2. **Contract and routing** (stage `contract`): each contract part applies its inbox, after checking each row against the code (a request can be wrong); routing jobs give every "unowned" path an owner set.
+3. **Inbox again**, so the sets also get the parts' Reconcile logs and the routing decisions.
+4. **Sheets** (stage `sheets`): each group of sets with inbox rows applies its inbox, then checks that every reader row of the set appears in its Files table, every `#[test]` function of each owned file has one verdict, and the header's line totals match the Files table.
+5. **Rebuild** (`tools/plan-rebuild.py`): `ownership.md`, the joined contract, coverage and sizing from the sheets, with the consistency checks it lists.
+6. **Re-evaluate** (stage `evaluate`): fresh Opus evaluators sample each area again (at least 20 contract items, file rows, reader rows and test verdicts each) and return the error rate by kind and the must-fix items (`templates/eval-result.schema.json`), also written to `eval-<area>-r<n>.json`.
 
-If an area is still above `plan.max_error_rate`, fix its must-fix list (a Sonnet sheet fix per set) and re-evaluate that area.
+`render-prompt --workflow-args phase2-reconcile --stage <stage>` runs the script of steps 1, 3 and 5 before it builds the stage's args. Under swarm, one command runs all of it as a background task:
+
+```sh
+tools/reconcile                     # contract, sheets, evaluate; --only <area> limits the evaluations
+```
+
+Under the Workflow tool, run the stages one by one: for each of `contract`, `sheets` and `evaluate`, `tools/render-prompt --workflow-args phase2-reconcile --stage <stage> --out <args file>`, then the workflow with that file.
+
+If an area is still above `plan.max_error_rate`, run the reconcile again (`tools/reconcile --only <area>`): the collation routes the area's must-fix items into the inboxes, and every job lists its inbox as an input, so under swarm only the jobs whose inbox changed run again.
 
 ## Step 7: decide the open questions
 

@@ -1,0 +1,6 @@
+{"error_rate": 0.1, "checked": 20, "by_kind": {"file": 0.1},
+ "must_fix": [
+  {"to": "shell-w1", "path": "crates/ui/src/chrome.rs", "kind": "reader", "what": "Add the reader in tests/chrome.rs.", "evidence": "crates/ui/tests/chrome.rs:12"},
+  {"to": "contract sh.C1", "path": "", "kind": "contract", "what": "Name what it replaces.", "evidence": "src/window.rs:40"},
+  {"to": "shell-w2", "path": "src/window.rs", "kind": "file", "what": "Action is edit, not rewrite."}
+ ]}

@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+"""plan-rebuild.py: rebuild the phase 2 plan files from the sheets and the contract parts.
+
+usage: plan-rebuild.py [--config PORT.TOML]
+
+Writes, keeping the previous version of each as <name>.before-reconcile once:
+  work.ownership           a summary table (Set | Repo | Model | Files | Write | Delete | Implements | Waits on) from
+                           every sheet's head and Files table, then a `### <set>` section per set: its sheet and files
+  <work.plan>/contract.md  the parts of work.parts joined in file order, 00-head.md first
+  <work.plan>/sizing.md    sets by repo and model, files by action, lines to write and delete by repo and area, the
+                           write split (framework production, app production, test files), test verdict totals,
+                           and the sets that developer-questions.md names
+and runs `coverage.py --from sheets` from work.dir (it writes <work.plan>/eval-coverage.md). Code moved between
+crates is not split out: the size audit judges that in eval-size.md.
+Checks, listed under `checks`: a sheet that does not parse, a path in two sheets, a contract id twice, a Writer
+whose sheet does not list the item, an id a sheet writes or calls that no part defines.
+
+tools/render-prompt runs the same rebuild for `--workflow-args phase2-reconcile --stage evaluate`.
+Prints the summary as JSON: {written, parse_failures, gaps, coverage, checks, totals}.
+Exit 0 when there are no checks and no coverage gaps, 1 otherwise, 2 for a config error.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from portkit import config, planfix, track  # noqa: E402
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--config")
+    a = ap.parse_args(argv)
+    try:
+        cfg = config.load(a.config)
+    except config.ConfigError as e:
+        print(f"plan-rebuild.py: {e}", file=sys.stderr)
+        return 2
+    with track.recorded("plan-rebuild") as rec:
+        out = planfix.rebuild(cfg)
+        clean = not out["checks"] and not out["gaps"] and "failed" not in out["coverage"]
+        line = (f"{out['totals']['sets']} sets, write {out['totals']['write']}, delete {out['totals']['delete']}; "
+                f"{len(out['checks'])} check findings; coverage gaps {out['gaps']}")
+        rec.result(line, data=out["totals"], ok=clean)
+    print(f"plan-rebuild.py: {line}", file=sys.stderr)
+    for c in out["checks"]:
+        print(f"  {c}", file=sys.stderr)
+    print(json.dumps(out))
+    return 0 if clean else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

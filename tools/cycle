@@ -33,8 +33,13 @@ Steps:
              (framework: the crates plus feature-root with the `cl features` of each crate; app: every package of
              `[workspace.metadata.cl] selection`), so no second feature set builds. A finding in a crate that did not
              change is listed and not counted.
-  4. tests   Only after a clean compile: `test-run LABEL-fw --fw` and `test-run LABEL --app`, then
+  4. tests   Only after a clean compile: the framework trials, `test-run LABEL --app`, then
              `compare-runs.py LABEL --tracks SRC --out <run>/tracks.md` and `diag-cut.py LABEL --tracks SRC`.
+             Framework trials: in a red round (tracks and fixers given), `test-run LABEL-fw --fw C ...` over each
+             red fixer's own crates (the packages owning the framework files its merged commits changed, in this
+             and earlier cycles) plus the crates whose trials failed in the previous cycle; when those and the app
+             run are green, `test-run LABEL-fw-rest` runs every other crate changed since plan.base before the cycle
+             reports green. Otherwise (a compile cycle, a batch's first run) `test-run LABEL-fw --fw`.
   5. look    When the app half compiled and look.driver is set: `cl <look.port_build>` in app.integration, then
              `look pair` for each states file with a state of one of the cycle's areas (all of them when no area
              is known). Skipped, and said so, while look.port_build is unset.
@@ -309,30 +314,82 @@ class Cycle:
         return gates.run_logged(gates.cl(self.cfg, args), tree, f, {**self.env, **(extra or {})})
 
     # ------------------------------------------------------------ 4. tests
-    def tests(self, tracks: str | None) -> dict:
+    def fw_crates(self, fixers: list[dict], touched: dict) -> dict[str, list[str]] | None:
+        """{task: its own framework crates} for a red round: the packages owning the framework files each fixer's
+        merged commits changed. None when the cycle has no red fixers (a compile cycle, a batch's first run)."""
+        tree = self.trees.get("fw")
+        if not tree or not self.inherit("tracks") or not fixers:
+            return None
+        out = {}
+        for fx in fixers:
+            files = (touched.get(fx["task"]) or {}).get("fw") or set()
+            out[fx["task"]] = sorted({p for f in files if "/vendor/" not in "/" + f and (p := gates.package_of(tree, f))})
+        return out
+
+    def fw_changed(self) -> list[str]:
+        """Every framework package changed since plan.base: the set `test-run --fw` runs."""
+        tree, base = self.trees.get("fw"), self.cfg.get("plan.base")
+        if not tree or not base:
+            return []
+        return sorted({p for f in gates.changed_files(tree, base) if (p := gates.package_of(tree, f))})
+
+    def fw_plan(self, fixers: list[dict], touched: dict) -> tuple[list[str] | None, dict | None]:
+        """The framework crates of this cycle's trials: None for every changed crate, else the red fixers' own
+        crates plus the crates whose trials failed in the previous cycle."""
+        per = self.fw_crates(fixers, touched)
+        if per is None:
+            return None, None
+        failed = ((self.prev or {}).get("tests") or {}).get("fw", {}).get("failed_crates") or []
+        return sorted({c for cs in per.values() for c in cs} | set(failed)), per
+
+    def test_part(self, part: str, args: list[str], log: str) -> dict:
+        rc = self.tool("test-run", *args, log=log)
+        if rc == 2:
+            raise Stop(EXIT_TOOL, f"test-run {args[0]}: tool failure (exit 2); see {self.rd / log}")
+        try:
+            s = json.loads((self.runs / args[0] / "summary.json").read_text())
+        except (OSError, ValueError):
+            raise Stop(EXIT_TOOL, f"test-run {args[0]}: no summary.json")
+        ps = s.get("parts", [])
+        return {"exit": rc, "failing": sorted({n for p in ps for n in p.get("failing", [])}),
+                "bad_binaries": sorted(f"{p['part']} {k}" for p in ps for k, b in (p.get("binaries") or {}).items()
+                                       if b.get("status") in ("crashed", "not run")),
+                "statuses": sorted({p.get("status") for p in ps}),
+                "failed_crates": sorted(p["part"][3:] for p in ps if p["part"].startswith("fw:") and p.get("status") != "ok"),
+                "passed": sum(p.get("passed", 0) for p in ps)}
+
+    def tests(self, tracks: str | None, fixers: list[dict], touched: dict) -> dict:
         res = {}
-        for part, args in (("fw", [f"{self.a.label}-fw", "--fw"]), ("app", [self.a.label, "--app"])):
-            if part not in self.trees:
-                continue
-            rc = self.tool("test-run", *args, log=f"test-{part}.log")
-            if rc == 2:
-                raise Stop(EXIT_TOOL, f"test-run {args[0]}: tool failure (exit 2); see {self.rd / f'test-{part}.log'}")
-            try:
-                s = json.loads((self.runs / args[0] / "summary.json").read_text())
-            except (OSError, ValueError):
-                raise Stop(EXIT_TOOL, f"test-run {args[0]}: no summary.json")
-            failing = sorted({n for p in s.get("parts", []) for n in p.get("failing", [])})
-            bad_bins = sorted(f"{p['part']} {k}" for p in s.get("parts", []) for k, b in (p.get("binaries") or {}).items()
-                              if b.get("status") in ("crashed", "not run"))
-            statuses = sorted({p.get("status") for p in s.get("parts", [])})
-            res[part] = {"exit": rc, "failing": failing, "bad_binaries": bad_bins, "statuses": statuses,
-                         "passed": sum(p.get("passed", 0) for p in s.get("parts", []))}
+        crates, per = self.fw_plan(fixers, touched)
+        if "fw" in self.trees:
+            if crates is None:
+                res["fw"] = self.test_part("fw", [f"{self.a.label}-fw", "--fw"], "test-fw.log")
+            elif crates:
+                res["fw"] = self.test_part("fw", [f"{self.a.label}-fw", *(x for c in crates for x in ("--fw", c))],
+                                           "test-fw.log")
+            else:
+                res["fw"] = {"exit": 0, "failing": [], "bad_binaries": [], "statuses": [], "failed_crates": [],
+                             "passed": 0}
+            if per is not None:
+                res["fw"].update(crates=crates, per_task=per)
+        if "app" in self.trees:
+            res["app"] = self.test_part("app", [self.a.label, "--app"], "test-app.log")
         base = set(_lines(self.cfg.path("work.baseline_failures"))) if self.cfg.get("work.baseline_failures") else set()
         app = res.get("app", {"failing": []})
         app["new_vs_baseline"] = [n for n in app["failing"] if n not in base]
         before = set(((self.prev or {}).get("tests") or {}).get("app", {}).get("failing", []))
         app["fixed"] = sorted(before - set(app["failing"])) if self.prev else []
         app["new"] = sorted(set(app["failing"]) - before) if self.prev else []
+        fw = res.get("fw")
+        if crates is not None and fw is not None and not fw["failing"] and not fw["bad_binaries"] \
+                and not app.get("new_vs_baseline") and not app.get("bad_binaries"):
+            rest = [c for c in self.fw_changed() if c not in set(crates)]
+            if rest:   # a green narrowed round: the other changed crates run before the cycle reports green
+                r = self.test_part("fw", [f"{self.a.label}-fw-rest", *(x for c in rest for x in ("--fw", c))],
+                                   "test-fw-rest.log")
+                fw.update(rest=rest, rest_exit=r["exit"], failing=r["failing"], bad_binaries=r["bad_binaries"],
+                          failed_crates=r["failed_crates"], passed=fw["passed"] + r["passed"],
+                          statuses=sorted(set(fw["statuses"]) | set(r["statuses"])))
         if tracks and "app" in self.trees:
             self.tool("compare-runs.py", self.a.label, "--tracks", tracks, "--out", str(self.rd / "tracks.md"),
                       log="compare.log")
@@ -509,6 +566,19 @@ def _failing_in_packet(f: Path) -> int:
     return int(m.group(1)) if m else 0
 
 
+def fw_step(c: Cycle, fixers: list[dict]) -> str:
+    """The dry run's framework trials: every changed crate, or each red fixer's own crates and their union."""
+    pending = [{"task": fx["task"], "repo": r, "files": git(c.trees[r], "diff", "--name-only", f"HEAD...{br}",
+                                                        check=False).stdout.split()}
+               for fx in fixers for r, br in fx["branches"].items() if r in c.trees]
+    crates, per = c.fw_plan(fixers, c.touched(pending))
+    if crates is None:
+        return f"test-run {c.a.label}-fw --fw (every crate changed since plan.base)"
+    own = "; ".join(f"{t}: {', '.join(cs) or 'no framework crate'}" for t, cs in per.items())
+    return (f"test-run {c.a.label}-fw " + (" ".join(f"--fw {x}" for x in crates) or "(no framework crate)")
+            + f" (red fixers' own crates: {own}); when that and the app run are green, the other changed crates")
+
+
 def summary_line(c: Cycle, code: int) -> str:
     o = c.out
     parts = [f"cycle {o['label']}: exit {code}"]
@@ -657,7 +727,7 @@ def main() -> int:
                  ("compile", True, f"compile-gate {a.label}-compile"),
                  ("lint", not a.no_lint, "cl cargo fmt / clippy -D warnings / doc on " +
                   "; ".join(f"{r}: {', '.join(c.changed_crates(r)) or 'no changed crate'}" for r in c.trees)),
-                 ("tests", not a.no_tests, f"test-run {a.label}-fw --fw; test-run {a.label} --app"
+                 ("tests", not a.no_tests, fw_step(c, fixers) + f"; test-run {a.label} --app"
                   + (f"; compare-runs.py and diag-cut.py --tracks {tracks}" if tracks else "")),
                  ("look", not a.no_look, f"cl {cfg.get('look.port_build')}; look pair" if cfg.get("look.port_build")
                   else "skipped: look.port_build unset"),
@@ -685,7 +755,7 @@ def main() -> int:
                 lint = c.timed("lint", c.lint)
                 c.out["lint"] = lint
             if compiled and not a.no_tests:
-                c.out["tests"] = c.timed("test", c.tests, tracks)
+                c.out["tests"] = c.timed("test", c.tests, tracks, fixers, touched)
             if comp["app_status"] == "ok" and not a.no_look and "app" in c.trees:
                 c.out["look"] = c.timed("look", c.look, areas)
             elif not a.no_look:

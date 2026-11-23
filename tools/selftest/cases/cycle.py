@@ -140,3 +140,47 @@ def case_compile_errors_go_to_their_fixer(s):
     check(not [c for c in s.cl_calls() if c[0] == "test"], "no tests after a failed compile", p)
     pk = (s.work / "runs" / "r1" / "followup" / "t1.md").read_text()
     check("crates/a/src/lib.rs:1:1: error[E0425]" in pk, "the error goes to the fixer whose commit changed the file", p)
+
+
+def crate_log(name, test):
+    exe = name.replace("-", "_") + "-1"
+    return (f"  Executable unittests src/lib.rs (target/debug/deps/{exe})\n"
+            f"     Running unittests src/lib.rs (target/debug/deps/{exe})\n\nrunning 1 test\ntest {test} ... ok\n\n"
+            "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n")
+
+
+def case_red_round_runs_each_tracks_crates(s):
+    crates = [{"name": f"crate-{x}", "dir": f"crates/{x}"} for x in "abc"]
+    fw = s.tree("fw", {".stub-metadata.json": cargo_metadata(crates),
+                       **{f"crates/{x}/Cargo.toml": f"[package]\nname = \"crate-{x}\"\n" for x in "abc"},
+                       **{f"crates/{x}/src/lib.rs": "\n" for x in "abc"}})
+    app = s.tree("app", {"Cargo.toml": "[workspace]\n[workspace.metadata.cl]\nselection = [\"app\"]\n",
+                         "app/Cargo.toml": "[package]\nname = \"app\"\n", "app/src/lib.rs": "\n"})
+    for t in (fw, app):
+        git(t, "branch", "base")
+    s.commit(fw, {"crates/c/src/lib.rs": "an earlier batch\n"}, "crate-c changed since the base")
+    for task, x in (("t1", "a"), ("t2", "b")):
+        git(fw, "switch", "-q", "-c", f"red/{task}", "main")
+        s.commit(fw, {f"crates/{x}/src/lib.rs": f"{task} fix\n"}, f"{task} fix")
+    git(fw, "switch", "-q", "main")
+    s.config({"framework.writing_base": "base", "app.writing_base": "base", "plan.base": "base"})
+    (s.work / "fixers.txt").write_text("t1\nt2\n")
+    (s.work / "groups.md").write_text("## t1\n\n### tests::a\n\n## t2\n\n### tests::b\n")
+    fake_binary(app, "target/debug/deps/app-1", ["tests::a", "tests::b"])
+    for x in "abc":
+        fake_binary(fw, f"target/debug/deps/crate_{x}-1", [f"{x}::one"])
+        s.cl_log(f"test-crate-{x}", crate_log(f"crate-{x}", f"{x}::one"))
+    s.cl_log("test-all-no-run", "  Executable app lib (target/debug/deps/app-1)\n")
+    s.cl_log("test-all", FAIL_LOG, 1)
+    p = s.run("cycle", "r1", "--fixers", "fixers.txt", "--tracks", "groups.md", "--dry-run")
+    check("t1: crate-a; t2: crate-b" in p.stdout and "--fw crate-a --fw crate-b" in p.stdout,
+          "the dry run lists each red fixer's crates", p)
+    p = s.run("cycle", "r1", "--fixers", "fixers.txt", "--tracks", "groups.md", "--no-lint", "--no-send")
+    tested = [c[1] for c in s.cl_calls() if c[0] == "test" and c[1] != "all"]
+    check(sorted(tested) == ["crate-a", "crate-b"], f"a red round tests only its fixers' crates: {tested}", p)
+    s.cl_log("test-all", "  ok app lib: 2 passed, 0 failed, 0 s\ncl: 2 passed, 0 failed, 1 binaries, 0 overflowed stacks, 0 s\n")
+    p = s.run("cycle", "r2", "--no-lint", "--no-send")
+    tested = [c[1] for c in s.cl_calls() if c[0] == "test" and c[1] != "all"][2:]
+    j = json.loads((s.work / "runs" / "r2" / "cycle.json").read_text())
+    check(tested == ["crate-a", "crate-b", "crate-c"] and j["tests"]["fw"].get("rest") == ["crate-c"],
+          f"a green narrowed round runs the other changed crates before it reports green: {tested}", p)

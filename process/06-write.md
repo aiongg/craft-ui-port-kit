@@ -62,11 +62,11 @@ Both runners start with the writer canary (`tools/racheck.py canary --sets <list
 
 If the first app batch's compile shows plan-level errors (a wrong contract item, a missing API) rather than writer slips, split the next batch by area before it builds.
 
-The number of build passes, not the number of sets, sets the wall time of phases 5 to 7.
+The number of cycles, not the number of sets, sets the wall time of phases 5 to 7 ([costs.md](costs.md), "The cycle model").
 
 ## Code-only trees for every writer
 
-Every writer in phases 5 to 7 (set writers, review fixers, compile fixers, red-round fixers) works in a code-only tree: a git worktree with no target dir, where nothing runs cargo, `cl` or rust-analyzer. They write code that compiles by reading: every import path, signature and trait bound checked against the code. One integrator builds everyone's work together.
+Set writers and review fixers in phases 5 to 7 work in a code-only tree: a git worktree with no target dir, where nothing runs cargo, `cl` or rust-analyzer. They write code that compiles by reading: every import path, signature and trait bound checked against the code. Compile and red-round fixers follow the fixer mode ([11-build-loop.md](11-build-loop.md)). `tools/cycle` builds everyone's work together.
 
 One-off tasks with a build (a look fix in phase 8, a framework gap found late) use the same split: the agent plans and writes in a code-only tree while it waits, then takes a build tree only to compile, run its trials and capture, and hands the build tree back at once ([11-build-loop.md](11-build-loop.md), "Target dirs and trees"). Before switching a build tree to its branch, the agent detaches the branch in its code-only tree (git refuses a branch checked out twice) and checks that the switch succeeded before it rebases: a rebase after a failed switch rewrites the build tree's previous branch.
 

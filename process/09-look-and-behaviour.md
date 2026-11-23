@@ -16,7 +16,7 @@ The rules that decide every judgement in this phase are in [rules/porting-rules.
 
 ## What earlier phases set up
 
-The look comparison does not start here. Phase 0 gave production its control channel, built it and wrote the driver ([01-setup.md](01-setup.md), step 6a). Phase 1 wrote a states file for every map section, added the missing hooks to production and checked that production reaches every state ([02-inventory-and-map.md](02-inventory-and-map.md), step 7). From the first compile on, the build loop captures the pairs of the batch's states ([11-build-loop.md](11-build-loop.md)), so most differences were seen and fixed while their sets were written. This phase closes what is left.
+The look comparison does not start here. Phase 0 gave production its control channel, built it and wrote the driver ([01-setup.md](01-setup.md), step 6a). Phase 1 wrote a states file for every map section, added the missing hooks to production and checked that production reaches every state ([02-inventory-and-map.md](02-inventory-and-map.md), step 7). From the first compile on, `tools/cycle` builds the port with `look.port_build` and captures the pairs of the batch's states ([11-build-loop.md](11-build-loop.md)); set that key in phase 0, since `cycle` skips the look step without it, so most differences were seen and fixed while their sets were written. This phase closes what is left.
 
 `tools/look` runs every comparison ([tools/look.md](../tools/look.md) has the full reference):
 

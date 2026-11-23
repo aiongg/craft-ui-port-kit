@@ -6,7 +6,9 @@ usage: tools/selftest/run [-v] [CASE ...]
 A case is a function `case_<name>` in tools/selftest/cases/<module>.py; CASE selects by `<module>` or
 `<module>.<name>` (a prefix is enough). Each case gets a fresh scratch directory with its own port.toml
 (lib.Scratch), runs kit tools there with stubbed `cl`, `cargo` and `claude` (tools/selftest/stubs/), and asserts on
-their exit status, output and files. -v prints the output of failed cases' last tool call.
+their exit status, output and files. A module with no `case_` function is one case: the runner runs it as a script
+(`python3 -I`) in its scratch directory, and it passes when it exits 0. -v prints the output of failed cases' last
+tool call.
 
 Prints one line per case and a last line `selftest: <n> passed, <n> failed`. Exit 0 when every case passed, 1 otherwise.
 """
@@ -14,6 +16,7 @@ import contextlib
 import importlib
 import io
 import shutil
+import subprocess
 import sys
 import tempfile
 import traceback
@@ -33,6 +36,21 @@ def main(argv: list[str]) -> int:
     want = [a for a in argv if a != "-v"]
     passed = failed = 0
     for f in sorted((HERE / "cases").glob("*.py")):
+        if "\ndef case_" not in f.read_text():
+            if want and not any(f.stem.startswith(w) for w in want):
+                continue
+            d = Path(tempfile.mkdtemp(prefix="kit-selftest-"))
+            r = subprocess.run([sys.executable, "-I", str(f)], cwd=d, capture_output=True, text=True)
+            if r.returncode == 0:
+                passed += 1
+                print(f"ok      {f.stem}")
+                shutil.rmtree(d, ignore_errors=True)
+            else:
+                failed += 1
+                tail = (r.stdout + r.stderr).strip().splitlines()[-3:]
+                print(f"FAILED  {f.stem}: exit {r.returncode}: " + " | ".join(tail))
+                print(f"        scratch kept: {d}")
+            continue
         mod = importlib.import_module(f"cases.{f.stem}")
         for name in sorted(n for n in dir(mod) if n.startswith("case_")):
             full = f"{f.stem}.{name[5:]}"

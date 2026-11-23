@@ -117,6 +117,10 @@ def case_fixer_mode_auto(s):
     check("fixer mode code-only" in p.stdout, "slow builds stay code-only", p)
     p = s.run("render-prompt", "p7-red-fixer", "TRACK=t1", "ROUND=r1", "TASK=t1")
     check("Fixer mode: `code-only`" in p.stdout, "the fixer prompt carries the resolved mode", p)
+    s.config({"framework.writing_base": "base", "app.writing_base": "base", "plan.base": "base",
+              "pipeline.fixer_mode": "auto", "build.warm_check_s": 60, "build.full_run_s": 50, "build.fw_trial_s": 700})
+    p = s.run("cycle", "r3", "--dry-run")
+    check("fixer mode code-only" in p.stdout, "slow framework trials alone give code-only", p)
 
 
 def case_merge_conflict_stops(s):

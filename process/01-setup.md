@@ -155,7 +155,7 @@ Then start the framework baseline as a background task, in the framework integra
 tools/test-run baseline-fw --fw-all --baseline
 ```
 
-It runs the trials of every framework package the app's lock takes from the framework. It takes longer than the app run; nothing waits on it until phase 6, so go on with phases 1 to 4 while it runs, and check that it finished before the first framework test run. Trials that fail here are base faults: later runs show them against this baseline instead of charging them to a set.
+It runs the trials of every framework package the app's lock takes from the framework. It takes longer than the app run; nothing waits on it until phase 6, so go on with phases 1 to 4 while it runs, and check that it finished before the first framework test run. Trials that fail here are base faults: later runs show them against this baseline instead of charging them to a set. When it has finished, record the third build time, `build.fw_trial_s` ([11-build-loop.md](11-build-loop.md), "Measuring the fixer mode's inputs").
 
 ## 8. Start the racheck daemons
 

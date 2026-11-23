@@ -38,7 +38,7 @@ Files in <work.runs>/LABEL/: `app.build.log`, `app.log`, `app.failed` (one faili
 Result for other tools: summary.json, and the last stdout line
   test-run LABEL: exit N; <part>: <status>, <n> passed, <n> failed, <n> crashed, <n> not run, <n> missing, <n> gone; ...
 summary.json: {"tool": "test-run", "label", "exit", "parts": [{"part", "filter", "status", "exit", "passed",
-"failed", "failing": [name...], "binaries": {key: {"status", "passed", "failed", "tests"}}, "previous": label|null,
+"failed", "seconds", "failing": [name...], "binaries": {key: {"status", "passed", "failed", "tests"}}, "previous": label|null,
 "baseline": label|null, "missing": [binary...], "gone": [test...], "gone_vs_baseline": [test...]}]}. A part's
 status is ok, failed (failing tests, a crashed or not-run binary), build-failed or tool-failure.
 
@@ -262,6 +262,14 @@ def fw_specs(cfg, a) -> list[tuple[str, str]]:
     return specs
 
 
+def timed(fn, *args) -> dict:
+    """A part's result with its wall seconds, build included (build.fw_trial_s and build.full_run_s are read here)."""
+    t = time.time()
+    r = fn(*args)
+    r["seconds"] = round(time.time() - t, 1)
+    return r
+
+
 def summary_line(label: str, code: int, parts: list[dict]) -> str:
     out = [f"test-run {label}: exit {code}"]
     for r in parts:
@@ -288,11 +296,11 @@ def main():
     value = cfg.get("build.test_threads")
     threads = "" if value is None else str(value)
     with track.recorded("test-run") as rec:
-        parts = [fw_part(cfg, rd, c, f, a.no_run, threads) for c, f in fw_specs(cfg, a)]
+        parts = [timed(fw_part, cfg, rd, c, f, a.no_run, threads) for c, f in fw_specs(cfg, a)]
         if a.fw and not parts:
             print("framework: no changed crates")
         if a.app or not (a.fw or a.fw_all):
-            parts.append(app_part(cfg, rd, a.filter, a.no_run, threads))
+            parts.append(timed(app_part, cfg, rd, a.filter, a.no_run, threads))
         md = [f"# {a.label}: comparison", ""]
         stamp = time.strftime("%Y-%m-%dT%H:%M:%S")
         base = baselines(cfg)

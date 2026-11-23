@@ -39,7 +39,7 @@ Steps:
              `look pair` for each states file with a state of one of the cycle's areas (all of them when no area
              is known). Skipped, and said so, while look.port_build is unset.
   6. packets One file per fixer in <work.runs>/LABEL/followup/<TASK>.md: a header with the cycle and the fixer mode
-             (pipeline.fixer_mode, `auto` decided by build.warm_check_s and build.full_run_s), the fixer's diag-cut
+             (pipeline.fixer_mode, `auto` decided by build.warm_check_s, build.full_run_s and build.fw_trial_s), the fixer's diag-cut
              packet, and the compile errors and lint findings in files its merged commits changed. A fixer with no
              failing test, no finding and no `DIAG ` line left on its branches gets no packet; its task goes to done.
   7. send    `swarm.py --follow-up TASK <packet>` for each packet, pipeline.parallel at a time, and waits for every

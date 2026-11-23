@@ -8,7 +8,7 @@ A cargo workspace in which every app crate links the framework rebuilds far more
 
 1. Every cargo command goes through the framework's `cl` (`build.cl`), in the framework tree and in the app tree alike.
 2. Each build tree has its own target dir, kept warm. New target dirs are seeded from a warm one.
-3. Writers write in code-only trees in every mode. Compile and red fixers follow the **fixer mode** (`pipeline.fixer_mode`): in `code-only` they write with no cargo and `DIAG ` prints where unsure; in `build` each takes a tree from the build pool and runs `cl check` of its group's crates or its own failing tests there; `auto` picks `build` when `build.warm_check_s` plus `build.full_run_s` is at most `pipeline.fixer_build_max_s`. Build trees are few, and are held only to compile, run trials and capture.
+3. Writers write in code-only trees in every mode. Compile and red fixers follow the **fixer mode** (`pipeline.fixer_mode`): in `code-only` they write with no cargo and `DIAG ` prints where unsure; in `build` each takes a tree from the build pool and runs `cl check` of its group's crates or its own failing tests there; `auto` picks `build` when `build.warm_check_s` plus the larger of `build.full_run_s` and `build.fw_trial_s` is at most `pipeline.fixer_build_max_s`. Build trees are few, and are held only to compile, run trials and capture.
 4. No workspace-wide build or test locally, and no `--all-features` or `--bins`. CI runs those.
 5. A slow loop is diagnosed from `cl`'s build records, never by timing another long run.
 
@@ -102,7 +102,13 @@ Each cycle appends its seconds per step to `<work.runs>/cycles.tsv`, with the ga
 
 ### Measuring the fixer mode's inputs
 
-In phase 0, after the baseline, record two times in `port.toml`: `build.warm_check_s`, the seconds of `tools/compile-gate` of the app after a one-file change in the app integration tree (its `summary.json` has the app half's `seconds`), and `build.full_run_s`, the seconds of the baseline's `test-run --app` once the build is warm (its stdout and `cl.log`). They decide `pipeline.fixer_mode = "auto"`, and price a cycle before any has run.
+In phase 0, after the baseline, record three times in `port.toml`:
+
+- `build.warm_check_s`: the seconds of `tools/compile-gate` of the app after a one-file change in the app integration tree (its `summary.json` has the app half's `seconds`).
+- `build.full_run_s`: the seconds of the baseline's `test-run --app` once the build is warm (each part's `seconds` in test-run's `summary.json`).
+- `build.fw_trial_s`: the seconds of the slowest warm `cl test` of one framework crate. The framework baseline (`baseline-fw`) builds cold, so take its slowest part from its `summary.json` and run that crate again warm: `tools/test-run baseline-fw-warm --fw <crate>`; record that run's `seconds`. Once `sizing.md` lists the crates the port changes, run the slowest of those the same way and record its time instead, since the cycle runs only changed crates.
+
+They decide `pipeline.fixer_mode = "auto"`, and price a cycle before any has run. `pipeline.fixer_build_max_s` is a placeholder threshold backed by one measured app.
 
 ## Target dirs and trees
 

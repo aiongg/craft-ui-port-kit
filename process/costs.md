@@ -72,7 +72,7 @@ Phases 6 and 7 run as cycles (`tools/cycle`, [11-build-loop.md](11-build-loop.md
 
 | Term | What it is | Before the first cycle | Once cycles have run |
 |---|---|---|---|
-| Cycle period | One cycle's build, runs and packets, plus the gap until the next cycle starts: fixers working on their packets and the lead's turn | `build.warm_check_s` + `build.full_run_s`, plus the fixers' time per round (agent times above) and a few minutes for the lead | The median start-to-start time of cycles in the same batch, from `<work.runs>/cycles.tsv` |
+| Cycle period | One cycle's build, runs and packets, plus the gap until the next cycle starts: fixers working on their packets and the lead's turn | `build.warm_check_s` + `build.full_run_s` + `build.fw_trial_s` per framework crate a round tests, plus the fixers' time per round (agent times above) and a few minutes for the lead | The median start-to-start time of cycles in the same batch, from `<work.runs>/cycles.tsv` |
 | Cycles per batch | Compile cycles until the batch compiles, then red rounds until it passes | A guess from the plan's size; say so | The median over finished batches |
 | Batches | The build batches of the write order (`plan.build_batches`) | From the write order | The same, minus the batches already seen |
 | Writing | Sets left over sets per hour | "Wall time of writing" above | Sets done per hour on the board |

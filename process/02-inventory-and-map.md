@@ -99,6 +99,7 @@ The agents' maps are the plan's foundation, so the lead reads a sample itself be
 
 - **Per area, at least five sections** spread over the map: open the app code at the cited lines, then the framework component at its cited path. Is the component real, does it do what the section says, and is the fit right?
 - **Gaps:** for each sampled gap, grep the framework for the concept, not only the name. A gap that duplicates an existing mechanism is the most common map error.
+- **Citations:** `tools/coverage.py` checks every `` `Symbol` (path:line) `` citation of the maps (check 7 of its report): the file exists, the line is inside it, and the line names the symbol. Fix each drifted citation before phase 2; spot-check only what the script cannot read (a bare `:236`, a symbol after the path).
 - **Tests:** compare two test counts per area with `grep -c '#\[test\]'`.
 - **The index:** its coverage table lists no unmapped entry, and every `SG-n` names real sections.
 

@@ -142,3 +142,28 @@ def case_one_confirming_evaluation(s):
     check(r.returncode == 1 and "no third evaluation" in r.stderr, "a third evaluation is refused", r)
     r = s.run("render-prompt", "--workflow-args", "phase2-final", "--stage", "evaluate")
     check(r.returncode == 1 and "does not run again" in r.stderr, "so is a rerun of the first evaluation", r)
+
+
+def case_coverage_citation_drift(s):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("coverage_tool", TOOLS / "coverage.py")
+    cov = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cov)
+    fw = s.root / "snap-fw" / "crates" / "ui" / "src"
+    fw.mkdir(parents=True)
+    (fw / "panel.rs").write_text("use x;\n\npub struct ChannelsPanel;\nimpl ChannelsPanel {\n    pub fn new() {}\n}\n")
+    m = s.work / "map.md"
+    m.write_text("## F1. Channels\n\n"
+                 "- **Framework**: `ChannelsPanel` (ui/src/panel.rs:3: `new` :5), `ChannelsPanel::new` (ui/src/panel.rs:5), "
+                 "`ChannelsPanel` (ui/src/panel.rs:2), `Gone` (ui/src/missing.rs:1), `Far` (ui/src/panel.rs:99)\n")
+    bad, n = cov.citation_drift({"A": m}, {}, s.root / "snap-fw")
+    check(n == 5 and len(bad) == 3, f"three of five citations drifted: {bad}")
+    check("line 2 reads" in bad[0] and "no such file" in bad[1] and "the file has 6 lines" in bad[2], f"reasons: {bad}")
+
+
+def case_map_section_heading_matches_render_prompt(s):
+    import re
+    head = (TOOLS.parent / "templates" / "map-section.md").read_text().splitlines()[0]
+    text = head.replace("<ID>", "F1").replace("<Part name>", "Channels")
+    check(re.match(r"^## ([A-Z]{1,3}\d+[a-z]?)\.?\s", text) and text.startswith("## F1."),
+          f"the template's heading is the form render-prompt's section regex reads: {head}")

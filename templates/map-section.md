@@ -1,4 +1,4 @@
-### <ID> <Part name>
+## <ID>. <Part name>
 
 - **Kind**: panel | dialog | popup | menu | options bar | widget | infra | canvas overlay.
 - **App code**: <path:lines, one entry per file or function that the part is made of>

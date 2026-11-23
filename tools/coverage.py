@@ -3,7 +3,7 @@
 
 usage: coverage.py [--from sheets|plan] [--out FILE] [--tsv FILE] [--done FILE] [--config PORT.TOML]
 
-Six checks, each counted as gaps:
+Seven checks, each counted as gaps:
   1. Map sections: every entry section of every area map ([[areas]] `map`, default <work.maps>/<area>.md) is named
      by a writer set, or listed in --done (work already finished, one `<area> <section>` per line).
   2. Files: every .rs file under app.ui_dirs (in app.snapshot, else app.checkout at plan.app_base) has an action in
@@ -16,6 +16,9 @@ Six checks, each counted as gaps:
   6. No open-question marker in a set's sheet, decisions.md or ownership section, outside code spans: TBD, TODO,
      "open question", "undecided", "to be decided", "(open)", "??", or a table cell or line that is only an
      unfilled template field (`<lowercase words>`). One gap per line.
+  7. Map citations: every `Symbol` (path:line) citation in an area map names a file that exists (in the framework
+     snapshot or the app's UI files), a line inside it, and that line contains the symbol's last name segment. One
+     gap per citation that fails. Citations of other forms (a bare `:236`, a symbol after the path) are not read.
 
 Two sources for the sets (--from; default `sheets` when work.sheets holds sheets, else `plan`):
   sheets  the writer sheets (templates/sheet.md): each sheet's Repo, `Map sections` head line and Files table; test
@@ -33,7 +36,7 @@ the ids of infra rows (tables under a heading with "Infra") and the gap, hook an
 their index (FG-, SG-, PC-, CH-, AC-, H-, G-) that no plan text names.
 
 Writes the report (default <work.plan>/eval-coverage.md), prints a JSON summary, posts one `coverage` event.
-Exit 0 when the six checks have no gaps, 1 otherwise, 2 when an input is missing.
+Exit 0 when the seven checks have no gaps, 1 otherwise, 2 when an input is missing.
 """
 from __future__ import annotations
 
@@ -594,6 +597,50 @@ def main(argv=None) -> int:
     return 0 if gaps == 0 else 1
 
 
+CITE = re.compile(r"`?([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)`?\s*\(\s*`?((?:[\w.-]+/)*[\w.-]+\.rs):(\d+)(?:-(\d+))?")
+
+
+def citation_drift(maps: dict, app_texts: dict[str, str], fw_root: Path | None) -> tuple[list[str], int]:
+    """Citations `Symbol (path:line)` of the area maps that no longer hold: (one message per failure, citations read).
+    A path resolves to the file whose path ends with it, in the framework snapshot or among the app UI files."""
+    fw_files: dict[str, list[Path]] = defaultdict(list)
+    if fw_root and fw_root.is_dir():
+        for p in fw_root.rglob("*.rs"):
+            rel = p.relative_to(fw_root).parts
+            if "target" not in rel and ".git" not in rel:
+                fw_files[p.name].append(p)
+    texts: dict[str, list[str]] = {}
+
+    def lines_of(key, loader):
+        if key not in texts:
+            texts[key] = loader().splitlines()
+        return texts[key]
+
+    def candidates(path):
+        found = [(str(p), lambda p=p: read(p)) for p in fw_files.get(path.rsplit("/", 1)[-1], []) if str(p).endswith("/" + path)]
+        found += [(rel, lambda t=t: t) for rel, t in app_texts.items() if rel == path or rel.endswith("/" + path)]
+        return found
+
+    out, n_read = [], 0
+    for area, mp in sorted(maps.items()):
+        for n, line in enumerate(read(mp).splitlines(), 1):
+            for m in CITE.finditer(line):
+                sym, path, lo = m.group(1).split("::")[-1], m.group(2), int(m.group(3))
+                n_read += 1
+                where = f"{mp.name}:{n}: `{m.group(1)}` ({path}:{lo})"
+                cands = candidates(path)
+                if not cands:
+                    out.append(f"{where}: no such file in the framework snapshot or the app UI files")
+                    continue
+                short = [lines_of(k, ld) for k, ld in cands]
+                if all(lo > len(ls) for ls in short):
+                    out.append(f"{where}: the file has {len(short[0])} lines")
+                elif not any(lo <= len(ls) and re.search(rf"\b{re.escape(sym)}\b", ls[lo - 1]) for ls in short):
+                    ref = next(ls for ls in short if lo <= len(ls))
+                    out.append(f"{where}: line {lo} reads `{ref[lo - 1].strip()[:80]}`")
+    return out, n_read
+
+
 def run(a, cfg, ui_dirs, plan_root):
     areas = [ar["id"] for ar in cfg.areas]
     maps = {ar["id"]: Path(ar["map"]) for ar in cfg.areas if Path(ar["map"]).exists()}
@@ -776,7 +823,9 @@ def run(a, cfg, ui_dirs, plan_root):
     sec_cnt = Counter(c for _, _, c in sec_rows)
     uncarried = settled_not_carried(sets, cfg.path("work.settled"), cfg.path("work.sets"))
     markers = open_markers(sets, cfg.path("work.sets"))
-    total_gaps = (sec_cnt["gap"] + len(u_writer) + len(u_mentioned) + len(u_silent) + cnt["gap"] + len(dup_cross)
+    fw_snap = cfg.get("framework.snapshot")
+    drift, cites = citation_drift(maps, files, Path(fw_snap) if fw_snap else None)
+    total_gaps = (len(drift) + sec_cnt["gap"] + len(u_writer) + len(u_mentioned) + len(u_silent) + cnt["gap"] + len(dup_cross)
                   + len(dir_overlap) + len(uncarried) + len(markers))
     W("# Plan coverage")
     W("")
@@ -949,6 +998,13 @@ def run(a, cfg, ui_dirs, plan_root):
     for s, src, n, line in markers:
         W(f"- {s} {src}:{n}: {line}")
     W("")
+    W("## 7. Map citations")
+    W("")
+    W(f"`Symbol` (path:line) citations read in the area maps: {cites}. Failing: {len(drift)}.")
+    W("")
+    for d in drift:
+        W(f"- {d}")
+    W("")
     W("## Limits of the check")
     W("")
     if source == "plan":
@@ -975,7 +1031,8 @@ def run(a, cfg, ui_dirs, plan_root):
         "test_gaps_count_only": sum(len(gaps_by_file[r]) for r in gaps_by_file if summaries.get(r)),
         "paths_in_two_sets": len(dup_cross), "dir_overlaps": len(dir_overlap), "dangling_section_refs": len(dangling),
         "infra_rows_not_in_plans": len(miss_infra), "gap_ids_not_in_plans": len(miss_gid),
-        "settled_not_carried": len(uncarried), "open_markers": len(markers),
+        "settled_not_carried": len(uncarried), "open_markers": len(markers), "citations": cites,
+        "citations_failing": len(drift),
     }
     return summary, out_path
 

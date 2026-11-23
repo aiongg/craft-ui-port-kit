@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """After combine-area: list lines a set added that the combined tree lacks and no later set removed or changed.
+A line counts as changed in place only when all its words appear in a later set's added lines of the same file.
 -X theirs can drop an earlier set's lines silently where two sets edit neighbouring lines; this finds them.
 Exit 1 when a line is lost, 0 otherwise.
 
@@ -68,18 +69,20 @@ def main():
             for f, lines in diffs[i][0].items():
                 shown = git(J, "show", f"HEAD:{f}")
                 have = {l.strip() for l in shown.splitlines()}
-                vocab = words(shown)
                 later = set().union(*(d[1].get(f, set()) for d in diffs[i + 1:])) if i + 1 < len(diffs) else set()
+                # Only a later set's own added lines in this file can explain a line that changed in place: words found
+                # elsewhere in the file (a stale base line) do not.
+                vocab = set().union(*(words(l) for d in diffs[i + 1:] for l in d[0].get(f, [])))
                 for l in lines:
                     if l in have or l in later or (shown == "" and any(f in d[1] for d in diffs[i + 1:])):
                         continue
-                    # Every word of the line still in the file: re-wrapped or extended by a later set, not dropped.
-                    if words(l) <= vocab:
+                    # Every word of the line is in a later set's added lines of this file: re-wrapped or extended by it.
+                    if vocab and words(l) <= vocab:
                         changed += 1
                         continue
                     print(f"LOST {s} {f}: {l[:140]}")
                     lost += 1
-        summary = f"combine-lost: {lost} line(s) missing; {changed} changed in place (words all present)"
+        summary = f"combine-lost: {lost} line(s) missing; {changed} changed in place by a later set"
         print(summary)
         rec.result(summary, data={"lost": lost, "changed": changed}, ok=lost == 0)
     sys.exit(1 if lost else 0)

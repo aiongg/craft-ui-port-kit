@@ -283,3 +283,19 @@ def case_branch_prefix(s):
     portset(s)
     check(Sheet("set-g").branch("fw") == "other/set/set-g", f"configured prefix: {Sheet('set-g').branch('fw')}")
     check(Sheet("set-g").branch("app") == "other/set/set-g-app", "second repo")
+
+
+def case_combine_lost_stale_base_line(s):
+    base = "fn a() {}\nlet value = compute(alpha);\nfn other(beta) {}\n"
+    fw = s.tree("fw", {"src/a.rs": base})
+    b = git(fw, "rev-parse", "HEAD").strip()
+    for name in ("set-a", "set-b"):
+        git(fw, "worktree", "add", "-q", "-b", f"port/set/{name}", str(s.work / "trees" / name))
+        (s.work / "sets" / name).mkdir(parents=True)
+        (s.work / "sets" / name / "base-fw").write_text(b + "\n")
+    s.commit(s.work / "trees" / "set-a", {"src/a.rs": base.replace("compute(alpha)", "compute(alpha, beta)")}, "set-a")
+    s.commit(s.work / "trees" / "set-b", {"src/a.rs": base + "fn extra() {}\n"}, "set-b")
+    s.commit(fw, {"src/a.rs": base + "fn extra() {}\n"}, "combined, set-a's line lost")
+    p = s.run("combine-lost", "set-a", "set-b", env={"REPO": "fw", "J": str(fw)})
+    check(p.returncode == 1 and "LOST set-a src/a.rs: let value = compute(alpha, beta);" in p.stdout,
+          "a line replaced by its stale base line is lost, though its words are elsewhere in the file", p)

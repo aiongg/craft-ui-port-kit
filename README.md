@@ -64,7 +64,7 @@ The kit improves from real runs: where the time went, what was redone, where you
 
 > Collect this port's logs with the kit's `tools/collect-logs`: run it in the port's workspace here, and on every other machine that ran agents or builds for this port (over ssh, from the same workspace path). Show me each archive's path and size and the list of files in it (`tar tzf`), so I can check them before sending.
 
-`tools/collect-logs` takes the workspace without worktrees or build output (plans, set output, agent prompts and replies, build and test logs, screenshots, the usage log, the dashboard events, STATE.md, port.toml) and the Claude Code sessions of the lead, its subagents and every headless agent of this port. Sessions hold whatever a command printed, so look through the archive before you send it.
+`tools/collect-logs` takes the workspace without worktrees or build output (plans, set output, agent prompts and replies, build and test logs, screenshots, the usage log, the dashboard events, STATE.md, port.toml) and the Claude Code sessions of the lead, its subagents and every headless agent of this port, with the lead's memory files and background task outputs. Sessions hold whatever a command printed, so look through the archive before you send it.
 
 ## Where to look next
 

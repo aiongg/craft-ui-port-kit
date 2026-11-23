@@ -5,33 +5,92 @@ usage: patch-framework [--dry-run] [APP-CARGO.TOML APP-CARGO.LOCK [FW-CHECKOUT]]
 
 Defaults: app.integration's Cargo.toml and Cargo.lock, and framework.integration.
 
-The generated block (between the BEGIN/END markers) holds the whole
-[patch.crates-io] table plus one [patch."<framework url>"] table per URL in
-framework.patch_urls, so reruns replace it cleanly. Existing [patch.crates-io]
-lines outside the block are absorbed into it, except the egui family (taken
-from the framework) and git patches of the framework itself, which become
-framework path patches. Prints the block; exit status 1 when a package the lock
-file takes from a framework URL is missing in the checkout.
-The patch is for local builds only: commit it on a local branch and never push it.
+The packages come from the lock file as committed at HEAD in the app tree (the working copy only when the lock is
+not tracked; a lock passed by path is read as given): a local build rewrites the working lock with path sources, so
+only the committed lock still names the framework's git sources, and a rerun computes the same patch.
+
+The app's own lines stay where they are. The tool only adds overrides:
+  - inside the app's [patch.crates-io] table, a marked region (`# BEGIN/END port-kit framework overrides`) with the
+    framework's own [patch.crates-io] entries (paths made absolute) and a path patch for every app entry that names a
+    framework URL; an app entry whose key an override replaces is commented out as `# port-kit overridden: <line>`;
+  - at the end of the file, a marked block (`# BEGIN/END port-kit framework patch`) with one [patch."<url>"] table per
+    URL in framework.patch_urls (and the [patch.crates-io] table itself when the app has none). An app table of the
+    same name is commented out the same way.
+A rerun first restores the commented lines and drops both regions, so it changes nothing when nothing moved.
+Prints the regions. Exit status 1 when the lock takes no package from a framework URL, or a package it takes is
+missing in the checkout. The patch is for local builds only: commit it on a local branch and never push it.
 """
-import re, sys, tomllib
+import re, subprocess, sys, tomllib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from portkit import config, track
+from portkit import config, gates, track
 
 BEGIN, END = "# BEGIN port-kit framework patch", "# END port-kit framework patch"
+OBEGIN, OEND = "# BEGIN port-kit framework overrides", "# END port-kit framework overrides"
+MARK = "# port-kit overridden: "
+KEY = re.compile(r"^\s*([A-Za-z0-9_-]+|\"[^\"]+\")\s*=")
+
 
 def inline(d):
     return "{ " + ", ".join(f'{k} = "{v}"' for k, v in d.items()) + " }"
 
-def table_lines(text, header):
-    m = re.search(rf"^\[{re.escape(header)}\]\s*$", text, re.M)
-    if not m:
-        return None, None, []
-    nxt = re.search(r"^\[", text[m.end():], re.M)
-    end = m.end() + nxt.start() if nxt else len(text)
-    return m.start(), end, text[m.end():end].splitlines()
+
+def restore(text: str) -> str:
+    """The manifest as the app had it: both regions dropped, commented app lines back."""
+    for b, e in ((BEGIN, END), (OBEGIN, OEND)):
+        text = re.sub(rf"^{re.escape(b)}\n.*?^{re.escape(e)}\n?", "", text, flags=re.M | re.S)
+    text = "\n".join(l[len(MARK):] if l.startswith(MARK) else l for l in text.split("\n"))
+    return text.rstrip("\n") + "\n"
+
+
+def table_span(lines: list[str], header: str):
+    """(index of the header line, index after the table's last line) of `[header]`, or None."""
+    pat = re.compile(rf"^\[{re.escape(header)}\]\s*(#.*)?$")
+    for i, l in enumerate(lines):
+        if pat.match(l):
+            j = i + 1
+            while j < len(lines) and not lines[j].lstrip().startswith("["):
+                j += 1
+            return i, j
+    return None
+
+
+def key_of(line: str) -> str | None:
+    m = KEY.match(line)
+    return m.group(1).strip('"') if m else None
+
+
+def patch(text: str, overrides: dict[str, str], url_tables: dict[str, list[str]]) -> tuple[str, list[str]]:
+    """The patched manifest and the lines of the regions it added."""
+    lines = restore(text).rstrip("\n").split("\n")
+    added = []
+    for u in url_tables:
+        span = table_span(lines, f'patch."{u}"')
+        if span:
+            for i in range(*span):
+                if lines[i].strip():
+                    lines[i] = MARK + lines[i]
+    ci = table_span(lines, "patch.crates-io")
+    end_block = []
+    if ci and overrides:
+        for i in range(ci[0] + 1, ci[1]):
+            if key_of(lines[i]) in overrides:
+                lines[i] = MARK + lines[i]
+        region = [OBEGIN, *(f"{k} = {v}" for k, v in overrides.items()), OEND]
+        lines[ci[0] + 1:ci[0] + 1] = region
+        added += region
+    elif overrides:
+        end_block += ["[patch.crates-io]", *(f"{k} = {v}" for k, v in overrides.items())]
+    for u, rows in url_tables.items():
+        if rows:
+            end_block += ["", f'[patch."{u}"]', *rows]
+    if end_block:
+        block = [BEGIN, *(end_block[1:] if end_block[0] == "" else end_block), END]
+        lines += ["", *block]
+        added += block
+    return "\n".join(lines) + "\n", added
+
 
 def main():
     args = [a for a in sys.argv[1:] if a != "--dry-run"]
@@ -40,7 +99,7 @@ def main():
         sys.exit(__doc__)
     cfg = config.load()
     app = cfg.path("app.integration")
-    toml_p, lock_p = (Path(args[0]), Path(args[1])) if args else (app / "Cargo.toml", app / "Cargo.lock")
+    toml_p = Path(args[0]) if args else app / "Cargo.toml"
     fw = Path(args[2]).resolve() if len(args) == 3 else cfg.path("framework.integration")
     URLS = [u.rstrip("/") for u in cfg.require("framework.patch_urls")]
     text = toml_p.read_text()
@@ -56,61 +115,37 @@ def main():
         if name:
             dirs.setdefault(name, f.parent)
 
-    fw_patch = tomllib.loads((fw / "Cargo.toml").read_text()).get("patch", {}).get("crates-io", {})
-    crates_io = {}
-    for k, v in fw_patch.items():
-        crates_io[k] = {"path": str(fw / v["path"])} if "path" in v else v
+    overrides = {}
+    for k, v in tomllib.loads((fw / "Cargo.toml").read_text()).get("patch", {}).get("crates-io", {}).items():
+        overrides[k] = inline({"path": str(fw / v["path"])} if "path" in v else v)
+    app_ci = tomllib.loads(restore(text)).get("patch", {}).get("crates-io", {})
+    for k, v in app_ci.items():
+        if k not in overrides and isinstance(v, dict) and any(str(v.get("git", "")).rstrip("/").removesuffix(".git") == u.removesuffix(".git") for u in URLS):
+            if k in dirs:
+                overrides[k] = inline({"path": str(dirs[k])})
 
-    # the app's crates-io lines not owned by the framework survive; old block included.
-    old = re.search(rf"^{BEGIN}\n.*?^{END}\n?", text, re.M | re.S)
-    scan = (old.group(0) if old else "") + text
-    extras = []
-    for ln in scan.splitlines():
-        m = re.match(r"^([A-Za-z0-9_-]+)\s*=\s*(\{.*\})\s*$", ln)
-        if not m or m.group(1) in crates_io or m.group(1) in {e[0] for e in extras}:
-            continue
-        in_ci = any(ln in section for section in [table_lines(text, "patch.crates-io")[2],
-                                                   table_lines(old.group(0), "patch.crates-io")[2] if old else []])
-        if not in_ci or re.search(r"/egui(\.git)?\b", ln) or any(u in ln for u in URLS):
-            continue
-        extras.append((m.group(1), m.group(2)))
-
-    lock = tomllib.loads(lock_p.read_text())
-    per_url = {u: {} for u in URLS}
-    for p in lock["package"]:
-        src = p.get("source", "")
-        for u in URLS:
-            if src.startswith("git+" + u):
-                per_url[u][p["name"]] = None
-    needed = sorted({n for d in per_url.values() for n in d})
+    lock = tomllib.loads(Path(args[1]).read_text()) if args else gates.committed_lock(app)
+    per_url = {u: sorted({p["name"] for p in lock.get("package", []) if p.get("source", "").startswith("git+" + u)}) for u in URLS}
+    needed = sorted({n for ns in per_url.values() for n in ns})
     missing = [n for n in needed if n not in dirs]
+    tables = {u: [f'{n} = {{ path = "{dirs[n]}" }}' for n in ns if n in dirs and n not in overrides] for u, ns in per_url.items()}
 
-    out = [BEGIN, "[patch.crates-io]"]
-    out += [f"{k} = {inline(v)}" for k, v in crates_io.items()]
-    out += [f"{k} = {v}" for k, v in extras]
-    for u in URLS:
-        out += ["", f'[patch."{u}"]']
-        out += [f'{n} = {{ path = "{dirs[n]}" }}' for n in sorted(per_url[u]) if n in dirs and n not in crates_io]
-    out.append(END)
-    block = "\n".join(out) + "\n"
-
-    print(block, end="")
+    new, added = patch(text, overrides, tables)
+    print("\n".join(added))
     print(f"\npackages: {len(needed)}; not found: {len(missing)}", file=sys.stderr)
     for n in missing:
         print(f"  not found in {fw}: {n}", file=sys.stderr)
-
-    if not dry:
-        if old:
-            text = text.replace(old.group(0), "")
-        s, e, _ = table_lines(text, "patch.crates-io")
-        if s is not None:
-            text = text[:s] + text[e:]
-        toml_p.write_text(text.rstrip("\n") + "\n\n" + block)
+    if not needed:
+        print(f"patch-framework: the lock takes no package from {', '.join(URLS)}; is the lock committed with the "
+              "framework pinned by git rev?", file=sys.stderr)
+        return 1
+    if not dry and new != text:
+        toml_p.write_text(new)
     return 1 if missing else 0
 
 
 if __name__ == "__main__":
     with track.recorded("patch-framework") as rec:
         rc = main()
-        rec.result("patched" if rc == 0 else "packages missing in the framework checkout")
+        rec.result("patched" if rc == 0 else "no framework package in the lock, or packages missing in the checkout", ok=rc == 0)
     sys.exit(rc)

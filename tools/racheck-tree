@@ -46,8 +46,9 @@ def main():
         fw_changed = git_names(fw, cfg.require("framework.writing_base"))
         reply = racheck.check(cfg, wt, "app", changed + mine, fw_tree=fw, fw_changed=fw_changed)
         if reply is None:
-            rec.result("app daemon not running")
-            sys.exit("racheck-tree: app daemon not running: start it with `racheck.py serve app`")
+            rec.result("racheck daemon died or is not running")
+            print("racheck-tree: racheck daemon died or is not running: restart it with `racheck.py serve app`", file=sys.stderr)
+            sys.exit(2)
         if not reply.get("ok"):
             rec.result(f"daemon error: {reply.get('error')}")
             sys.exit(f"racheck-tree: {reply.get('error')}")

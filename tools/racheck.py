@@ -272,12 +272,16 @@ def query(cfg, repo, req):
         s.connect(sock_path(cfg, repo))
     except OSError:
         return None
-    s.sendall((json.dumps(req) + "\n").encode())
-    s.shutdown(socket.SHUT_WR)
-    data = b""
-    while chunk := s.recv(1 << 20):
-        data += chunk
-    return json.loads(data)
+    # A daemon that dies mid-reply is the same to a caller as one that is not running: no answer.
+    try:
+        s.sendall((json.dumps(req) + "\n").encode())
+        s.shutdown(socket.SHUT_WR)
+        data = b""
+        while chunk := s.recv(1 << 20):
+            data += chunk
+        return json.loads(data)
+    except (OSError, ValueError):
+        return None
 
 
 def check(cfg, tree, repo, changed, also=(), fw_tree=None, fw_changed=(), every=False):
@@ -323,8 +327,8 @@ def canary(cfg, names, set_lists):
             continue
         r = query(cfg, repo, {"tree": str(repos(cfg)[repo]["root"]), "changed": [rel], "also": []})
         if r is None or not r.get("ok"):
-            why = "daemon not running" if r is None else r.get("error")
-            print(f"canary {repo}: {why} (start it: racheck.py serve {repo})")
+            why = "daemon died or is not running" if r is None else r.get("error")
+            print(f"canary {repo}: {why} (restart it: racheck.py serve {repo})")
             code = 2
             continue
         errs = [d for d in r["diagnostics"] if d["severity"] == "error"]
@@ -354,7 +358,7 @@ def main():
     except config.ConfigError as e:
         sys.exit(f"racheck: {e}")
     if a.cmd == "serve":
-        with track.recorded(f"racheck serve {a.repo}") as rec:
+        with track.recorded(f"racheck-serve-{a.repo}") as rec:
             serve(cfg, a.repo)
             rec.result("daemon stopped")
     elif a.cmd == "stop":
@@ -363,7 +367,7 @@ def main():
         bad = [r for r in a.repo if r not in REPO_NAMES]
         if bad:
             sys.exit(f"racheck canary: not a repo: {', '.join(bad)} (fw or app)")
-        with track.recorded("racheck canary") as rec:
+        with track.recorded("racheck-canary") as rec:
             code = canary(cfg, a.repo, a.sets)
             rec.result(f"canary exit {code}", ok=code == 0)
         sys.exit(code)
@@ -372,7 +376,8 @@ def main():
     else:
         r = check(cfg, a.tree, a.repo, a.changed, a.also, a.fw_tree, a.fw_changed, a.all)
         if r is None:
-            sys.exit(f"racheck daemon not running: start it with `racheck.py serve {a.repo}`")
+            print(f"racheck daemon died or is not running: restart it with `racheck.py serve {a.repo}`", file=sys.stderr)
+            sys.exit(2)
         print(json.dumps(r, indent=1))
 
 

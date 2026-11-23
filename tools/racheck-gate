@@ -44,8 +44,9 @@ def main():
         print(f"app files {len(files)}, framework overlay {len(overlay)}")
         reply = racheck.check(cfg, app, "app", files, fw_tree=fw, fw_changed=overlay)
         if reply is None:
-            rec.result("app daemon not running")
-            sys.exit("racheck-gate: app daemon not running: start it with `racheck.py serve app`")
+            rec.result("racheck daemon died or is not running")
+            print("racheck-gate: racheck daemon died or is not running: restart it with `racheck.py serve app`", file=sys.stderr)
+            sys.exit(2)
         (rd / "racheck-gate.json").write_text(json.dumps(reply, indent=1))
         tracked = subprocess.run(["git", "-C", str(app), "ls-files", "*.rs"], capture_output=True, text=True, check=True).stdout
         mods = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "mod-lines.py")], input=tracked, cwd=app,

@@ -305,7 +305,7 @@ def racheck_set(sheet: Sheet) -> list[str] | None:
         also = sorted(p for p in mine - set(changed) if p in base_files(repo) and (tree / p).exists())
         r = racheck.query(ctx.cfg, repo, {"tree": str(tree), "changed": changed, "also": also})
         if r is None:
-            print(f"racheck: no daemon for {repo} (start: {tools}/racheck.py serve {repo})")
+            print(f"racheck: daemon for {repo} died or is not running (restart: {tools}/racheck.py serve {repo})")
             return None
         if not r["ok"]:
             print(f"racheck {repo}: {r['error']}")

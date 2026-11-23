@@ -31,7 +31,7 @@ def setup(s):
 def case_refuses_without_daemon(s):
     setup(s)
     p = s.run("run-area", "pilot", "one.txt", "default.txt")
-    check(p.returncode == 2 and "daemon not running" in p.stdout and "writer canary failed" in p.stderr, "refuses", p)
+    check(p.returncode == 2 and "daemon died or is not running" in p.stdout and "writer canary failed" in p.stderr, "refuses", p)
 
 
 def case_refuses_on_errors(s):
@@ -54,3 +54,18 @@ def case_starts_when_clean(s):
         srv.shutdown()
     check("canary fw: crates/craft/src/lib.rs: 0 errors" in p.stdout and "writer canary failed" not in p.stderr,
           "a clean canary lets the batch start", p)
+
+
+def case_daemon_dying_mid_reply_is_not_running(s):
+    setup(s)
+
+    class H(socketserver.StreamRequestHandler):
+        def handle(self):
+            self.rfile.readline()   # closes without a reply
+    srv = socketserver.UnixStreamServer(str(s.work / "trees" / "racheck-fw.sock"), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        p = s.run("run-area", "pilot", "one.txt", "default.txt")
+    finally:
+        srv.shutdown()
+    check(p.returncode == 2 and "daemon died or is not running" in p.stdout, "a closed socket is a dead daemon, no crash", p)

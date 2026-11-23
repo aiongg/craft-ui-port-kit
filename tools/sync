@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+"""sync: merge upstream's new commits into the port's integration trees, at the heads as they are now, and record it.
+
+usage: sync [--fw] [--app] [--dry-run] [--config PORT.TOML]
+
+  --fw, --app   the repos to sync (default: each one whose integration tree, upstream URL and branch are set):
+                fw merges framework.branch of framework.repo into framework.integration, app merges app.base_branch
+                of app.upstream into app.integration.
+  --dry-run     fetch and measure only; change nothing.
+
+Per repo:
+  1. Refuses (exit 2) when the integration tree has uncommitted changes.
+  2. Fetches the upstream branch into refs/portkit/upstream/<branch> of the tree (no branch or remote of yours moves)
+     and measures: the commits the tree lacks, and the files that would conflict (`git merge-tree --write-tree`).
+  3. No conflict: `git merge --no-ff --no-edit` of that commit, one merge commit. Never a rebase, never a push.
+     A conflict: the tree stays as it is; the conflicted files are printed, and the merge is yours to resolve by the
+     rules of process/10-land.md, step 1 (for the app, the production merge). Run sync again afterwards: it sees
+     upstream's head merged and records the sync.
+  4. Appends one row to <work.runs>/syncs.tsv: start (UTC), repo, upstream (URL#branch), upstream_sha, before,
+     after, behind, conflicts, fetch_s, merge_s, total_s, exit. cycle reads it to report when a sync is due.
+Posts one `sync` event. The next cycle compiles and tests the merged trees.
+
+Output: per repo a line `sync <repo>: ...`. Exit 0 when every repo merged or was already in step, 1 when a fetch or
+merge failed, 2 for a dirty tree or a config error, 3 when a merge would conflict.
+"""
+from __future__ import annotations
+
+import argparse
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from portkit import config, track  # noqa: E402
+from portkit import sync as S  # noqa: E402
+
+EXIT_OK, EXIT_FAILED, EXIT_TOOL, EXIT_CONFLICT = 0, 1, 2, 3
+
+
+def row(cfg, vals: dict) -> None:
+    f = S.tsv(cfg)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    new = not f.is_file()
+    with open(f, "a") as out:
+        if new:
+            out.write("\t".join(S.TSV_COLS) + "\n")
+        out.write("\t".join(str(vals.get(k, "")) for k in S.TSV_COLS) + "\n")
+
+
+def sync_one(cfg, repo: str, tree: Path, url: str, branch: str, dry: bool) -> tuple[int, str]:
+    t0 = time.time()
+    vals = {"start": datetime.fromtimestamp(t0, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "repo": repo,
+            "upstream": f"{url}#{branch}"}
+
+    def done(code: int, line: str) -> tuple[int, str]:
+        vals.update(exit=code, total_s=f"{time.time() - t0:.0f}")
+        if not dry:
+            row(cfg, vals)
+        return code, f"sync {repo}: {line}"
+
+    if S.git(tree, "status", "--porcelain", "--untracked-files=no").stdout.strip():
+        return EXIT_TOOL, f"sync {repo}: {tree} has uncommitted changes: commit or set them aside first"
+    before = S.git(tree, "rev-parse", "HEAD").stdout.strip()
+    vals.update(before=before, after=before)
+    try:
+        sha = S.fetch(tree, url, branch)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        return done(EXIT_FAILED, f"fetching {branch} from {url} failed: {(getattr(e, 'stderr', '') or str(e)).strip()}")
+    vals.update(upstream_sha=sha, fetch_s=f"{time.time() - t0:.0f}")
+    n = S.behind(tree, sha)
+    vals["behind"] = n
+    if n == 0:
+        vals["conflicts"] = 0
+        return done(EXIT_OK, f"in step with {branch} at {sha[:10]}; recorded")
+    mt = S.git(tree, "merge-tree", "--write-tree", "--name-only", "--no-messages", "HEAD", sha, check=False)
+    files = [l for l in mt.stdout.splitlines()[1:] if l.strip()] if mt.returncode == 1 else []
+    if mt.returncode not in (0, 1):
+        return done(EXIT_FAILED, f"git merge-tree failed: {mt.stderr.strip()}")
+    vals["conflicts"] = len(files)
+    if files:
+        listing = "\n".join(f"  {f}" for f in files)
+        return done(EXIT_CONFLICT, f"{n} commits behind {branch} at {sha[:10]}; {len(files)} files would conflict, "
+                    f"nothing merged:\n{listing}\nMerge by process/10-land.md step 1: "
+                    f"git -C {tree} merge --no-ff {sha}, resolve, commit; then run sync again")
+    if dry:
+        return done(EXIT_OK, f"{n} commits behind {branch} at {sha[:10]}; merges clean (dry run: nothing merged)")
+    t1 = time.time()
+    m = S.git(tree, "merge", "--no-ff", "--no-edit", "-m", f"Merge {branch} {sha[:12]} into the port", sha, check=False)
+    vals["merge_s"] = f"{time.time() - t1:.0f}"
+    if m.returncode != 0:
+        S.git(tree, "merge", "--abort", check=False)
+        return done(EXIT_FAILED, f"git merge failed and was aborted: {(m.stderr or m.stdout).strip()}")
+    after = S.git(tree, "rev-parse", "HEAD").stdout.strip()
+    vals["after"] = after
+    return done(EXIT_OK, f"merged {n} commits of {branch} at {sha[:10]}: {before[:10]} -> {after[:10]}")
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--fw", action="store_true")
+    ap.add_argument("--app", action="store_true")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--config")
+    a = ap.parse_args(argv)
+    try:
+        cfg = config.load(a.config)
+    except config.ConfigError as e:
+        print(f"sync: {e}", file=sys.stderr)
+        return EXIT_TOOL
+    have = S.configured(cfg)
+    want = [r for r in ("fw", "app") if getattr(a, r)] or list(have)
+    missing = [r for r in want if r not in have]
+    if missing or not want:
+        keys = "; ".join(", ".join(S.REPOS[r]) for r in (missing or S.REPOS))
+        print(f"sync: set {keys} in port.toml", file=sys.stderr)
+        return EXIT_TOOL
+    codes, lines = [], []
+    with track.recorded("sync") as rec:
+        for r in want:
+            code, line = sync_one(cfg, r, *have[r], a.dry_run)
+            codes.append(code)
+            lines.append(line)
+            print(line)
+        code = max(codes)
+        rec.result("; ".join(l.splitlines()[0] for l in lines), log=str(S.tsv(cfg)), ok=code == 0)
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

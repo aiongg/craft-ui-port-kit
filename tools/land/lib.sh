@@ -1,11 +1,34 @@
 # Shared steps of the landing tools. Source it after tools/portkit/lib.sh:
 #   . "$(dirname "$(readlink -f "$0")")/../portkit/lib.sh"
 #   . "$(dirname "$(readlink -f "$0")")/lib.sh"
-# Needs git and git-filter-repo. Nothing here pushes.
+# Needs git and git-filter-repo. Nothing here pushes; early-ci.sh is the one landing tool that does, to the fork.
 LAND=$TOOLS/land
 
 land_need_filter_repo() {
   git filter-repo --version >/dev/null 2>&1 || die "git-filter-repo is not installed (pip install git-filter-repo)"
+}
+
+# land_norm_url URL: a repository URL in one form for comparison: no scheme, user, `.git` or trailing slash, `:` of
+# an scp-style URL as `/`, lower case.
+land_norm_url() {
+  printf '%s' "$1" | sed -E 's#^[a-z+]+://##; s#^[^@/]*@##; s#^([^/:]+):#\1/#; s#\.git/?$##; s#/+$##' | tr 'A-Z' 'a-z'
+}
+
+# land_slug_of URL: `owner/repo`, the last two path parts of URL, as `gh --repo` takes it.
+land_slug_of() { land_norm_url "$1" | awk -F/ '{ print $(NF-1) "/" $NF }'; }
+
+# land_fork_url: land.early_ci_fork, after checking that it is set and names none of framework.repo, app.upstream
+# and land.push_target. The early-CI tool pushes only to this URL.
+land_fork_url() {
+  local fork k other
+  fork=$(cfgr land.early_ci_fork)
+  for k in framework.repo app.upstream land.push_target; do
+    other=$(cfg "$k")
+    [ -n "$other" ] || continue
+    [ "$(land_norm_url "$fork")" != "$(land_norm_url "$other")" ] ||
+      die "land.early_ci_fork is $k ($other): early CI pushes only to your fork, never to an upstream repository"
+  done
+  printf '%s' "$fork"
 }
 
 # land_slug REF: REF as a file name.

@@ -1,0 +1,21 @@
+#!/usr/bin/env python3
+"""Stub gh CLI for selftest cases: records each call and answers `pr list` and `pr create`.
+
+Each call is appended to <STUB_GH_DIR>/calls.jsonl as {"argv": [...]}. `pr list ... --jq length` prints the content
+of <STUB_GH_DIR>/open.txt (default 0); `pr create` prints a PR URL. Anything else prints nothing. Exit 0.
+"""
+import json
+import os
+import sys
+from pathlib import Path
+
+d = Path(os.environ["STUB_GH_DIR"])
+d.mkdir(parents=True, exist_ok=True)
+argv = sys.argv[1:]
+with open(d / "calls.jsonl", "a") as f:
+    f.write(json.dumps({"argv": argv}) + "\n")
+if argv[:2] == ["pr", "list"]:
+    f = d / "open.txt"
+    print(f.read_text().strip() if f.exists() else "0")
+elif argv[:2] == ["pr", "create"]:
+    print("https://example.invalid/pull/1")

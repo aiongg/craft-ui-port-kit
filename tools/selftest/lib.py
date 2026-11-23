@@ -37,7 +37,9 @@ class Scratch:
     def config(self, keys: dict) -> Path:
         """Write port.toml: `section.key` -> value, on top of what every case needs."""
         base = {"work.dir": str(self.work), "app.name": "Selftest", "framework.checkout": str(self.root / "fw"),
-                "app.checkout": str(self.root / "app"), "app.ui_dirs": ["src"], "build.cl": str(STUBS / "cl")}
+                "app.checkout": str(self.root / "app"), "app.ui_dirs": ["src"], "build.cl": str(STUBS / "cl"),
+                # Upstreams that do not exist: cycle's sync check fails fast and offline unless a case sets them.
+                "framework.repo": str(self.root / "no-upstream-fw.git"), "app.upstream": str(self.root / "no-upstream-app.git")}
         base.update(keys)
         sections: dict[str, dict] = {}
         for k, v in base.items():

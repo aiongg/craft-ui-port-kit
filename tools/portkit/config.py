@@ -41,6 +41,8 @@ ENV_CONFIG = "PORT_KIT_CONFIG"
 ENV_PREFIX = "PORT_KIT_"
 # Set in every agent the kit starts headless: the plugin's SessionStart hook (tools/lead-context) stays silent there.
 ENV_AGENT = "PORT_KIT_AGENT"
+# Commands the tools take from the environment instead of PATH (swarm.py: claude; land/early-ci.sh: gh).
+ENV_COMMANDS = ("PORT_KIT_CLAUDE_BIN", "PORT_KIT_GH_BIN")
 
 
 FIXER_MODES = ("code-only", "build", "auto")
@@ -107,10 +109,10 @@ KEYS: list[Key] = [
 
     # ---- framework: craft-libs
     K("framework.repo", "https://github.com/storytold/craft-libs", "str",
-      "land/land-framework.sh land/pin-framework.py patch-framework prompts", "Framework repository URL. It must be the remote that holds plan.base: "
+      "land/land-framework.sh land/early-ci.sh land/pin-framework.py patch-framework sync cycle prompts", "Framework repository URL. It must be the remote that holds plan.base: "
       "the pin names this URL and a rev only that remote has does not resolve for anyone else.",
       placeholder="FW_REPO"),
-    K("framework.branch", "next", "str", "land/land-framework.sh init-workspace prompts",
+    K("framework.branch", "next", "str", "land/land-framework.sh land/early-ci.sh sync cycle init-workspace prompts",
       "Framework branch the port targets: `next` on the framework's upstream; when it does not exist there yet, "
       "the branch the framework team names. Pins and landing use it.", placeholder="FW_BRANCH"),
     K("framework.checkout", None, "path", "move-base patch-framework init-workspace",
@@ -148,9 +150,9 @@ KEYS: list[Key] = [
       "reference for triage, red rounds and look work.", placeholder="PROD"),
     K("app.release", None, "path", "prompts", "Optional read-only checkout of the latest app release.",
       placeholder="RELEASE"),
-    K("app.upstream", None, "str", "land/land-app.sh prompts", "App repository URL (production).",
+    K("app.upstream", None, "str", "land/land-app.sh sync cycle prompts", "App repository URL (production).",
       placeholder="APP_UPSTREAM"),
-    K("app.base_branch", "main", "str", "land/land-app.sh prompts", "Branch the released app builds from: the branch of the latest release tag "
+    K("app.base_branch", "main", "str", "land/land-app.sh sync cycle prompts", "Branch the released app builds from: the branch of the latest release tag "
       "(`git branch -r --contains <tag>`), which can differ from the default branch.",
       placeholder="APP_BASE_BRANCH"),
     K("app.port_branch", "port/framework", "str", "init-workspace land/land-app.sh prompts",
@@ -338,10 +340,16 @@ KEYS: list[Key] = [
     # ---- land: scrub and landing (the tools print push commands and never push)
     K("land.framework_via", "pr", "str", "land/land-framework.sh",
       "How framework changes reach framework.branch: `pr` (one PR per build batch) or `fast-forward`."),
-    K("land.early_ci_approved", False, "bool", "land/*",
+    K("land.early_ci_approved", False, "bool", "land/early-ci.sh",
       "The developer's standing approval for the lead to push scrubbed port branches to the developer's fork and open "
       "draft PRs there, so CI runs early on small diffs. False: kit tools never push and nothing is opened. Set it "
       "only after the developer says yes in phase 0."),
+    K("land.early_ci_fork", None, "str", "land/early-ci.sh cycle",
+      "The developer's fork of the framework repository (URL), where land/early-ci.sh pushes scrubbed port branches "
+      "and opens draft PRs for early CI. It must differ from framework.repo, app.upstream and land.push_target."),
+    K("land.sync_after_commits", 100, "int", "cycle sync",
+      "cycle reports a sync as due when framework.branch or app.base_branch is more than this many commits ahead of "
+      "the port's integration branch (or a day has passed since the last sync). A placeholder value, not measured."),
     K("land.push_target", None, "str", "land/land-app.sh",
       "App repository URL the landed branch goes to; land-app.sh prints the push command."),
     K("land.push_branch", "next", "str", "land/land-app.sh", "App branch the landed port goes to."),
@@ -568,7 +576,7 @@ def load(config_file: str | None = None, overrides: dict[str, str] | None = None
         if name in env:
             values[path] = _from_text(BY_PATH[path], env[name])
     for name in env:
-        if name.startswith(ENV_PREFIX) and name not in ENV_NAMES and name not in (ENV_CONFIG, ENV_AGENT):
+        if name.startswith(ENV_PREFIX) and name not in ENV_NAMES and name not in (ENV_CONFIG, ENV_AGENT, *ENV_COMMANDS):
             warnings.append(f"environment: {name} names no config key (ignored)")
     for path, text in (overrides or {}).items():
         if path not in BY_PATH:

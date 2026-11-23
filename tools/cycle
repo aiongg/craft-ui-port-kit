@@ -47,6 +47,11 @@ Steps:
              Nothing is sent while the board is paused.
   8. record  <work.runs>/LABEL/report.md and cycle.json, one row in <work.runs>/cycles.tsv, one `cycle` event, and
              in phase 6 after a clean compile `track phase 7` (the phase gate decides; a refusal is listed).
+  9. upstream  Fetches framework.branch and app.base_branch into refs/portkit/upstream/ of the integration trees
+             (portkit/sync.py) and notes "sync due" when a tree is more than land.sync_after_commits behind, or
+             behind with its last tools/sync more than a day ago. On a green cycle, when land.early_ci_fork is set and
+             the framework head is not the newest ref in <work.landing>/early-ci.tsv, it notes the
+             `land/early-ci.sh` command; it never runs it. A failed fetch is a note. Also in --dry-run.
 
 Result: cycle.json, and the last stdout line
   cycle LABEL: exit N; merged k/n; compile: ...; lint: ...; app: ...; look: ...; packets: ...; mode M; T s
@@ -74,6 +79,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from portkit import config, gates, track  # noqa: E402
+from portkit import sync as upstream_sync  # noqa: E402
 from portkit import track as T  # noqa: E402
 from portkit.testlog import load_tracks  # noqa: E402
 
@@ -465,6 +471,20 @@ class Cycle:
                          "phase 7 refused: " + "; ".join(l.strip("- ").strip() for l in r.stderr.splitlines()[1:-1]))
         return notes
 
+    def upstream(self, green: bool) -> list[str]:
+        """Notes for the lead: a sync that is due (portkit.sync.due), and on a green cycle, the early-CI command when
+        land.early_ci_fork is set and the framework head is not the newest ref in <work.landing>/early-ci.tsv."""
+        notes = upstream_sync.due(self.cfg)
+        tree = self.trees.get("fw")
+        if green and tree and self.cfg.get("land.early_ci_fork"):
+            head = git(tree, "rev-parse", "HEAD", check=False).stdout.strip()
+            f = self.cfg.path("work.landing") / "early-ci.tsv"
+            rows = [l.split("\t") for l in f.read_text().splitlines() if l.strip()] if f.is_file() else []
+            if head and (not rows or rows[-1][2] != head):
+                label = re.sub(r"[^A-Za-z0-9._-]", "-", str(self.out.get("batch") or self.a.label))
+                notes.append(f"early CI: tools/land/early-ci.sh fw {tree} {head[:12]} {label}")
+        return notes
+
     def track_cmd(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run([sys.executable, "-I", str(TOOLS / "track"), *args], capture_output=True, text=True)
 
@@ -515,6 +535,7 @@ def summary_line(c: Cycle, code: int) -> str:
     parts.append(f"{o.get('total_s', 0):.0f} s")
     if o.get("stop"):
         parts.append(f"STOPPED: {o['stop']}")
+    parts += [n.removesuffix(": run tools/sync") for n in o.get("upstream", []) if n.startswith("sync due")]
     return "; ".join(parts)
 
 
@@ -644,6 +665,8 @@ def main() -> int:
                   f"timeout {cfg.get('pipeline.followup_timeout_min')} min")]
         for name, on, what in steps:
             print(f"  {name}: {what if on else 'off'}")
+        for note in c.upstream(False):
+            print(f"  {note}")
         return 0
 
     code = EXIT_GREEN
@@ -680,6 +703,8 @@ def main() -> int:
             code, c.out["stop"] = e.code, e.why
             print(f"cycle: {e.why}", file=sys.stderr)
         c.out["notes"] += c.phase(st, a.batch, a.area, compiled)
+        c.out["upstream"] = c.upstream(code == EXIT_GREEN)
+        c.out["notes"] += c.out["upstream"]
         c.out["weekly_pct"] = c.weekly()
         c.out["end"] = utc(time.time())
         c.out["total_s"] = time.time() - c.t0

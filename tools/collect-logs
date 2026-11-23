@@ -3,7 +3,7 @@
 #   collect-logs [--out DIR]
 # Run it from the port's workspace (or with PORT_KIT_CONFIG naming port.toml) on every machine the port used: the
 # machine the lead runs on and any build machine that ran agents. Writes
-# <DIR>/port-logs-<app id>-<host>-<date>.tar.gz (DIR defaults to the home directory) and prints its size.
+# <DIR>/port-logs-<app id>-<machine hash>-<date>.tar.gz (DIR defaults to the home directory) and prints its size.
 #
 # It takes:
 # - work.dir without its worktrees (work.trees), build output, compiled artifacts and files over 50 MB: plans, maps,
@@ -15,7 +15,10 @@
 # - the kit's commit and the claude version.
 # A machine without port.toml (a build machine that only ran builds) gets the sessions only; set PORT_KIT_WORK_DIR and
 # PORT_KIT_APP_ID there if the port's directories have other names than on the lead's machine.
-# Sessions hold whatever a command printed. Look through the archive (tar tzf) before you send it.
+# Everything is redacted before it is packed (tools/portkit/redact.py: your home path, login, host and git
+# identity, emails, IPs, private hosts, token shapes and the lines of land.private_patterns). Matching cannot find
+# everything: read the archive through for people's names, private projects or customer data, and look at the
+# screenshots it lists as unchecked, before you send it.
 . "$(dirname "$(readlink -f "$0")")/portkit/lib.sh"
 set -euo pipefail
 
@@ -34,8 +37,9 @@ dirs=$(printf '%s\n' "$work" "$(cfg app.checkout 2>/dev/null || true)" "$(cfg fr
 [ -n "$app" ] || app=port
 [ -n "$work$dirs" ] || die "no port.toml found and PORT_KIT_WORK_DIR unset: run it from the port's workspace"
 
-host=$(hostname -s)
-file=$out/port-logs-$app-$host-$(date +%Y%m%d-%H%M).tar.gz
+# The archive name tells machines apart without naming them.
+machine=$(hostname | sha1sum | cut -c1-6)
+file=$out/port-logs-$app-$machine-$(date +%Y%m%d-%H%M).tar.gz
 stage=$(mktemp -d)
 trap 'rm -rf -- "$stage"' EXIT
 
@@ -75,13 +79,17 @@ if [ -d "$HOME/.claude/projects" ]; then
 fi
 
 {
-  echo "host: $host"
+  echo "machine: $machine"
   echo "date: $(date -u +%FT%TZ)"
   echo "work dir: ${work:-unset}"
   git -C "$KIT" log -1 --format='kit commit: %H %cs' 2>/dev/null || echo "kit commit: unknown"
   grep -h '"version"' "$KIT/.claude-plugin/plugin.json" 2>/dev/null | sed 's/^ */kit plugin /' || true
   claude --version 2>/dev/null || true
 } > "$stage/about.txt"
+
+# Personal data and secrets out before anything is packed; see tools/portkit/redact.py for what it can and cannot find.
+priv=$(cfg land.private_patterns 2>/dev/null || true)
+python3 -I "$TOOLS/portkit/redact.py" "$stage" ${priv:+--private "$priv"}
 
 tar -C "$stage" -czf "$file" .
 echo "wrote $file ($(du -h "$file" | cut -f1)): $(find "$stage/sessions" -name '*.jsonl' | wc -l) session files," \

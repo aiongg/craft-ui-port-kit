@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """crate-order.py: print workspace crates in dependency order, dependencies first, with no build.
 
-usage: crate-order.py WORKSPACE_DIR CRATE...
+usage: crate-order.py WORKSPACE_DIR [--with-dependents] [--skip-outside] CRATE...
 
 Reads `cargo metadata --no-deps` in WORKSPACE_DIR (it resolves nothing and needs no network) and orders the given
 workspace packages so that every crate comes after the workspace crates it depends on, directly or through other
@@ -9,9 +9,14 @@ workspace crates not in the list. Normal and build dependencies count; dev-depen
 edge does not decide which crate's errors come first and dev-dependencies may form cycles. Crates with no order
 between them keep the order they were given in.
 
+--with-dependents adds every workspace package that depends on a given one, directly or through others, by any edge
+(normal, build or dev: `cl check` checks tests too, so a dev-dependent breaks with its dependency).
+--skip-outside drops names that are not workspace members (a vendored crate outside the members, a tool's own
+manifest) and names each on stderr as `skipped: <name> (not a workspace member)`; without it they are an error.
+
 A crate may be named by its package name or its library name (`craft_ui` for `craft-ui`). Prints one package name
 per line. Exit 2 for an unknown crate, a dependency cycle or a failed `cargo metadata` (the message names it);
-compile-gate then uses the order it was given. CARGO names the cargo binary (default: cargo).
+compile-gate then stops as a tool failure. CARGO names the cargo binary (default: cargo).
 """
 import json
 import os
@@ -32,22 +37,25 @@ def metadata(ws: str) -> dict:
     return json.loads(r.stdout)
 
 
-def graph(meta: dict) -> tuple[list[str], dict[str, set[str]], dict[str, str]]:
-    """Workspace package names in metadata order, their workspace dependencies, and lib-name aliases."""
+def graph(meta: dict) -> tuple[list[str], dict[str, set[str]], dict[str, str], dict[str, set[str]]]:
+    """Workspace package names in metadata order, their normal and build workspace dependencies, lib-name aliases, and
+    their workspace dependencies by any edge (dev included)."""
     members = set(meta.get("workspace_members") or [])
     pkgs = [p for p in meta["packages"] if not members or p["id"] in members]
     names = [p["name"] for p in pkgs]
     known = set(names)
     deps: dict[str, set[str]] = {}
+    every: dict[str, set[str]] = {}
     alias: dict[str, str] = {}
     for p in pkgs:
+        every[p["name"]] = {d["name"] for d in p.get("dependencies", []) if d["name"] in known and d["name"] != p["name"]}
         deps[p["name"]] = {d["name"] for d in p.get("dependencies", [])
                            if d.get("kind") in (None, "build") and d["name"] in known and d["name"] != p["name"]}
         alias[p["name"].replace("-", "_")] = p["name"]
         for t in p.get("targets", []):
             if any(k in ("lib", "rlib", "proc-macro", "cdylib", "dylib", "staticlib") for k in t.get("kind", [])):
                 alias[t["name"]] = p["name"]
-    return names, deps, alias
+    return names, deps, alias, every
 
 
 def order(names: list[str], deps: dict[str, set[str]], wanted: list[str]) -> list[str]:
@@ -74,10 +82,11 @@ def main(argv: list[str]) -> int:
     if len(argv) < 1 or argv[0] in ("-h", "--help"):
         print(__doc__)
         return 0 if argv else 2
-    ws, crates = argv[0], argv[1:]
+    flags = {a for a in argv[1:] if a in ("--with-dependents", "--skip-outside")}
+    ws, crates = argv[0], [a for a in argv[1:] if a not in flags]
     if not crates:
         return 0
-    names, deps, alias = graph(metadata(ws))
+    names, deps, alias, every = graph(metadata(ws))
     wanted, unknown = [], []
     for c in crates:
         n = c if c in deps else alias.get(c)
@@ -85,9 +94,20 @@ def main(argv: list[str]) -> int:
             unknown.append(c)
         elif n not in wanted:
             wanted.append(n)
-    if unknown:
+    if unknown and "--skip-outside" in flags:
+        for c in unknown:
+            print(f"skipped: {c} (not a workspace member)", file=sys.stderr)
+    elif unknown:
         print(f"crate-order: not a package of the workspace in {ws}: {', '.join(unknown)}", file=sys.stderr)
         return 2
+    if "--with-dependents" in flags:
+        added = True
+        while added:
+            added = False
+            for n in names:
+                if n not in wanted and every[n] & set(wanted):
+                    wanted.append(n)
+                    added = True
     for n in order(names, deps, wanted):
         print(n)
     return 0

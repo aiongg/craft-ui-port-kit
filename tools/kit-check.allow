@@ -11,3 +11,5 @@ tools/land/rewrite-rules.txt	regex:/Users/[A-Za-z][A-Za-z0-9._-]*/==>/path/to/lo
 tools/land/rewrite-rules.txt	regex:/tmp/claude-[^\s"'`)\]>,;]*==>/tmp/scratch
 # The one commit is authored by the repository owner's GitHub noreply address.
 @ident	aiongg <67543387+aiongg@users.noreply.github.com>
+# Selftest commits in scratch repos use a reserved, non-routable address.
+tools/selftest/lib.py	selftest@example.invalid

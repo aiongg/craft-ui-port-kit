@@ -3,18 +3,35 @@
 
 usage: compile-gate LABEL [--fw-only | --app-only] [CRATE ...] [--config PORT.TOML]
 
-Framework half (runs in framework.integration): `cl check <crate>` for each framework crate in dependency order,
-stopping at the first crate that fails. The crates are the ones named, or by default the packages that own the files
-changed between framework.writing_base and HEAD. The order comes from crate-order.py (the order given when that
-tool cannot run).
+Framework half (runs in framework.integration): `cl check <crate> --keep-going --message-format short` for each
+framework crate in dependency order, every crate, whatever the earlier ones gave, so every independent crate's errors
+come back in one run. The crates are the ones named, or by default the workspace packages that own the files changed
+between framework.writing_base and HEAD plus every workspace package that depends on them (dev-dependencies
+included); packages outside the workspace members are skipped and named. List and order come from crate-order.py.
+Errors of all the calls are counted once each and charged to the package that owns the file. Each crate ends as:
+  ok              cl exited 0
+  failed          errors in the crate's own files
+  failed-through  cl failed on errors in other crates' files only (named); fixing those comes first
+  tool-failure    cl exited nonzero and its log holds no `file:line:col: error` line (its plain `error` lines are
+                  printed): a setup fault, never a pass
 
-App half (runs in app.integration): `cl check all --keep-going --message-format short`, which compiles the app's
-whole pinned package selection in cl's app mode (the selection comes from [workspace.metadata.cl] in the app's root
-Cargo.toml; feature-selection.py derives it for a new app). All errors of one run come back together.
+App half (runs in app.integration, only when the framework half is ok): `cl check all --keep-going --message-format
+short`, which compiles the app's whole pinned package selection in cl's app mode (the selection comes from
+[workspace.metadata.cl] in the app's root Cargo.toml; feature-selection.py derives it for a new app). Its status is
+ok, failed or tool-failure as above.
 
-Every cargo build goes through cl, under build.launcher (CL_LAUNCHER) and build.memory_cap. Logs: <work.runs>/LABEL/
-(`fw-<crate>.log`, `app.log`, `app.errors` with one `file:line:col: error ...` line per error). Exit status: 0 when
-everything compiles, 1 otherwise.
+Every cargo build goes through cl, under build.launcher (CL_LAUNCHER) and build.memory_cap. Logs in
+<work.runs>/LABEL/: `fw-<crate>.log`, `fw.errors` and `app.errors` (one `file:line:col: error ...` line per error),
+`app.log`.
+
+Result for other tools: <work.runs>/LABEL/summary.json, and the last stdout line
+  compile-gate LABEL: exit N; framework: <n> ok, <n> failed, <n> failed-through, <n> tool-failure, <n> errors; app: <status>, <n> errors
+summary.json: {"tool": "compile-gate", "label", "exit", "framework": null | {"crates": [{"crate", "status", "exit",
+"errors", "through": [package...], "seconds"}], "skipped": [name...], "errors", "errors_by_package": {package: n}},
+"app": null | {"status", "exit", "errors", "crates_failed", "seconds"}}. A half that did not run is null.
+
+Exit status: 0 when everything compiles, 1 on compile errors, 2 on a tool failure (a tool-failure crate or app run,
+or crate-order.py failing) or a usage error.
 """
 import argparse
 import subprocess
@@ -27,37 +44,68 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from portkit import config, gates, track
 
 
-def order(cfg, tree: Path, crates: list[str]) -> list[str]:
-    """Dependency order of the crates (dependencies first) from crate-order.py; the given order on failure."""
-    r = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "crate-order.py"), str(tree), *crates],
+def crate_list(fw: Path, crates: list[str], dependents: bool) -> tuple[list[str] | None, list[str], str]:
+    """(crates in dependency order or None on failure, skipped names, crate-order's message)."""
+    flags = ["--with-dependents", "--skip-outside"] if dependents else []
+    r = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "crate-order.py"), str(fw), *flags, *crates],
                        capture_output=True, text=True)
-    out = r.stdout.split()
-    return out if r.returncode == 0 and set(out) == set(crates) else crates
+    skipped = [l.split()[1] for l in r.stderr.splitlines() if l.startswith("skipped: ")]
+    msg = "; ".join(l for l in r.stderr.splitlines() if not l.startswith("skipped: "))
+    return (r.stdout.split() if r.returncode == 0 else None), skipped, msg
 
 
-def framework_half(cfg, rd: Path, crates: list[str]) -> tuple[bool, str]:
+def framework_half(cfg, rd: Path, named: list[str]) -> dict:
     fw = cfg.path("framework.integration")
+    crates = named
     if not crates:
         files = gates.changed_files(fw, cfg.require("framework.writing_base"))
         crates = sorted({p for f in files if (p := gates.package_of(fw, f))})
+    res = {"crates": [], "skipped": [], "errors": 0, "errors_by_package": {}}
     if not crates:
-        return True, "framework: no changed crates"
-    crates = order(cfg, fw, crates)
+        print("framework: no changed crates")
+        return res
+    order, res["skipped"], msg = crate_list(fw, crates, dependents=not named)
+    for s in res["skipped"]:
+        print(f"skipped: {s} (not a workspace member)")
+    if order is None:
+        print(f"framework: crate-order.py failed: {msg}")
+        res["crates"] = [{"crate": c, "status": "tool-failure", "exit": None, "errors": 0, "through": [], "seconds": 0}
+                         for c in crates]
+        return res
     env = gates.cl_env(cfg)
-    for c in crates:
+    runs = []
+    for c in order:
         log = rd / f"fw-{c}.log"
+        log.write_bytes(b"")
         t = time.time()
-        rc = gates.run_logged(gates.cl(cfg, ["check", c, "--message-format", "short"]), fw, log, env)
-        errs = gates.error_lines(log)
-        print(f"{c}: {'ok' if rc == 0 else f'{len(errs)} errors, exit {rc}'} ({time.time() - t:.0f}s)", flush=True)
-        if rc != 0:
-            for l in errs[:40]:
+        rc = gates.run_logged(gates.cl(cfg, ["check", c, "--keep-going", "--message-format", "short"]), fw, log, env)
+        runs.append((c, rc, gates.error_lines(log), time.time() - t, log))
+        print(f"{c}: exit {rc}, {len(runs[-1][2])} error lines ({runs[-1][3]:.0f}s)", flush=True)
+    every = sorted({e for r in runs for e in r[2]})
+    (rd / "fw.errors").write_text("".join(e + "\n" for e in every))
+    owners = gates.by_package(fw, every)
+    res["errors"] = len(every)
+    res["errors_by_package"] = {k: len(v) for k, v in sorted(owners.items())}
+    for c, rc, errs, secs, log in runs:
+        own = owners.get(c, [])
+        through = sorted({p for p, es in owners.items() if p != c and set(es) & set(errs)})
+        status = "ok" if rc == 0 else "failed" if own else "failed-through" if errs else "tool-failure"
+        res["crates"].append({"crate": c, "status": status, "exit": rc, "errors": len(own), "through": through,
+                              "seconds": round(secs)})
+        if status == "failed":
+            print(f"{c}: {len(own)} errors")
+            for l in own[:40]:
                 print("  " + l)
-            return False, f"framework: {c} failed ({len(errs)} errors); {crates.index(c)} of {len(crates)} crates ok before it"
-    return True, f"framework: {len(crates)} crate(s) ok"
+        elif status == "failed-through":
+            print(f"{c}: failed through {', '.join(through)}")
+        elif status == "tool-failure":
+            print(f"{c}: TOOL FAILURE: exit {rc} with no error line ({log})")
+            for l in gates.plain_errors(log)[:8]:
+                print("  " + l)
+    return res
 
 
-def app_half(cfg, rd: Path) -> tuple[bool, str]:
+def app_half(cfg, rd: Path) -> dict:
     app = cfg.path("app.integration")
     log = rd / "app.log"
     log.write_bytes(b"")
@@ -65,14 +113,32 @@ def app_half(cfg, rd: Path) -> tuple[bool, str]:
     rc = gates.run_logged(gates.cl(cfg, ["check", "all", "--keep-going", "--message-format", "short"]), app, log, gates.cl_env(cfg))
     errs = gates.error_lines(log)
     (rd / "app.errors").write_text("".join(e + "\n" for e in errs))
-    text = log.read_text(errors="replace")
-    failed = text.count("error: could not compile")
-    print(f"app check exit {rc} ({time.time() - t:.0f}s): {len(errs)} errors, {failed} crates failed")
+    failed = log.read_text(errors="replace").count("error: could not compile")
+    status = "ok" if rc == 0 else "failed" if errs else "tool-failure"
+    print(f"app check exit {rc} ({time.time() - t:.0f}s): {len(errs)} errors, {failed} crates failed"
+          + (" -- TOOL FAILURE: no error line" if status == "tool-failure" else ""))
     # Errors without a file position (resolution, manifest) show the cause when the list is empty.
-    plain = Counter(l for l in text.splitlines() if l.startswith("error") and not l.startswith("error[") and "could not compile" not in l)
+    plain = Counter(l for l in log.read_text(errors="replace").splitlines()
+                    if l.startswith("error") and not gates.ERROR_LINE.match(l) and not l.startswith(gates.NOT_A_CAUSE))
     for line, n in plain.most_common(8):
         print(f"  {n:>3} {line}")
-    return rc == 0, f"app: exit {rc}, {len(errs)} errors, {failed} crates failed"
+    return {"status": status, "exit": rc, "errors": len(errs), "crates_failed": failed, "seconds": round(time.time() - t)}
+
+
+def exit_code(fwr: dict | None, appr: dict | None) -> int:
+    states = [c["status"] for c in (fwr or {}).get("crates", [])] + ([appr["status"]] if appr else [])
+    return 2 if "tool-failure" in states else 1 if any(s != "ok" for s in states) else 0
+
+
+def summary_line(label: str, code: int, fwr: dict | None, appr: dict | None) -> str:
+    parts = [f"compile-gate {label}: exit {code}"]
+    if fwr is not None:
+        n = Counter(c["status"] for c in fwr["crates"])
+        parts.append(f"framework: {n['ok']} ok, {n['failed']} failed, {n['failed-through']} failed-through, "
+                     f"{n['tool-failure']} tool-failure, {fwr['errors']} errors")
+    if appr is not None:
+        parts.append(f"app: {appr['status']}, {appr['errors']} errors")
+    return "; ".join(parts)
 
 
 def main():
@@ -87,18 +153,17 @@ def main():
     cfg = config.load(a.config)
     rd = gates.run_dir(cfg, a.label)
     with track.recorded("compile-gate") as rec:
-        results = []
-        ok = True
+        fwr = appr = None
         if not a.app_only:
-            ok, msg = framework_half(cfg, rd, a.crates)
-            results.append(msg)
-        if ok and not a.fw_only:
-            ok, msg = app_half(cfg, rd)
-            results.append(msg)
-        text = f"{a.label}: " + "; ".join(results)
+            fwr = framework_half(cfg, rd, a.crates)
+        if not a.fw_only and exit_code(fwr, None) == 0:
+            appr = app_half(cfg, rd)
+        code = exit_code(fwr, appr)
+        gates.write_summary(rd, {"tool": "compile-gate", "label": a.label, "exit": code, "framework": fwr, "app": appr})
+        text = summary_line(a.label, code, fwr, appr)
         print(text)
-        rec.result(text, log=str(rd), data={"label": a.label, "ok": ok})
-    sys.exit(0 if ok else 1)
+        rec.result(text, log=str(rd), data={"label": a.label, "ok": code == 0, "exit": code}, ok=code == 0)
+    sys.exit(code)
 
 
 if __name__ == "__main__":

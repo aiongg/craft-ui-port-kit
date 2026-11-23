@@ -1,0 +1,2 @@
+crates/c/src/lib.rs:1:1: error[E0432]: unresolved import `craft::gone`
+error: could not compile `crate-c` (lib test) due to 1 previous error

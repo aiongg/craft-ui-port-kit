@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+"""Stub of the framework's cl for selftest cases: prints a canned log and exits with a canned status.
+
+The command key is the command word and its first argument, plus `-no-run` when --no-run is given:
+`cl check craft-a --keep-going` -> `check-craft-a`; `cl test all --no-run` -> `test-all-no-run`; `cl test all` ->
+`test-all`. The stub prints <STUB_CL_LOGS>/<key>.log (nothing when missing) and exits with the number in
+<key>.rc (0 when missing). When <key>.<n>.log exists for the n-th call of that key (1-based), it is used instead, so
+a case can give a rerun a different result. Every call is appended to <STUB_CL_LOGS>/calls.jsonl as
+{"argv": [...], "cwd": ...}.
+"""
+import json
+import os
+import sys
+from pathlib import Path
+
+d = Path(os.environ["STUB_CL_LOGS"])
+args = sys.argv[1:]
+key = "-".join(args[:2]) + ("-no-run" if "--no-run" in args else "")
+with open(d / "calls.jsonl", "a") as f:
+    f.write(json.dumps({"argv": args, "cwd": os.getcwd()}) + "\n")
+n = sum(1 for l in open(d / "calls.jsonl") if json.loads(l)["argv"][:2] == args[:2] and ("--no-run" in json.loads(l)["argv"]) == ("--no-run" in args))
+log = d / f"{key}.{n}.log"
+if not log.exists():
+    log = d / f"{key}.log"
+rc_file = log.with_suffix(".rc")
+if log.exists():
+    text = log.read_text()
+    sys.stdout.write(text.replace("@SCRATCH@", str(d.parent)))
+sys.exit(int(rc_file.read_text().strip() or 0) if rc_file.exists() else 0)

@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+"""selftest: run the kit's fixture cases, each against its own scratch workspace and stubs. No build, no network.
+
+usage: tools/selftest/run [-v] [CASE ...]
+
+A case is a function `case_<name>` in tools/selftest/cases/<module>.py; CASE selects by `<module>` or
+`<module>.<name>` (a prefix is enough). Each case gets a fresh scratch directory with its own port.toml
+(lib.Scratch), runs kit tools there with stubbed `cl`, `cargo` and `claude` (tools/selftest/stubs/), and asserts on
+their exit status, output and files. -v prints the output of failed cases' last tool call.
+
+Prints one line per case and a last line `selftest: <n> passed, <n> failed`. Exit 0 when every case passed, 1 otherwise.
+"""
+import importlib
+import shutil
+import sys
+import tempfile
+import traceback
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import lib  # noqa: E402
+
+
+def main(argv: list[str]) -> int:
+    if argv[:1] in (["-h"], ["--help"]):
+        print(__doc__.strip())
+        return 0
+    verbose = "-v" in argv
+    want = [a for a in argv if a != "-v"]
+    passed = failed = 0
+    for f in sorted((HERE / "cases").glob("*.py")):
+        mod = importlib.import_module(f"cases.{f.stem}")
+        for name in sorted(n for n in dir(mod) if n.startswith("case_")):
+            full = f"{f.stem}.{name[5:]}"
+            if want and not any(full.startswith(w) for w in want):
+                continue
+            d = Path(tempfile.mkdtemp(prefix="kit-selftest-"))
+            s = lib.Scratch(d)
+            try:
+                getattr(mod, name)(s)
+                passed += 1
+                print(f"ok      {full}")
+                shutil.rmtree(d, ignore_errors=True)
+            except Exception as e:  # one failing case must not stop the others
+                failed += 1
+                print(f"FAILED  {full}: {e if isinstance(e, AssertionError) else traceback.format_exc(limit=3)}")
+                if verbose and s.last is not None:
+                    print("  --- last call output ---\n  " + (s.last.stdout + s.last.stderr).replace("\n", "\n  "))
+                print(f"        scratch kept: {d}")
+    print(f"selftest: {passed} passed, {failed} failed")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

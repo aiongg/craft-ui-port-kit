@@ -88,7 +88,9 @@ racheck-gate overlays the changed framework files on the framework daemon's tree
 tools/compile-gate <batch>
 ```
 
-The framework half runs `cl check <crate>` for each framework crate the batch changed, in dependency order (`tools/crate-order.py`), and stops at the first crate that fails. The app half runs `cl check all --keep-going` in the app integration tree, so every error of the app's selection comes back in one run. Logs go to `<work.runs>/<batch>/`; the tool posts its own result on the dashboard. Run it as a background task.
+The framework half runs `cl check <crate> --keep-going` for each framework crate the batch changed and every workspace crate that depends on one, in dependency order (`tools/crate-order.py`), and never stops at a failing crate, so every independent crate's errors come back in one run. Each error is counted once and charged to the crate that owns its file; a crate that fails only on another crate's errors shows as `failed-through` that crate. The app half runs `cl check all --keep-going` in the app integration tree once the framework is clean. Logs go to `<work.runs>/<batch>/`, the result to `summary.json` there; the tool posts its own result on the dashboard. Run it as a background task.
+
+Exit 1 means compile errors. Exit 2 means a tool failure: cl exited nonzero and printed no `file:line:col: error` line (a manifest, resolution or setup fault, printed by the gate). Never count exit 2 as a pass or as "0 errors"; fix the setup and run the gate again.
 
 ## Compile errors
 
@@ -127,7 +129,7 @@ Then write the app batch ([06-write.md](06-write.md)) and come back to step 1 fo
 - [ ] Every set of the batch has a review verdict; every finding is fixed, restored or ruled.
 - [ ] The batch is combined in each integration tree; combine-lost reports nothing; owed lines are marked commits; cross-owner findings are resolved.
 - [ ] The racheck gate has no `real` or `mod-file` error.
-- [ ] `tools/compile-gate` passes: every changed framework crate, then the app selection.
+- [ ] `tools/compile-gate` exits 0: every changed framework crate and its dependents, then the app selection.
 - [ ] Every component the batch adds has stories that render, checked by the lead.
 - [ ] Plan errors found by the compile are fixed in the plan, and `STATE.md` records them.
 

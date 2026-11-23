@@ -3,6 +3,7 @@
 Also the phase exit table that `track phase` runs (PHASE_EXITS, below the build helpers)."""
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
@@ -59,6 +60,35 @@ def error_lines(log: Path) -> list[str]:
     if not log.is_file():
         return []
     return sorted({l.rstrip("\n") for l in open(log, errors="replace") if ERROR_LINE.match(l)})
+
+
+# Lines cargo prints around errors that are no error of their own.
+NOT_A_CAUSE = ("error: could not compile", "error: aborting due to", "error: build failed")
+
+
+def plain_errors(log: Path) -> list[str]:
+    """`error...` lines without a file position (resolution, manifest, linker, a tool's own failure), in log order,
+    unique. They name the cause when a nonzero exit left no `file:line:col: error` line."""
+    if not log.is_file():
+        return []
+    out = [l.rstrip("\n") for l in open(log, errors="replace")
+           if l.startswith("error") and not ERROR_LINE.match(l) and not l.startswith(NOT_A_CAUSE)]
+    return list(dict.fromkeys(out))
+
+
+def by_package(tree: Path, errors: list[str]) -> dict[str, list[str]]:
+    """Error lines grouped by the cargo package owning each line's file (`?` when no package owns it)."""
+    out: dict[str, list[str]] = {}
+    for e in errors:
+        out.setdefault(package_of(tree, e.split(":", 1)[0]) or "?", []).append(e)
+    return out
+
+
+def write_summary(rd: Path, data: dict) -> Path:
+    """<run dir>/summary.json, the machine-readable result of a gate or test run."""
+    f = rd / "summary.json"
+    f.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n")
+    return f
 
 
 def package_of(tree: Path, rel: str) -> str | None:

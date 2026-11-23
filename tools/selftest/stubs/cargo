@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+"""Stub cargo for selftest cases: `cargo metadata ...` prints <cwd>/.stub-metadata.json; anything else exits 2."""
+import sys
+from pathlib import Path
+
+if sys.argv[1:2] != ["metadata"]:
+    sys.exit("stub cargo: only `metadata` is stubbed")
+f = Path.cwd() / ".stub-metadata.json"
+if not f.exists():
+    sys.exit("stub cargo: no .stub-metadata.json in the tree")
+print(f.read_text())

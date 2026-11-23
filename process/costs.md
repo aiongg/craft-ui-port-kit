@@ -61,7 +61,7 @@ The panels area ran end to end first: 18 sets (13 framework, 5 app), 7,000 frame
 2. **Phase 2.** Sets scale with map sections: PhotoCraft had about 0.6 sets per map section and about 520 lines to write per set. Phase 2 is the most quota-heavy phase per line: budget most of a subscription week for an app of PhotoCraft's size, and expect one fix round and one re-evaluation.
 3. **Phases 4-6, per set.** Plan check about $0.65; write about $1.70 for a Sonnet set (one-shot or agent mode); $3 to $9 for an Opus set; review fix about $0.85 including the test-failure round. Count the Opus sets from the sheets: framework sets that change a shared mechanism (pass, input routing, focus, layout, paint), plus retries.
 4. **Wall time of writing.** Sets / `pipeline.parallel` x 5 to 10 min per set. At 6 in parallel, about 35 to 70 sets per hour; the pilot wrote 13 sets in 15 min.
-5. **Cycles.** Wall time in phases 6 and 7 follows the number of cycles, not the number of sets: a warm incremental build costs about the same for 20 sets as for 60. Price them with "The cycle model" below.
+5. **Cycles.** Wall time in phases 6 and 7 follows the number of cycles, not the number of sets: a warm incremental build costs about the same for 20 sets as for 60. Price them with "The cycle model" below, the lead's own calls included ("Pricing the lead").
 6. **Compare with the plan's size.** If the plan writes more than about half of what it deletes on the app side, the size audit in phase 2 should have cut it; a near one-to-one rewrite costs as much as the old code did to write.
 
 Give the developer the projection as ranges, with the measured basis next to each number. Measure the pilot and re-project before writing the remaining areas.
@@ -80,3 +80,15 @@ Phases 6 and 7 run as cycles (`tools/cycle`, [11-build-loop.md](11-build-loop.md
 `track eta` computes these from the cycle events and the board, and the dashboard shows them. The fixer mode changes the period: in `build`, fixers confirm their fixes before they hand back, so a round's gap is longer and the cycles per batch fewer.
 
 **Quota.** The lead's own session uses the same allowance as the agents, and `work.usage_log` holds only the agents' calls. So the projection reads the account's weekly use through `pipeline.weekly_quota_command`, sampled at every cycle: the use per hour since the last reset, times the hours to the finish, gives the share at the finish. When it passes 100 %, ask the developer for a schedule or a second account before the next batch.
+
+**Pricing the lead.** The lead is a large part of a run's cost, and `work.usage_log` does not hold it. Price it from three numbers:
+
+| Term | What it is | How to get it |
+|---|---|---|
+| Cost per lead call | One turn of the lead session at its usual context; it grows with the context, since every call re-reads it | The session's recorded cost over its call count, or the cached-input rate times the typical context plus the output |
+| Lead calls per cycle | The lead's calls between two cycle starts: reading the cycle's result, merging, answering plans, briefing | The lead's calls in phases 6 and 7 over the cycles in `cycles.tsv` |
+| Lead share | The lead's part of the run's recorded cost | Lead cost over lead plus agents |
+
+Lead cost of the rest of the port = cycles left x lead calls per cycle x cost per lead call, plus the planning phases' lead calls at the same price. Add it to the agents' projection before you give the developer the total.
+
+One measured run (a second port, phases 5 to 7): about $0.07 per lead call at about 230k context ($0.06 to $0.10 at median contexts of 177k to 293k); about 8 lead calls per cycle (1,164 calls over about 145 cycles); the lead was 61 % of the session's recorded cost. Keeping the lead's context small lowers every one of its calls: hand off at a stopping point once it is large (`rules/lead-rules.md`, "Records and hand-offs").

@@ -83,3 +83,11 @@ def case_fixer_turns_and_model(s):
     s.config({"pipeline.fixer_mode": "build", "models.red_fixer": "sonnet"})
     p = s.run("swarm.py", "jobs.json", "--dry-run", "--max-turns", "50")
     check("would run sonnet, max_turns 50," in line("rfix-g1"), "a set model and --max-turns win", p)
+
+
+def case_refuses_unfilled_placeholder(s):
+    (s.work / "p.md").write_text("fix round {{ROUND}} of the tests\n")
+    (s.work / "jobs.json").write_text(json.dumps([{"task": "rfix-g1", "prompt_file": "p.md"}]))
+    p = s.run("swarm.py", "jobs.json")
+    check(p.returncode == 2 and "p.md" in p.stderr and "{{ROUND}}" in p.stderr and not calls(s),
+          "an unfilled placeholder stops the run before any call", p)

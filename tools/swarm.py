@@ -558,6 +558,10 @@ def _read_script(sw: Swarm, p: subprocess.Popen, name: str, answer, noted: set[s
                     noted.add(k)
                     sw.say(f"note: agent option {k} is ignored under swarm.py")
             label = str(opts.get("label") or f"job-{m['id']}")
+            if left := unfilled(m["prompt"]):
+                sw.say(f"{label}: not run: the prompt still holds {', '.join(left)}")
+                answer(m["id"], None)
+                continue
             job = Job(prompt=m["prompt"], label=label, task=task_id(opts, m["prompt"], label),
                       model=model_for(sw.cfg, opts), schema=opts.get("schema"), phase=opts.get("phase"),
                       title=label, group=opts.get("phase") or name, role=opts.get("role"),
@@ -567,6 +571,14 @@ def _read_script(sw: Swarm, p: subprocess.Popen, name: str, answer, noted: set[s
         elif op in ("return", "error"):
             outcome = m
     return outcome
+
+
+PLACEHOLDER = re.compile(r"\{\{[A-Z][A-Z0-9_]*\}\}")
+
+
+def unfilled(prompt: str) -> list[str]:
+    """Placeholders (`{{NAME}}`) a rendered prompt still holds: render-prompt leaves unknown ones in place."""
+    return sorted(set(PLACEHOLDER.findall(prompt)))
 
 
 def load_jobs(cfg: config.Config, path: Path) -> list[Job]:
@@ -584,6 +596,11 @@ def load_jobs(cfg: config.Config, path: Path) -> list[Job]:
             raise SystemExit(f"swarm: {path}: task {j['task']} appears twice")
         seen.add(j["task"])
         prompt = j.get("prompt") or Path(rel(j["prompt_file"])).read_text()
+        if left := unfilled(prompt):
+            src = rel(j["prompt_file"]) if j.get("prompt_file") and not j.get("prompt") else f"{path} (job {j['task']})"
+            print(f"swarm: {src}: the prompt still holds {', '.join(left)}; render it with the values filled in",
+                  file=sys.stderr)
+            raise SystemExit(2)
         schema = j.get("schema") or (json.loads(Path(rel(j["schema_file"])).read_text()) if j.get("schema_file") else None)
         tools = j.get("tools")
         allow = j.get("allow")

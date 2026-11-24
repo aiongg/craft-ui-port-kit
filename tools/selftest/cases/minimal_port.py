@@ -197,11 +197,19 @@ def case_minimal_mode(s):
     s.run("track", "event", "run", "macOS: Cmd+Q lost changes", "--data", "platform=macos", "--data", f"sha={sha[:12]}",
           "--data", "result=fail")
     p = s.run("land/exit-gate.py", "app", sha)
-    check(p.returncode == 1 and "macos: the newest run" in p.stderr and "linux" not in p.stderr.split("platforms not passed")[1],
+    check(p.returncode == 1 and "macos: a run for" in p.stderr and "linux" not in p.stderr.split("platforms not passed")[1],
           "a failed platform blocks; a passed one does not", p)
     s.run("track", "event", "run", "macOS checklist passed", "--data", "platform=macos", "--data", f"sha={sha}",
           "--data", "result=pass")
     p = s.run("land/exit-gate.py", "app", sha)
+    check(p.returncode == 1 and "macos: a run" in p.stderr, "a pass recorded after a failed row does not clear it", p)
+    sha2 = "fedcba9876543210fedcba9876543210fedcba98"
+    for plat in ("linux", "macos"):
+        s.run("track", "event", "run", f"{plat} row 1", "--data", f"platform={plat}", "--data", f"sha={sha2[:12]}",
+              "--data", "result=pass")
+        s.run("track", "event", "run", f"{plat} row 2", "--data", f"platform={plat}", "--data", f"sha={sha2[:12]}",
+              "--data", "result=pass")
+    p = s.run("land/exit-gate.py", "app", sha2)
     check(p.returncode == 0 and "2 of 2 platforms passed" in p.stdout, "every platform passed: the app may land", p)
     p = s.run("land/exit-gate.py", "framework", sha)
     check(p.returncode == 0, "a framework fix lands with no run gate", p)

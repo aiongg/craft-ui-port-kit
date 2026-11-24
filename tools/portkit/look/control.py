@@ -43,6 +43,7 @@ class App:
         self.sock: socket.socket | None = None
         self.f = None
         self.next_id = 1
+        self.notes: list[str] = []   # optional steps that failed since the driver last took them (`look pair` prints them)
         self.extra: dict = {}        # driver state between shots (for example the setup that last ran)
 
     def connect(self, port: int, token: str | None, timeout: float = 90) -> None:
@@ -136,11 +137,17 @@ def launch(side: str, argv: list[str], workdir: Path, env: dict | None = None, t
 
 
 def run_steps(app: App, steps: list[dict]) -> None:
-    """Send each step's request in order. `{"method": "@sleep", "params": {"seconds": S}}` waits instead."""
+    """Send each step's request in order. `{"method": "@sleep", "params": {"seconds": S}}` waits instead. A step with
+    `"optional": true` that fails is recorded in `app.notes` and the run goes on; any other failure raises."""
     for s in steps or []:
         m, p = s["method"], s.get("params") or {}
         if m == "@sleep":
             time.sleep(float(p.get("seconds", 1)))
+        elif s.get("optional"):
+            try:
+                app.call(m, p)
+            except ControlError as e:
+                app.notes.append(f"optional step {m} failed: {e}")
         else:
             app.call(m, p)
 

@@ -207,7 +207,7 @@ The other steps go on while a fix is in flight. Only the run step and landing wa
 
 Nothing merges before the app has run. After the test rounds, build and launch the real app at the port branch's head, on every platform of `minimal.run_platforms`. Before you start, check that the pin includes every framework fix the port needed.
 
-- **Linux.** Use the look tooling ([tools/look.md](../tools/look.md)). Production is the app built at `plan.app_base` (`look.production_binary`) and the port is the app built at the port branch (`look.port_binary`). Set up `look.driver` from the example driver, and write one states file for the checklist states the app's control channel reaches. `tools/look pair <States> --side both` captures both sides into one compare page; that page gives the before and after screenshots for the report. Check the rows the control channel cannot reach (real drags, the platform quit) by launching the port under the same display and driving it by hand, or hand them to a platform the developer runs.
+- **Linux.** Use the look tooling ([tools/look.md](../tools/look.md)). Production is the app built at `plan.app_base` (`look.production_binary`) and the port is the app built at the port branch (`look.port_binary`). Set up `look.driver` from the example driver, and write one states file for the checklist states the app's control channel reaches. `tools/look pair <States> --side both` captures both sides into one compare page; that page gives the before and after screenshots for the report. Build production in its own target dir (`CARGO_TARGET_DIR=<dir>`, separate from the port's: one target dir holds one `debug/<app>` and the second build overwrites the first), copy each binary out if you like, and set `look.production_target_dir` and `look.port_target_dir` so `look calibrate` finds each build's fonts. Check the rows the control channel cannot reach (real drags, keys with modifiers, the wheel with Ctrl, the window close) by launching the port on a `Display` and driving it with `portkit.look.xinput` ([tools/look.md](../tools/look.md#driving-rows-by-hand); needs `python-xlib`), or hand them to a platform the developer runs.
 - **macOS.** Send the developer the commit, the build and launch commands, and the checklist. They run it on their machine and answer each row.
 - **Web.** Build the web shell and open it in a browser, with the same checklist rows that apply.
 
@@ -229,7 +229,7 @@ Record each platform's result for the commit that ran:
 tools/track event run "linux: checklist passed" --task mp-run --data platform=linux --data sha=<commit> --data result=pass
 ```
 
-A failed row is `result=fail`, with the row in the text. The landing gate ([step 8](#8-report-and-land)) refuses the app until every platform of `minimal.run_platforms` has passed for the commit it lands. The app's PR stays a draft until then.
+Record one event per row or one per platform. A failed row is `result=fail`, with the row in the text. The landing gate ([step 8](#8-report-and-land)) folds every `run` event of the commit and platform: one failed row fails the platform, and a later pass does not undo it. It refuses the app until every platform of `minimal.run_platforms` has a pass and no fail for the commit it lands. The app's PR stays a draft until then.
 
 ## 8. Report and land
 

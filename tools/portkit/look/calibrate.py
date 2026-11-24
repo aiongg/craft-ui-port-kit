@@ -36,10 +36,19 @@ def scale(size: tuple[int, int], window) -> float | None:
     return round(sx, 2) if abs(sx - sy) < 0.01 else None
 
 
-def build_outputs(binary: Path) -> list[Path]:
+def build_outputs(binary: Path, target_dir: Path | None = None) -> list[Path]:
     """The build-script output files of the cargo profile dir that holds `binary` (target/<profile>/<bin>, or
-    .../examples/<bin>): the newest one per package that reads CRAFT_FONTS_DIR."""
-    for prof in (binary.parent, binary.parent.parent):
+    .../examples/<bin>): the newest one per package that reads CRAFT_FONTS_DIR. With `target_dir` (the cargo target
+    dir that built it, for a binary copied elsewhere) the profile dir is the one named like the binary's folder, else
+    the most recently built one."""
+    if target_dir is not None:
+        profs = [p for p in target_dir.iterdir() if (p / "build").is_dir()] if target_dir.is_dir() else []
+        same = [p for p in profs if p.name == binary.parent.name]
+        profs = same or sorted(profs, key=lambda p: (p / "build").stat().st_mtime, reverse=True)
+        candidates = profs[:1]
+    else:
+        candidates = [binary.parent, binary.parent.parent]
+    for prof in candidates:
         bdir = prof / "build"
         if not bdir.is_dir():
             continue
@@ -58,10 +67,10 @@ def build_outputs(binary: Path) -> list[Path]:
     return []
 
 
-def fonts(binary: Path) -> dict:
+def fonts(binary: Path, target_dir: Path | None = None) -> dict:
     """What the build that made `binary` embedded, from its craft-fonts build-script output:
     {status, checkout, warnings, outputs}."""
-    outs = build_outputs(binary)
+    outs = build_outputs(binary, target_dir)
     if not outs:
         return {"status": FONT_UNKNOWN, "checkout": None, "warnings": [], "outputs": []}
     checkout, warnings = None, []
@@ -97,7 +106,8 @@ def revision(tree: Path, installed: str | None) -> dict:
     """Production's revision in `tree` against the installed release: {tree, head, describe, installed,
     installed_commit, ahead, behind, text}."""
     out = {"tree": str(tree), "head": _git(tree, "rev-parse", "HEAD"),
-           "describe": _git(tree, "describe", "--tags", "--always"), "installed": installed,
+           "describe": _git(tree, "describe", "--tags", "--always") or _git(tree, "rev-parse", "--short", "HEAD"),
+           "installed": installed,
            "installed_commit": None, "ahead": None, "behind": None}
     if not installed or installed == "none":
         out["text"] = f"production {out['describe']}; " + ("the developer runs no installed release" if installed

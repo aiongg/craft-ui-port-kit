@@ -98,11 +98,14 @@ def _side_fig(st: dict, side: str, label: str) -> str:
     if not s:
         return f'<figure class="{cls}"><p class="lk-wait">{esc(label)}: not captured yet</p></figure>'
     if s.get("error"):
-        return f'<figure class="{cls}"><p class="lk-err">{esc(label)}: {esc(s["error"])}</p></figure>'
+        took = f" (after {esc(s['seconds'])} s)" if s.get("seconds") is not None else ""
+        return f'<figure class="{cls}"><p class="lk-err">{esc(label)}: {esc(s["error"])}{took}</p></figure>'
     stale = f" (from the run of {esc(s['t'])})" if s.get("stale") else ""
+    secs = f" · captured in {esc(s['seconds'])} s" if s.get("seconds") is not None else ""
+    notes = "".join(f'<p class="lk-wait">{esc(n)}</p>' for n in s.get("notes") or [])
     return (f'<figure class="{cls}"><a href="{esc(s["full"])}"><img src="{esc(s["shot"])}" alt="{esc(label)}: '
             f'{esc(st["title"])}" loading="lazy"></a><figcaption>{esc(label)}{stale} · '
-            f'<a href="{esc(s["full"])}">full window</a></figcaption></figure>')
+            f'<a href="{esc(s["full"])}">full window</a>{secs}</figcaption>{notes}</figure>')
 
 
 def write_page(page_dir: Path, man: dict) -> Path:

@@ -624,26 +624,28 @@ def exit_failures(phase: int, ctx: GateContext) -> tuple[int, list[tuple[str, st
 
 def minimal_land_check(store, which: str, sha: str) -> tuple[bool, list[str]]:
     """The landing gate of a minimal port (work.mode = minimal): the app lands only after the run step passed for
-    the commit it lands, on every platform of minimal.run_platforms. A platform passes when its newest `run` event
-    whose `sha` data names this commit (either may be the shorter prefix) has `result=pass`. Framework fixes land
+    the commit it lands, on every platform of minimal.run_platforms. A platform passes when at least one `run` event
+    whose `sha` data names this commit (either may be the shorter prefix) has `result=pass` and none has another
+    result: every row may record its own event, and any failed row fails the platform. Framework fixes land
     as their own PRs to the framework branch, with no gate here. Returns (ok, lines to print)."""
     if which == "framework":
         return True, ["run gate: a framework fix of a minimal port lands as its own PR; no run gate"]
     want = [str(p) for p in store.cfg.get("minimal.run_platforms") or []]
     events, _, _ = store.read_events()
-    newest: dict[str, dict] = {}
+    runs: dict[str, list[dict]] = {}
     for e in events:
         d = e.get("data") or {}
         run_sha = str(d.get("sha") or "")
         if e.get("kind") == "run" and len(run_sha) >= 7 and (sha.startswith(run_sha) or run_sha.startswith(sha)):
-            newest[str(d.get("platform"))] = e
+            runs.setdefault(str(d.get("platform")), []).append(e)
     fails = []
     for p in want:
-        e = newest.get(p)
-        if not e:
+        if not runs.get(p):
             fails.append(f"{p}: no run recorded for {sha[:12]}")
-        elif (e.get("data") or {}).get("result") != "pass":
-            fails.append(f"{p}: the newest run for {sha[:12]} ({e.get('t')}) has result "
+            continue
+        bad = [e for e in runs[p] if (e.get("data") or {}).get("result") != "pass"]
+        for e in bad:
+            fails.append(f"{p}: a run for {sha[:12]} ({e.get('t')}) has result "
                          f"{(e.get('data') or {}).get('result')!r}: {e.get('text', '')}")
     if not fails:
         return True, [f"run gate: {len(want)} of {len(want)} platforms passed the run of {sha[:12]}"]

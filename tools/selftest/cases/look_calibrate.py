@@ -84,3 +84,19 @@ def case_clean_with_revision(s):
           in r.stdout, f"production is one commit after the release: {rev}", r)
     r = s.run("look", "calibrate", "--side", "up", env={"STUB_SCALE_UP": "2", "STUB_SCALE_PORT": "2"})
     check(r.returncode == 0 and list(report(s)["sides"]) == ["up"], "--side up captures production only", r)
+
+
+def case_target_dir_per_side(s):
+    """A binary copied out of its target dir reads its fonts from look.production_target_dir / look.port_target_dir."""
+    setup(s, FONTS_NO_UI, None)
+    port_bin = s.root / "copies" / "app"
+    port_bin.parent.mkdir()
+    port_bin.write_text("#!/bin/sh\n")
+    os.chmod(port_bin, 0o755)
+    s.config({"look.driver": str(s.work / "driver.py"), "look.production_binary": str(s.root / "prod/target/release/app"),
+              "look.port_binary": str(port_bin), "look.window": "100x50",
+              "look.port_target_dir": str(s.root / "port" / "target")})
+    r = s.run("look", "calibrate", env={"STUB_SCALE_UP": "2", "STUB_SCALE_PORT": "2"})
+    rep = report(s)
+    check(rep["sides"]["port"]["fonts"]["status"] == "no interface face", f"port fonts from its target dir: {rep['sides']['port']['fonts']}", r)
+    check("production" in r.stdout and rep["revision"]["describe"], "the revision names a describe string", r)

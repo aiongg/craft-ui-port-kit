@@ -61,6 +61,8 @@ def _check_steps(steps, where: str) -> None:
             raise StatesError(f"{where}: step {i + 1} needs a method")
         if "params" in s and not isinstance(s["params"], dict):
             raise StatesError(f"{where}: step {i + 1}: params must be an object")
+        if "optional" in s and not isinstance(s["optional"], bool):
+            raise StatesError(f"{where}: step {i + 1}: optional must be true or false")
 
 
 def _check_crop(box, where: str) -> None:

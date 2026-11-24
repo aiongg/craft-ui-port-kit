@@ -111,7 +111,7 @@ def prerequisites(cfg: config.Config) -> tuple[list[str], list[str], bool]:
     cl = cfg.get("build.cl")
     if cl and Path(cl).is_file():
         ok.append("cl")
-    elif cfg.get("framework.checkout"):
+    elif cfg.get("framework.checkout") and cfg.get("work.mode") != "minimal":   # the minimal port's steps never call cl
         missing.append(f"the framework's cl at {cl} (build.cl)")
     return ok, missing, hard
 
@@ -243,6 +243,8 @@ def main(argv=None) -> int:
         for sec, key, val in fills:
             if val is not None:
                 text = set_key(text, sec, key, val)
+        if a.mode == "minimal":   # a live table, so the run step's platforms are visible and editable
+            text = set_key(text, "minimal", "run_platforms", ["linux", "macos"])
         write_toml(toml, text)
         print(f"wrote {toml}")
     else:

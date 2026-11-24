@@ -18,6 +18,7 @@ It builds nothing. The build loop builds the port; production is built once with
 - [The phase gate](#the-phase-gate)
 - [Driver interface](#driver-interface)
 - [Helpers for drivers](#helpers-for-drivers)
+- [Driving rows by hand](#driving-rows-by-hand)
 - [Dashboard events](#dashboard-events)
 - [Config keys](#config-keys)
 - [Requirements](#requirements)
@@ -74,7 +75,7 @@ A table lists every state with its result:
 | `partial` | Only one side has a shot |
 | `waiting` | The state has a `needs` field and is not captured |
 
-Each state then shows production, port and the difference image side by side, and the crops of its regions. The view buttons switch every state to side by side, blink (production and port alternate in one frame) or difference only; the choice is remembered in the browser. Every image links its full-window shot. A match by the numbers is not acceptance: the lead looks at every pair at full size (process/09, step 2).
+Each side's figure names the time its capture took, and lists any optional reset or setup step that failed (a step with `"optional": true`). `look pair` prints the same time after each state; a state that waits out a timeout shows there. Each state then shows production, port and the difference image side by side, and the crops of its regions. The view buttons switch every state to side by side, blink (production and port alternate in one frame) or difference only; the choice is remembered in the browser. Every image links its full-window shot. A match by the numbers is not acceptance: the lead looks at every pair at full size (process/09, step 2).
 
 ## Judging at full size
 
@@ -92,7 +93,7 @@ An agent's image reader shrinks every image whose longer edge is over `look.read
 | Fact | Read from | A problem when |
 |---|---|---|
 | Scale of each capture | The shot's size against the window | The two sides' scales differ, or width and height scale differently |
-| Fonts of each build | The craft-fonts build-script output cargo keeps beside the binary (`<profile dir>/build/<package>-<hash>/output`): the checkout it read and its `craft-fonts:` warnings, among them "has no interface face (role `ui`)" | A side built with no interface face or no craft-fonts checkout, or the sides embed different fonts. `unknown` (no such output) is reported, not a problem. |
+| Fonts of each build | The craft-fonts build-script output cargo keeps beside the binary (`<profile dir>/build/<package>-<hash>/output`), or, when the binary was copied out of its target dir, in `look.production_target_dir` or `look.port_target_dir` (production and port need separate target dirs, or the second build overwrites the first's output): the checkout it read and its `craft-fonts:` warnings, among them "has no interface face (role `ui`)" | A side built with no interface face or no craft-fonts checkout, or the sides embed different fonts. `unknown` (no such output) is reported, not a problem. |
 | Production's revision | `git describe` of the tree that holds `look.production_binary` (else `app.production`), against `look.installed_version` | `look.installed_version` is not set. A revision difference is reported, not a problem: tell the developer that differences between their installed app and the port may be production's own changes. |
 
 It prints one line per side, the build warnings, the revision and each problem. Exit `0` with no problem, `1` with one, `2` for a usage or config error. It posts one `look-calibrate` event on the task `setup-look`. Run it in phase 0 for production (`--side up`) and again once the port first builds ([process/01-setup.md](../process/01-setup.md), step 6a).
@@ -127,7 +128,7 @@ One JSON file per panel or dialog, `<look.states_dir>/<Panel>.json`. The panel n
 | `theme` | file, state | Theme the driver sets before the state's steps. Absent: the driver leaves the theme alone. |
 | `crop` | file, state | `[x0, y0, x1, y1]` in pixels of the full-window shot: the panel's area. `null` or absent: the whole window. |
 | `setups` | file | Named step lists for what a state needs but does not show (a sample document, a fixture). |
-| `reset` | file | Steps sent before every state, so no state depends on the one before. |
+| `reset` | file | Steps sent before every state, so no state depends on the one before. A step may carry `"optional": true`: if it fails (for example a key the app never acknowledges), the run goes on and the page records the failure, instead of failing every state. |
 | `id` | state | Lowercase letters, digits, `.`, `_`, `-`; unique in the file. Used in file names. |
 | `title` | state | What the state shows |
 | `setup` | state | A name from `setups`, or a step list. The driver runs it when it differs from the setup it ran last in that app instance. |
@@ -243,11 +244,38 @@ The kit's `tools/` directory is on the import path while `look` runs a driver.
 | `launch(side, argv, workdir, env=None, token_file=None, token=None, ready=LISTENING, timeout=120)` | Starts the app in its own process group with its output in `<workdir>/app.log`, waits for the `control server listening on 127.0.0.1:<port>` line, reads the token, connects and authenticates. Returns an `App`. |
 | `App.call(method, params)` | One request; returns its result, raises `ControlError` on `ok: false` |
 | `App.quit()` | `app.quit`, then kills the process group if it is still running after 15 s |
+| `App.notes` | Optional steps that failed since `look pair` last took them; `run_steps` fills it |
 | `App.extra` | A dict for the driver's own state (the setup that last ran, the display) |
-| `run_steps(app, steps)` | Sends each step; handles `@sleep` |
+| `run_steps(app, steps)` | Sends each step; handles `@sleep`; a failed step with `"optional": true` is added to `app.notes` |
 | `screenshot(app, name, write_root, out_png, params=None)` | `ui.screenshot {path: name}` (relative to the folder the app lets automation write to), waits until the file is complete, moves it to `out_png`; returns the reply (`width`, `height`) |
 
 `portkit.look.display.Display(screen="1920x1200x24")`: `start()` runs a private Xvfb on Linux and returns `{"DISPLAY": ":<n>"}` to add to the app's environment; Xvfb picks a free display number itself, so instances started at once never collide. Elsewhere it returns `{}` and the app uses the desktop. `stop()` ends it.
+
+## Driving rows by hand
+
+Checklist rows the control channel cannot reach (a held drag, a key with modifiers, the wheel with Ctrl, the window's close button) are driven with real X input. `portkit.look.xinput.XInput(display)` sends it through XTEST on the display of `portkit.look.display.Display`; the app sees it as a user's keyboard and mouse. The control channel stays for reading state (`ui.inspect`) and for screenshots.
+
+| Method | Does |
+|---|---|
+| `set_input_focus()` | Focuses the newest top-level window. Xvfb runs no window manager, so without this every key is lost. Call it after the window maps and again after a dialog or window closes. |
+| `key("Control_L+Shift_L+Tab")` | Presses the X keysym names in order and releases them in reverse |
+| `click(x, y, button=1)`, `move(x, y)` | Pointer in screen pixels |
+| `drag(x0, y0, x1, y1)`, `drag_hold(...)` | A drag; `drag_hold` returns the function that releases, so a state can be captured mid-drag |
+| `wheel(x, y, up=True, mods=("Control_L",), clicks=3)` | Wheel clicks with modifiers held |
+| `wm_close()` | `WM_DELETE_WINDOW` to the top-level windows, as a window manager's close button |
+
+```python
+from portkit.look import control
+from portkit.look.display import Display
+from portkit.look.xinput import XInput
+
+disp = Display(); env = disp.start()
+app = control.launch("port", [binary, "--control", "0"], workdir, env={**os.environ, **env})
+xi = XInput(env["DISPLAY"]); xi.set_input_focus()
+xi.key("Escape"); print(app.call("ui.inspect"))
+```
+
+Run the script with `uv run -q --with python-xlib python -I script.py`; `-I` drops the script's folder from the import path, so add the kit's `tools/` directory with `sys.path.insert`.
 
 ## Dashboard events
 
@@ -267,6 +295,7 @@ The `[look]` section of port.toml; [process/config.md](../process/config.md) has
 | `run_dir` | `{work.dir}/look/run` | App instances' work dirs and the last run's full-window shots |
 | `production_binary` | unset | Production built with the control hooks (side `up`) |
 | `port_binary` | unset | The port's binary in the app integration tree's target dir (side `port`) |
+| `production_target_dir`, `port_target_dir` | unset | The cargo target dir that built each binary, when the binary was copied out of it; `look calibrate` reads the fonts from there |
 | `window` | `1440x900` | Window size for states files that name none |
 | `installed_version` | unset | The release the developer runs (a tag, a version, a commit, or `none`); `look calibrate` compares production with it |
 | `reader_max_px` | `1568` | The longest edge the agents' image reader keeps unscaled; crops fit it |
@@ -277,4 +306,5 @@ The `[look]` section of port.toml; [process/config.md](../process/config.md) has
 
 - Python 3.11 or later.
 - Pillow and numpy for `pair` and `crops`. Without them, `look` runs itself again under `uv run --with pillow --with numpy` when `uv` is installed; otherwise it says to install them. `states`, `calibrate` and `brief` need neither.
+- `python-xlib` for `portkit.look.xinput` (`uv run --with python-xlib ...`).
 - On Linux, `Xvfb` for drivers that use `Display` (Debian and Ubuntu: package `xvfb`). Rendering without a GPU needs a CPU Vulkan or GL driver (Mesa's lavapipe or llvmpipe); the PhotoCraft driver uses lavapipe when it is installed.

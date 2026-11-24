@@ -357,6 +357,12 @@ KEYS: list[Key] = [
       "Production build with the control hooks (process/01-setup.md, step 6a); side `up`."),
     K("look.port_binary", None, "path", "look",
       "The port's binary as the build loop builds it in the app integration tree; side `port`."),
+    K("look.production_target_dir", None, "path", "look",
+      "The cargo target dir that built look.production_binary, when the binary was copied out of it. `look calibrate` "
+      "reads the fonts the build embedded from there. Unset: from the folder beside the binary."),
+    K("look.port_target_dir", None, "path", "look",
+      "The cargo target dir that built look.port_binary, when the binary was copied out of it (as "
+      "look.production_target_dir, for side `port`)."),
     K("look.window", "1440x900", "str", "look",
       "Window size `<width>x<height>` for states files that name none."),
     K("look.installed_version", None, "str", "look portkit/gates.py",

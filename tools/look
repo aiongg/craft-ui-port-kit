@@ -66,6 +66,7 @@ from portkit.look import calibrate, differences, page, procs, states  # noqa: E4
 
 SIDES = ("up", "port")
 SIDE_KEY = {"up": "look.production_binary", "port": "look.port_binary"}
+TARGET_KEY = {"up": "look.production_target_dir", "port": "look.port_target_dir"}
 REEXEC = "PORT_KIT_LOOK_REEXEC"
 
 
@@ -134,23 +135,33 @@ def version(cfg, side: str, binary: Path, at: dict | None) -> str:
     return text
 
 
-def run_side(driver, side: str, binary: Path, workdir: Path, shots: Path, todo: list[dict]) -> dict:
-    """Start one app, shoot every state, stop it. Returns {state id: full-window PNG path, or an error string}."""
+def run_side(driver, side: str, binary: Path, workdir: Path, shots: Path, todo: list[dict],
+             info: dict | None = None) -> dict:
+    """Start one app, shoot every state, stop it. Returns {state id: full-window PNG path, or an error string}.
+    `info` gets {state id: {"seconds": capture time, "notes": [optional steps that failed]}} (the notes come from
+    the driver's app object, `app.notes`, which portkit.look.control.run_steps fills)."""
     out, app = {}, None
+    info = info if info is not None else {}
     workdir.mkdir(parents=True, exist_ok=True)
     try:
         app = driver.start(side, str(binary), workdir, todo[0]["window"])
         for st in todo:
             dst = shots / f"full-{side}-{st['id']}.png"
+            t0 = time.monotonic()
             try:
                 driver.shoot(app, side, st, st["window"], dst)
                 if not dst.is_file():
                     raise RuntimeError(f"the driver wrote no {dst.name}")
                 out[st["id"]] = dst
-                print(f"[{side}] {st['id']}: ok", flush=True)
+                status = "ok"
             except Exception as e:
-                out[st["id"]] = f"{type(e).__name__}: {e}"
-                print(f"[{side}] {st['id']}: {out[st['id']]}", flush=True)
+                out[st["id"]] = status = f"{type(e).__name__}: {e}"
+            secs = round(time.monotonic() - t0, 1)
+            notes = list(getattr(app, "notes", None) or [])
+            if hasattr(app, "notes"):
+                app.notes.clear()
+            info[st["id"]] = {"seconds": secs, "notes": notes}
+            print(f"[{side}] {st['id']}: {status} ({secs}s)" + "".join(f"\n[{side}]   {n}" for n in notes), flush=True)
     except Exception as e:
         msg = f"the app did not start: {type(e).__name__}: {e}"
         for st in todo:
@@ -163,6 +174,11 @@ def run_side(driver, side: str, binary: Path, workdir: Path, shots: Path, todo: 
             except Exception as e:
                 print(f"[{side}] stop: {type(e).__name__}: {e}", flush=True)
     return out
+
+
+def count_failed(got: dict) -> int:
+    """Captures that failed: every side's state whose result is an error string, not a PNG path."""
+    return sum(1 for res in got.values() for r in res.values() if not isinstance(r, Path))
 
 
 def capture_scale(shots: dict, todo: list[dict]) -> float | None:
@@ -247,10 +263,12 @@ def _pair_one(cfg, driver, pixels, panel, sides, binaries, only, rec) -> int:
                 old.unlink()
         todo = {side: [states.for_side(doc, s, side, window) for s in run] for side in sides}
         port_head = head(cfg) if "port" in sides else None      # before the run: what the binary was built from
+        infos = {side: {} for side in sides}
         with cf.ThreadPoolExecutor(len(sides)) as ex:
-            futs = {side: ex.submit(run_side, driver, side, binaries[side], work / side, shots, todo[side])
+            futs = {side: ex.submit(run_side, driver, side, binaries[side], work / side, shots, todo[side], infos[side])
                     for side in sides}
             got = {side: f.result() for side, f in futs.items()}
+        failed = count_failed(got)
         t1 = time.monotonic()
 
         page_dir.mkdir(parents=True, exist_ok=True)
@@ -273,7 +291,6 @@ def _pair_one(cfg, driver, pixels, panel, sides, binaries, only, rec) -> int:
                     man["sides"][side]["head"] = port_head
             else:
                 man["sides"][side] = (old.get("sides") or {}).get(side) or {"label": "production" if side == "up" else "port"}
-        failed = 0
         for st in doc["states"]:
             sid = st["id"]
             entry = {"id": sid, "title": st.get("title", sid)}
@@ -298,9 +315,9 @@ def _pair_one(cfg, driver, pixels, panel, sides, binaries, only, rec) -> int:
                     entry[side] = {"shot": f"{side}-{sid}.png", "full": f"full-{side}-{sid}.png", "t": stamp}
                 else:
                     entry[side] = {"error": res, "t": stamp}
+                entry[side].update({k: v for k, v in infos[side].get(sid, {}).items() if v})
                 if side == "port":
                     entry[side]["head"] = port_head
-                    failed += 1
             man["states"].append(entry)
         man["times"]["shots"] = round(t1 - t0, 1)
         diff_all(pixels, page_dir, man, 12, 6, 20)
@@ -457,7 +474,9 @@ def _calibrate(cfg, a):
         got = {side: f.result()["calibrate"] for side, f in futs.items()}
     for side, b in binaries.items():
         st = b.stat()
-        d = {"binary": str(b), "size": st.st_size, "mtime": st.st_mtime, "fonts": calibrate.fonts(b)}
+        tkey = TARGET_KEY[side]
+        target = cfg.path(tkey) if cfg.get(tkey) else None
+        d = {"binary": str(b), "size": st.st_size, "mtime": st.st_mtime, "fonts": calibrate.fonts(b, target)}
         shot = got[side]
         if isinstance(shot, Path):
             try:

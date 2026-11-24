@@ -14,7 +14,7 @@ row that fails now; it prints that decision. The override is that one recorded d
 flag of their own. `framework` before phase 8 passes with a note: framework changes may land after any build batch
 (process/10-land.md).
 In a minimal port (work.mode = minimal) it runs the run gate instead: the app commit must have passed the run step
-on every platform of minimal.run_platforms (`run` events with data platform, sha and result=pass; process/minimal-port.md,
+on every platform of minimal.run_platforms (`run` events with data platform, sha and result; every one must be pass; process/minimal-port.md,
 step 7); a framework fix passes. Exit 0 pass; 1 refused (one line per failing row); 2 usage or no workspace.
 """
 from __future__ import annotations

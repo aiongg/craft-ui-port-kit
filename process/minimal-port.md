@@ -211,7 +211,7 @@ Nothing merges before the app has run. After the test rounds, build and launch t
 - **macOS.** Send the developer the commit, the build and launch commands, and the checklist. They run it on their machine and answer each row.
 - **Web.** Build the web shell and open it in a browser, with the same checklist rows that apply.
 
-The runtime removes two egui defaults when it installs: `quit_shortcuts` (Ctrl+Q and Cmd+Q) and `zoom_with_keyboard` (Ctrl+= and Ctrl+-). An app that relied on either binds the key itself (a command in its keymap, or an app-side handler), and the Keys row below checks both.
+The runtime removes two egui defaults when it installs: `quit_shortcuts` and `zoom_with_keyboard` (Ctrl+= and Ctrl+-). Quit is the framework command `window.quit` (`QuitCommand::Quit`, Ctrl+Q and Cmd+Q), which goes through the same close path as the window's close button, so unsaved changes still ask. An app with its own quit command unbinds `window.quit` in its command overrides and keeps its own; an app binding on the same chord wins either way. Keyboard zoom is the app's: a command in its keymap or an app-side handler. The update dialogs show the icon the app passes with `HostBuilder::icon_png`; without it they show the app name's first letter. The Keys row below checks quit and zoom.
 
 Checklist (one row per item; a row that fails is a bug for the writer, or a framework fix):
 

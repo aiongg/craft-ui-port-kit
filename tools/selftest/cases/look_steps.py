@@ -72,3 +72,24 @@ def _rejects(doc):
     except states.StatesError:
         return True
     return False
+
+
+def case_x_steps_reset_and_port(s):
+    """`@x.*` steps need a display name (a plain error otherwise); a state's own reset replaces the file's; a logged
+    port 0 is refused; `Display(screens=2)` asks Xvfb for two screens joined by Xinerama."""
+    from portkit.look.display import Display
+    app = FakeApp()
+    app.side, app.extra = "port", {}
+    try:
+        control.run_steps(app, [{"method": "@x.key", "params": {"keys": "Escape"}}])
+        check(False, "an @x step without a display raises")
+    except control.ControlError as e:
+        check("display_name" in str(e), f"the error names display_name: {e}")
+    control.run_steps(app, [{"method": "@x.key", "optional": True, "params": {"keys": "Escape"}}])
+    check(any("@x.key" in n for n in app.notes), f"an optional @x step is noted: {app.notes}")
+    doc = {"reset": [{"method": "a"}], "states": []}
+    check(states.for_side(doc, {"id": "s", "steps": []}, "port", (1, 1))["reset"] == [{"method": "a"}], "file reset by default")
+    check(states.for_side(doc, {"id": "s", "steps": [], "reset": []}, "port", (1, 1))["reset"] == [], "a state opts out of the reset")
+    argv = Display(screens=2).argv("Xvfb", 3)
+    check(argv.count("-screen") == 2 and "+xinerama" in argv, f"two screens: {argv}")
+    check(control.free_port() > 0, "free_port gives a port")

@@ -14,8 +14,11 @@ from Xlib.ext import xtest
 
 
 class XInput:
-    def __init__(self, display_name: str):
+    def __init__(self, display_name: str, scale: float = 1.0):
+        """`scale` is pixels per point. The pointer methods take points, as `ui.inspect` reports them, and send
+        pixels: at interface scale 1.5 a point 100 is pixel 150."""
         self.x = xdisplay.Display(display_name)
+        self.scale = scale
 
     def _sync(self, wait: float = 0.15) -> None:
         self.x.sync()
@@ -37,7 +40,7 @@ class XInput:
 
     # pointer ---------------------------------------------------------------------------------------------
     def move(self, x: float, y: float) -> None:
-        xtest.fake_input(self.x, X.MotionNotify, x=int(x), y=int(y))
+        xtest.fake_input(self.x, X.MotionNotify, x=int(round(x * self.scale)), y=int(round(y * self.scale)))
         self._sync()
 
     def click(self, x: float, y: float, button: int = 1) -> None:
@@ -88,7 +91,7 @@ class XInput:
             raise ValueError(f"unknown key {name}")
         return self.x.keysym_to_keycode(sym)
 
-    def key(self, combo: str, hold: float = 0.08) -> None:
+    def key(self, combo: str, hold: float = 0.08, settle: float = 0.4) -> None:
         """Press the keys of `combo` in order and release them in reverse: `Control_L+Shift_L+Tab`, `Escape`,
         `F6`, `Alt_L+1`. Names are X keysym names."""
         codes = [self._code(n) for n in combo.split("+")]
@@ -99,7 +102,28 @@ class XInput:
         for c in reversed(codes):
             xtest.fake_input(self.x, X.KeyRelease, c)
             self._sync(0.03)
-        time.sleep(0.4)
+        time.sleep(settle)
+
+    def type(self, text: str, gap: float = 0.0) -> None:
+        """Type `text` one character at a time: press and release back to back (`gap` seconds between characters),
+        one sync at the end, so a burst lands inside one frame. Characters on the shifted level press Shift."""
+        shift = self._code("Shift_L")
+        for ch in text:
+            sym = XK.string_to_keysym(ch) or ord(ch)
+            code = self.x.keysym_to_keycode(sym)
+            if not code:
+                raise ValueError(f"no key types {ch!r}")
+            shifted = self.x.keycode_to_keysym(code, 0) != sym
+            if shifted:
+                xtest.fake_input(self.x, X.KeyPress, shift)
+            xtest.fake_input(self.x, X.KeyPress, code)
+            xtest.fake_input(self.x, X.KeyRelease, code)
+            if shifted:
+                xtest.fake_input(self.x, X.KeyRelease, shift)
+            if gap:
+                self.x.sync()
+                time.sleep(gap)
+        self._sync(0.3)
 
     # window ----------------------------------------------------------------------------------------------
     def wm_close(self) -> int:

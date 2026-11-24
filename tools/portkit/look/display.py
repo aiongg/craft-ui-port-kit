@@ -26,14 +26,22 @@ class DisplayError(RuntimeError):
 
 
 class Display:
-    def __init__(self, screen: str = "1920x1200x24", headless: bool | None = None, timeout: float = 20):
+    def __init__(self, screen: str = "1920x1200x24", headless: bool | None = None, timeout: float = 20,
+                 screens: int = 1):
         """`screen` is Xvfb's `WxHxDEPTH`; keep it larger than every window a states file asks for.
-        `headless=None` means: headless on Linux, the desktop elsewhere."""
+        `headless=None` means: headless on Linux, the desktop elsewhere. `screens=2` adds a second screen of the same
+        size to the right of the first, joined by Xinerama, for apps with a window on a second monitor."""
         self.screen = screen
+        self.screens = screens
         self.headless = sys.platform.startswith("linux") if headless is None else headless
         self.timeout = timeout
         self.proc: subprocess.Popen | None = None
         self.name: str | None = None
+
+    def argv(self, xvfb: str, fd: int) -> list[str]:
+        screens = [a for i in range(self.screens) for a in ("-screen", str(i), self.screen)]
+        return [xvfb, "-displayfd", str(fd), *screens, *(["+xinerama"] if self.screens > 1 else []),
+                "-nolisten", "tcp", "-noreset"]
 
     def start(self) -> dict[str, str]:
         if not self.headless:
@@ -44,7 +52,7 @@ class Display:
         r, w = os.pipe()
         try:
             self.proc = subprocess.Popen(
-                [xvfb, "-displayfd", str(w), "-screen", "0", self.screen, "-nolisten", "tcp", "-noreset"],
+                self.argv(xvfb, w),
                 pass_fds=(w,), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         finally:
             os.close(w)

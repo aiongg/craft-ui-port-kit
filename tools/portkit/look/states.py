@@ -8,7 +8,7 @@ Format (tools/look.md, "States files"):
       "theme": "pro",                                optional; the driver sets it before every state
       "crop": [x0, y0, x1, y1],                      optional; pixels of the full-window shot; null = whole window
       "setups": {"sample": [STEP, ...]},             optional named setups
-      "reset": [STEP, ...],                          optional; sent before every state
+      "reset": [STEP, ...],                          optional; sent before every state (a state's own "reset" replaces it, [] opts out)
       "states": [
         {"id": "structure", "title": "...", "setup": "sample" | [STEP, ...], "steps": [STEP, ...],
          "up_steps": [...], "port_steps": [...],     optional per-side steps that replace `steps`
@@ -99,7 +99,7 @@ def check(doc: dict, name: str = "states file", strict: bool = True) -> dict:
             raise StatesError(f"{where}: id {sid!r} appears twice")
         seen.add(sid)
         where = f"{name}: state {sid}"
-        for key in ("steps", *(f"{s}_steps" for s in SIDES)):
+        for key in ("steps", "reset", *(f"{s}_steps" for s in SIDES)):
             if key in st:
                 _check_steps(st[key], f"{where}: {key}")
         if "steps" not in st and not st.get("needs"):
@@ -131,7 +131,7 @@ def load(path: Path, strict: bool = True) -> dict:
 
 def for_side(doc: dict, st: dict, side: str, default_window: tuple[int, int]) -> dict:
     """The state as a driver gets it: one side's steps, the setup as a step list plus a key that names it, the
-    file's reset, theme, window and crop resolved. Other fields of the state are passed through."""
+    state's own reset (else the file's), theme, window and crop resolved. Other fields of the state are passed through."""
     out = {k: v for k, v in st.items() if not k.endswith("_steps")}
     out["steps"] = st.get(f"{side}_steps", st.get("steps", []))
     setup = st.get("setup")
@@ -141,7 +141,7 @@ def for_side(doc: dict, st: dict, side: str, default_window: tuple[int, int]) ->
         out["setup"], out["setup_key"] = setup, json.dumps(setup, sort_keys=True)
     else:
         out["setup"], out["setup_key"] = [], None
-    out["reset"] = doc.get("reset", [])
+    out["reset"] = st["reset"] if "reset" in st else doc.get("reset", [])
     out["theme"] = st.get("theme", doc.get("theme"))
     out["window"] = list(parse_window(st["size"]) if "size" in st else
                          parse_window(doc["size"]) if "size" in doc else default_window)

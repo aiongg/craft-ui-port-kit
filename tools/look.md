@@ -128,7 +128,7 @@ One JSON file per panel or dialog, `<look.states_dir>/<Panel>.json`. The panel n
 | `theme` | file, state | Theme the driver sets before the state's steps. Absent: the driver leaves the theme alone. |
 | `crop` | file, state | `[x0, y0, x1, y1]` in pixels of the full-window shot: the panel's area. `null` or absent: the whole window. |
 | `setups` | file | Named step lists for what a state needs but does not show (a sample document, a fixture). |
-| `reset` | file | Steps sent before every state, so no state depends on the one before. A step may carry `"optional": true`: if it fails (for example a key the app never acknowledges), the run goes on and the page records the failure, instead of failing every state. |
+| `reset` | file, state | Steps sent before every state, so no state depends on the one before. A state's own `reset` replaces the file's; `[]` makes that state skip it (the start-up state). A step may carry `"optional": true`: if it fails (for example a key the app never acknowledges), the run goes on and the page records the failure, instead of failing every state. |
 | `id` | state | Lowercase letters, digits, `.`, `_`, `-`; unique in the file. Used in file names. |
 | `title` | state | What the state shows |
 | `setup` | state | A name from `setups`, or a step list. The driver runs it when it differs from the setup it ran last in that app instance. |
@@ -137,7 +137,20 @@ One JSON file per panel or dialog, `<look.states_dir>/<Panel>.json`. The panel n
 | `needs` | state | The state is not captured yet: a missing control hook (`CH-n`), `steps` (the map gave none), or a setup to write. |
 | `note` | state | Free text shown with a waiting state |
 
-A step is one control request, `{"method": ..., "params": {...}}`, in the app's own method names. `{"method": "@sleep", "params": {"seconds": 2}}` waits instead. This is craft-libs `docs/porting.md` "States file" plus setups, reset, crop and needs.
+A step is one control request, `{"method": ..., "params": {...}}`, in the app's own method names. `{"method": "@sleep", "params": {"seconds": 2}}` waits instead.
+
+Rows that must pass through the window's input (Escape as the runtime's window cancel, chords, Ctrl+wheel, the close button) cannot be control requests when the app's key request goes straight to its engine. `control.run_steps` also runs real X input steps on the driver's private display (Linux; python-xlib; the driver sets `app.extra["display_name"]` from its `Display` and, at an interface scale other than 1, `app.extra["x_scale"]`, pixels per point):
+
+| Step | Params |
+|---|---|
+| `@x.key` | `keys`: X keysym names joined by `+`, as `Control_L+Shift_L+Tab` |
+| `@x.type` | `text`, `gap` (seconds between characters, default 0: one burst inside a frame) |
+| `@x.click` | `x`, `y` in points, `button` |
+| `@x.wheel` | `x`, `y` in points, `up`, `mods` (default `Control_L`), `clicks` |
+| `@x.close` | none: `WM_DELETE_WINDOW` to the top-level windows |
+| `@x.focus` | none: keyboard focus to the newest window |
+
+Each takes `settle` (seconds to wait after, default 0.3) and `"optional": true` like any step. `look` re-runs itself under uv with python-xlib as well as Pillow and numpy. This is craft-libs `docs/porting.md` "States file" plus setups, reset, crop and needs.
 
 `look pair` refuses a states file with an unknown setup name, a named setup that is still empty, a repeated id or a step without a method, and names the problem.
 
@@ -241,7 +254,7 @@ The kit's `tools/` directory is on the import path while `look` runs a driver.
 
 | Helper | Does |
 |---|---|
-| `launch(side, argv, workdir, env=None, token_file=None, token=None, ready=LISTENING, timeout=120)` | Starts the app in its own process group with its output in `<workdir>/app.log`, waits for the `control server listening on 127.0.0.1:<port>` line, reads the token, connects and authenticates. Returns an `App`. |
+| `launch(side, argv, workdir, env=None, token_file=None, token=None, ready=LISTENING, timeout=120)` | Starts the app in its own process group with its output in `<workdir>/app.log`, waits for the `control server listening on 127.0.0.1:<port>` line, reads the token, connects and authenticates. Returns an `App`. It refuses a logged port 0 (an app that logs the port it was asked for, not the one it bound): pass `control.free_port()`. |
 | `App.call(method, params)` | One request; returns its result, raises `ControlError` on `ok: false` |
 | `App.quit()` | `app.quit`, then kills the process group if it is still running after 15 s |
 | `App.notes` | Optional steps that failed since `look pair` last took them; `run_steps` fills it |
@@ -249,7 +262,7 @@ The kit's `tools/` directory is on the import path while `look` runs a driver.
 | `run_steps(app, steps)` | Sends each step; handles `@sleep`; a failed step with `"optional": true` is added to `app.notes` |
 | `screenshot(app, name, write_root, out_png, params=None)` | `ui.screenshot {path: name}` (relative to the folder the app lets automation write to), waits until the file is complete, moves it to `out_png`; returns the reply (`width`, `height`) |
 
-`portkit.look.display.Display(screen="1920x1200x24")`: `start()` runs a private Xvfb on Linux and returns `{"DISPLAY": ":<n>"}` to add to the app's environment; Xvfb picks a free display number itself, so instances started at once never collide. Elsewhere it returns `{}` and the app uses the desktop. `stop()` ends it.
+`portkit.look.display.Display(screen="1920x1200x24", screens=1)` (`screens=2` adds a second screen to the right, joined by Xinerama, for an app's second-monitor window): `start()` runs a private Xvfb on Linux and returns `{"DISPLAY": ":<n>"}` to add to the app's environment; Xvfb picks a free display number itself, so instances started at once never collide. Elsewhere it returns `{}` and the app uses the desktop. `stop()` ends it.
 
 ## Driving rows by hand
 
@@ -258,8 +271,9 @@ Checklist rows the control channel cannot reach (a held drag, a key with modifie
 | Method | Does |
 |---|---|
 | `set_input_focus()` | Focuses the newest top-level window. Xvfb runs no window manager, so without this every key is lost. Call it after the window maps and again after a dialog or window closes. |
-| `key("Control_L+Shift_L+Tab")` | Presses the X keysym names in order and releases them in reverse |
-| `click(x, y, button=1)`, `move(x, y)` | Pointer in screen pixels |
+| `key("Control_L+Shift_L+Tab", hold=0.08, settle=0.4)` | Presses the X keysym names in order and releases them in reverse |
+| `type("text", gap=0.0)` | Types each character press and release back to back, one sync at the end: a burst that lands inside one frame |
+| `click(x, y, button=1)`, `move(x, y)` | Pointer in points: `ui.inspect` reports points and XTEST takes pixels, so `XInput(display, scale=<pixels per point>)` converts (at interface scale 1.5 an unscaled click lands in another widget) |
 | `drag(x0, y0, x1, y1)`, `drag_hold(...)` | A drag; `drag_hold` returns the function that releases, so a state can be captured mid-drag |
 | `wheel(x, y, up=True, mods=("Control_L",), clicks=3)` | Wheel clicks with modifiers held |
 | `wm_close()` | `WM_DELETE_WINDOW` to the top-level windows, as a window manager's close button |
@@ -270,7 +284,7 @@ from portkit.look.display import Display
 from portkit.look.xinput import XInput
 
 disp = Display(); env = disp.start()
-app = control.launch("port", [binary, "--control", "0"], workdir, env={**os.environ, **env})
+app = control.launch("port", [binary, "--control", str(control.free_port())], workdir, env={**os.environ, **env})
 xi = XInput(env["DISPLAY"]); xi.set_input_focus()
 xi.key("Escape"); print(app.call("ui.inspect"))
 ```

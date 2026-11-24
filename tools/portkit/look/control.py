@@ -94,6 +94,13 @@ class App:
         procs.forget(self.proc.pid)
 
 
+def free_port() -> int:
+    """A free local TCP port, for apps that log the port they were asked for (pass it as the app's control port)."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 def launch(side: str, argv: list[str], workdir: Path, env: dict | None = None, token_file: Path | None = None,
            token: str | None = None, ready: str = LISTENING, timeout: float = 120) -> App:
     """Start the app, wait for its control port line in the log, connect and authenticate.
@@ -121,6 +128,9 @@ def launch(side: str, argv: list[str], workdir: Path, env: dict | None = None, t
             m = pat.search(log_path.read_text(errors="replace"))
             if m:
                 port = int(m.group(1))
+                if port == 0:
+                    raise ControlError(f"{side}: the app logged the requested port 0, not the bound one; pass a free "
+                                       f"port (control.free_port()) or make the app log its bound address")
             else:
                 time.sleep(0.3)
         if token is None and token_file is not None:
@@ -136,13 +146,54 @@ def launch(side: str, argv: list[str], workdir: Path, env: dict | None = None, t
     return app
 
 
+def x_step(app: App, action: str, p: dict) -> None:
+    """Real X input for rows that must pass through the window's input (Escape as the window cancel, chords, Ctrl+wheel,
+    the close button), which the control channel's own key and click requests may bypass. Needs python-xlib and a
+    driver that stored the private display's name in `app.extra["display_name"]` (and, for apps drawn at an interface
+    scale, `app.extra["x_scale"]`, pixels per point). Coordinates in `params` are points."""
+    name = app.extra.get("display_name")
+    if not name:
+        raise ControlError(f"{app.side}: @x.{action} needs app.extra['display_name'] (the driver's Display name; "
+                           f"Linux only)")
+    xi = app.extra.get("xi")
+    if xi is None:
+        from .xinput import XInput
+        xi = app.extra["xi"] = XInput(name, scale=float(app.extra.get("x_scale", 1.0)))
+        xi.set_input_focus()
+    if action == "focus":
+        xi.set_input_focus()
+    elif action == "key":
+        xi.set_input_focus()
+        xi.key(p["keys"])
+    elif action == "type":
+        xi.set_input_focus()
+        xi.type(p["text"], gap=float(p.get("gap", 0.0)))
+    elif action == "click":
+        xi.click(p["x"], p["y"], p.get("button", 1))
+    elif action == "wheel":
+        xi.wheel(p["x"], p["y"], up=p.get("up", True), mods=tuple(p.get("mods", ["Control_L"])), clicks=p.get("clicks", 3))
+    elif action == "close":
+        xi.wm_close()
+    else:
+        raise ControlError(f"{app.side}: unknown X step @x.{action}")
+    time.sleep(float(p.get("settle", 0.3)))
+
+
 def run_steps(app: App, steps: list[dict]) -> None:
-    """Send each step's request in order. `{"method": "@sleep", "params": {"seconds": S}}` waits instead. A step with
+    """Send each step's request in order. `{"method": "@sleep", "params": {"seconds": S}}` waits instead; `@x.key {keys}`, `@x.type {text}`, `@x.click {x, y}`,
+    `@x.wheel {x, y, up, mods, clicks}`, `@x.close` and `@x.focus` send real X input (see `x_step`). A step with
     `"optional": true` that fails is recorded in `app.notes` and the run goes on; any other failure raises."""
     for s in steps or []:
         m, p = s["method"], s.get("params") or {}
         if m == "@sleep":
             time.sleep(float(p.get("seconds", 1)))
+        elif m.startswith("@x."):
+            try:
+                x_step(app, m[3:], p)
+            except Exception as e:
+                if not s.get("optional"):
+                    raise e if isinstance(e, ControlError) else ControlError(f"{app.side}: step {m} failed: {e}") from e
+                app.notes.append(f"optional step {m} failed: {e}")
         elif s.get("optional"):
             try:
                 app.call(m, p)

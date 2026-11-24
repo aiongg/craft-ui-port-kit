@@ -211,6 +211,8 @@ Nothing merges before the app has run. After the test rounds, build and launch t
 - **macOS.** Send the developer the commit, the build and launch commands, and the checklist. They run it on their machine and answer each row.
 - **Web.** Build the web shell and open it in a browser, with the same checklist rows that apply.
 
+The runtime removes two egui defaults when it installs: `quit_shortcuts` (Ctrl+Q and Cmd+Q) and `zoom_with_keyboard` (Ctrl+= and Ctrl+-). An app that relied on either binds the key itself (a command in its keymap, or an app-side handler), and the Keys row below checks both.
+
 Checklist (one row per item; a row that fails is a bug for the writer, or a framework fix):
 
 | Area | Check |
@@ -218,7 +220,7 @@ Checklist (one row per item; a row that fails is a bug for the writer, or a fram
 | Start-up | The app starts; a saved layout from the old version loads with every panel in place |
 | Dock | Drag a tab and a group; float a panel; close and reopen it; reset the layout; quit, restart, and the layout is as left |
 | Dialogs | The update check dialog opens and closes; the shortcuts dialog opens, assigns a key and saves; every other dialog the port moved |
-| Keys | Escape in the canvas and in dialogs; Tab and Shift+Tab; F6 and F10; Alt+digit shortcuts; zoom keys; each app shortcut the report names as colliding with a framework binding |
+| Keys | Escape in the canvas and in dialogs; Tab and Shift+Tab; F6 and F10; Alt+digit shortcuts; zoom keys; Ctrl+Q and Cmd+Q; Ctrl+= and Ctrl+-; each app shortcut the report names as colliding with a framework binding |
 | Close | Closing the window with unsaved changes asks to save; so does the platform quit (Cmd+Q and Dock Quit on macOS) |
 | Look | Panel contents look as before; the dock chrome differs only as the report lists |
 | Web | The web build starts and the rows above that apply pass |

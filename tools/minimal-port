@@ -604,6 +604,16 @@ def cmd_repin(cfg, a, tree: Path, rules: Rules, rd: Path, rec) -> int:
     patch_urls = list(cfg.get("framework.patch_urls") or [url])
     if url not in patch_urls:
         patch_urls = [url, *patch_urls]
+    # An app may name the framework by another URL (the upstream one, a fork): every git URL in its manifests
+    # with the framework repository's name is rewritten like framework.repo.
+    repo_name = url.rstrip("/").removesuffix(".git").rsplit("/", 1)[-1]
+    seen = {u.rstrip("/").removesuffix(".git") for u in patch_urls}
+    for f in tracked(tree, "*Cargo.toml"):
+        for u in re.findall(r'git\s*=\s*"([^"]+)"', (tree / f).read_text()):
+            bare = u.rstrip("/").removesuffix(".git")
+            if bare.rsplit("/", 1)[-1] == repo_name and bare not in seen:
+                seen.add(bare)
+                patch_urls.append(u)
     fw = cfg.path("framework.checkout")
     r = subprocess.run(["git", "-C", str(fw), "show", f"{rev}:Cargo.toml"], capture_output=True, text=True)
     if r.returncode:

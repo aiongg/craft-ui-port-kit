@@ -146,6 +146,15 @@ def case_repin(s):
     check(p.stdout.splitlines()[-1].startswith("minimal-port repin: 0 edits"), "a second repin changes nothing", p)
 
 
+def case_repin_other_url(s):
+    app, rev = setup(s)
+    other = "https://example.invalid/up/craft-libs.git"
+    (app / "crates/ui/Cargo.toml").write_text(CRATE_MANIFEST + f'craft-extra = {{ git = "{other}", rev = "{OLD}" }}\n')
+    git(app, "commit", "-qam", "other url")
+    p = s.run("minimal-port", "repin")
+    check(f'+craft-extra = {{ git = "{FW_URL}", rev = "{rev}" }}' in p.stdout.splitlines(), "a manifest's other framework URL is repinned", p)
+
+
 def case_rewrite(s):
     app, _ = setup(s)
     p = s.run("minimal-port", "rewrite", "--apply")

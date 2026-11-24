@@ -18,7 +18,7 @@ NO_CHECKOUT = "building without craft-fonts"
 FONT_OK = "interface faces"
 FONT_NO_UI = "no interface face"
 FONT_NONE = "no craft-fonts checkout"
-FONT_UNKNOWN = "unknown"
+FONT_UNKNOWN = "no craft-fonts build output; the app loads its fonts itself"
 
 
 def png_size(path: Path) -> tuple[int, int]:
@@ -97,9 +97,13 @@ def _git(tree: Path, *args: str) -> str | None:
 
 
 def tree_of(binary: Path) -> Path | None:
-    """The git work tree that holds `binary`, if any."""
+    """The git work tree that holds `binary`, if any. A tree with no commit is skipped: it is not production's."""
     top = _git(binary.parent, "rev-parse", "--show-toplevel")
-    return Path(top) if top else None
+    return Path(top) if top and has_head(Path(top)) else None
+
+
+def has_head(tree: Path) -> bool:
+    return bool(_git(tree, "rev-parse", "--verify", "-q", "HEAD"))
 
 
 def revision(tree: Path, installed: str | None) -> dict:

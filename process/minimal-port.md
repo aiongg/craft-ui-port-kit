@@ -103,7 +103,7 @@ tools/minimal-port repin             # the diff, nothing written
 tools/minimal-port repin --apply     # writes and commits once
 ```
 
-It sets every framework dependency to `plan.base`. Each egui `[patch.crates-io]` entry gets the rev the framework's own manifest uses at `plan.base`. It renames or drops the features `next` changed (craft-ui `serde` and `native-windows`; `egui` to `ui` on craft-update, craft-window and craft-quit; craft-keymap `ui`). Read what it lists (a fork the framework does not patch, a features array over several lines) and fix those lines by hand in the same branch.
+It sets every framework dependency to `plan.base`. A dependency counts as a framework dependency when its git URL is `framework.repo`, one of `framework.patch_urls`, or any other URL in the app's manifests that names a repository with the framework's name (the upstream URL, a fork); the rewritten line takes `framework.repo`. Each egui `[patch.crates-io]` entry gets the rev the framework's own manifest uses at `plan.base`. It renames or drops the features `next` changed (craft-ui `serde` and `native-windows`; `egui` to `ui` on craft-update, craft-window and craft-quit; craft-keymap `ui`). Read what it lists (a fork the framework does not patch, a features array over several lines) and fix those lines by hand in the same branch.
 
 `Cargo.lock` re-resolves in the first build (step 3). When resolution reports a version conflict between the two revisions' requirements, update that one package: `cl cargo update -p <crate>@<old> --precise <new>` (the SoundCraft trial needed `rustix` 1.1.5 to 1.1.6). Commit the lock with the repin.
 

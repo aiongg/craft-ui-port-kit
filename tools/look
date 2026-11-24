@@ -489,9 +489,9 @@ def _calibrate(cfg, a):
         sides[side] = d
     installed = cfg.get("look.installed_version")
     prod = binaries.get("up") or (cfg.path("look.production_binary") if cfg.get("look.production_binary") else None)
-    tree = calibrate.tree_of(prod) if prod else None
-    if tree is None and cfg.get("app.production"):
-        tree = cfg.path("app.production")
+    tree = cfg.path("app.production") if cfg.get("app.production") else None   # the configured tree first
+    if tree is None or not calibrate.has_head(tree):
+        tree = calibrate.tree_of(prod) if prod else None
     rev = calibrate.revision(tree, installed) if tree else {"installed": installed,
                                                             "text": "no git tree holds the production build"}
     found = calibrate.problems(sides, rev)

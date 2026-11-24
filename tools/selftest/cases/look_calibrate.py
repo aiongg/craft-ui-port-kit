@@ -100,3 +100,23 @@ def case_target_dir_per_side(s):
     rep = report(s)
     check(rep["sides"]["port"]["fonts"]["status"] == "no interface face", f"port fonts from its target dir: {rep['sides']['port']['fonts']}", r)
     check("production" in r.stdout and rep["revision"]["describe"], "the revision names a describe string", r)
+
+
+def case_production_tree_preferred(s):
+    """A binary inside an unrelated repository with no commits does not give the revision: app.production does;
+    a build with no craft-fonts output says so plainly."""
+    setup(s, FONTS_OK, "1.0")
+    prod = s.root / "prod"
+    moved = s.root / "elsewhere" / "wrap"
+    moved.mkdir(parents=True)
+    os.rename(prod / "target", moved / "target")
+    git(s.root / "elsewhere", "init", "-q")
+    (moved / "target" / "release" / "build").rename(s.root / "build-out")
+    s.config({"look.driver": str(s.work / "driver.py"), "look.production_binary": str(moved / "target" / "release" / "app"),
+              "look.port_binary": str(s.root / "port/target/debug/app"), "look.window": "100x50",
+              "look.installed_version": "1.0", "app.production": str(prod)})
+    r = s.run("look", "calibrate", env={"STUB_SCALE_UP": "2", "STUB_SCALE_PORT": "2"})
+    rev = report(s)["revision"]
+    check(rev["head"] and rev["tree"] == str(prod), f"revision from app.production: {rev}", r)
+    check("no craft-fonts build output; the app loads its fonts itself" in r.stdout, "plain fonts wording", r)
+    check("unknown" not in r.stdout.split("revision:")[0], "no 'unknown' fonts", r)

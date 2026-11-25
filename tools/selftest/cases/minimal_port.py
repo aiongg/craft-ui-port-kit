@@ -220,5 +220,21 @@ def case_minimal_mode(s):
               "--data", "result=pass")
     p = s.run("land/exit-gate.py", "app", sha2)
     check(p.returncode == 0 and "2 of 2 platforms passed" in p.stdout, "every platform passed: the app may land", p)
+    sha3 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    na = ["track", "event", "run", "linux: update dialog", "--data", "platform=linux", "--data", f"sha={sha3[:12]}",
+          "--data", "result=na"]
+    p = s.run(*na)
+    check(p.returncode != 0 and "reason" in p.stderr, "result=na without reason is rejected", p)
+    p = s.run(*na, "--data", "reason=webview paints black")
+    check(p.returncode != 0 and "covered" in p.stderr, "result=na without covered is rejected", p)
+    p = s.run(*na, "--data", "reason=webview paints black", "--data", "covered=macos run")
+    check(p.returncode == 0, "result=na with reason and covered is accepted", p)
+    s.run("track", "event", "run", "macos ok", "--data", "platform=macos", "--data", f"sha={sha3[:12]}", "--data", "result=pass")
+    p = s.run("land/exit-gate.py", "app", sha3)
+    check(p.returncode == 1 and "linux: no pass recorded" in p.stderr and "macos" not in p.stderr.split("not passed")[1],
+          "na alone does not satisfy a platform", p)
+    s.run("track", "event", "run", "linux other rows", "--data", "platform=linux", "--data", f"sha={sha3[:12]}", "--data", "result=pass")
+    p = s.run("land/exit-gate.py", "app", sha3)
+    check(p.returncode == 0, "na beside a pass does not block", p)
     p = s.run("land/exit-gate.py", "framework", sha)
     check(p.returncode == 0, "a framework fix lands with no run gate", p)

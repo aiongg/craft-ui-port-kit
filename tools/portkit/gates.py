@@ -625,8 +625,10 @@ def exit_failures(phase: int, ctx: GateContext) -> tuple[int, list[tuple[str, st
 def minimal_land_check(store, which: str, sha: str) -> tuple[bool, list[str]]:
     """The landing gate of a minimal port (work.mode = minimal): the app lands only after the run step passed for
     the commit it lands, on every platform of minimal.run_platforms. A platform passes when at least one `run` event
-    whose `sha` data names this commit (either may be the shorter prefix) has `result=pass` and none has another
-    result: every row may record its own event, and any failed row fails the platform. Framework fixes land
+    whose `sha` data names this commit (either may be the shorter prefix) has `result=pass` and none has a result
+    other than `pass` or `na`: every row may record its own event, and any failed row fails the platform. An `na`
+    event (a row that cannot run on that platform, with its reason and where it is covered) neither blocks nor
+    counts as a pass. Framework fixes land
     as their own PRs to the framework branch, with no gate here. Returns (ok, lines to print)."""
     if which == "framework":
         return True, ["run gate: a framework fix of a minimal port lands as its own PR; no run gate"]
@@ -643,7 +645,10 @@ def minimal_land_check(store, which: str, sha: str) -> tuple[bool, list[str]]:
         if not runs.get(p):
             fails.append(f"{p}: no run recorded for {sha[:12]}")
             continue
-        bad = [e for e in runs[p] if (e.get("data") or {}).get("result") != "pass"]
+        results = [(e.get("data") or {}).get("result") for e in runs[p]]
+        bad = [e for e in runs[p] if (e.get("data") or {}).get("result") not in ("pass", "na")]
+        if not bad and "pass" not in results:
+            fails.append(f"{p}: no pass recorded for {sha[:12]} (result na does not count as a pass)")
         for e in bad:
             fails.append(f"{p}: a run for {sha[:12]} ({e.get('t')}) has result "
                          f"{(e.get('data') or {}).get('result')!r}: {e.get('text', '')}")

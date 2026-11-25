@@ -284,7 +284,7 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | Key | Type | Default | Read by | Meaning |
 |---|---|---|---|---|
 | `rules` | path | `{kit}/rules/minimal-port.toml` | minimal-port | Rewrites and report patterns of the minimal port, labelled with the framework revision they were written for. Env: `PORT_KIT_MINIMAL_RULES`. |
-| `run_platforms` | list | `["linux", "macos"]` | land/exit-gate.py | Platforms the run step must pass on before a minimal port lands: each needs a `run` event with `result=pass` for the landed commit (process/minimal-port.md, step 7). Add `web` for an app with a web shell. Env: `PORT_KIT_MINIMAL_RUN_PLATFORMS`. |
+| `run_platforms` | list | `["linux", "macos"]` | land/exit-gate.py | Platforms the run step must pass on before a minimal port lands: each needs a `run` event with `result=pass` (`result=na` rows do not count) for the landed commit (process/minimal-port.md, step 7). Add `web` for an app with a web shell. Env: `PORT_KIT_MINIMAL_RUN_PLATFORMS`. |
 
 ### [land]
 

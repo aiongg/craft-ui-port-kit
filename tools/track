@@ -189,9 +189,15 @@ def cmd_event(a):
     T.check_kind(a.kind)
     if a.task:
         T.check_task(a.task)
+    data = data_pairs(a.data)
+    if a.kind == "run" and data.get("result") == "na":
+        for key in ("reason", "covered"):
+            if not str(data.get(key) or "").strip():
+                die(f"run result=na needs a non-empty --data {key}=...: the reason the row cannot run here, and the "
+                    "platform or run that covers it instead (process/minimal-port.md, step 7)")
     s = store(a)
     s.write([T.new_event(a.kind, task=a.task, text=" ".join(a.text), links=links_of(a.link),
-                         data=data_pairs(a.data) or None)])
+                         data=data or None)])
     print(f"event {a.kind}: {' '.join(a.text)}")
 
 

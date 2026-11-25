@@ -385,7 +385,7 @@ KEYS: list[Key] = [
     K("minimal.rules", "{kit}/rules/minimal-port.toml", "path", "minimal-port",
       "Rewrites and report patterns of the minimal port, labelled with the framework revision they were written for."),
     K("minimal.run_platforms", ["linux", "macos"], "list", "land/exit-gate.py",
-      "Platforms the run step must pass on before a minimal port lands: each needs a `run` event with `result=pass` "
+      "Platforms the run step must pass on before a minimal port lands: each needs a `run` event with `result=pass` (`result=na` rows do not count) "
       "for the landed commit (process/minimal-port.md, step 7). Add `web` for an app with a web shell.",
       default_doc='`["linux", "macos"]`'),
 

@@ -231,7 +231,13 @@ Record each platform's result for the commit that ran:
 tools/track event run "linux: checklist passed" --task mp-run --data platform=linux --data sha=<commit> --data result=pass
 ```
 
-Record one event per row or one per platform. A failed row is `result=fail`, with the row in the text. The landing gate ([step 8](#8-report-and-land)) folds every `run` event of the commit and platform: one failed row fails the platform, and a later pass does not undo it. It refuses the app until every platform of `minimal.run_platforms` has a pass and no fail for the commit it lands. The app's PR stays a draft until then.
+Record one event per row or one per platform. A failed row is `result=fail`, with the row in the text. A row that cannot be reached on a platform (a webview that paints black under Xvfb) is `result=na`, which needs `--data reason=<why it cannot run here>` and `--data covered=<where it is covered instead, for example "macos run">`; `track event` refuses `na` without both:
+
+```sh
+tools/track event run "linux: update dialog" --task mp-run --data platform=linux --data sha=<commit> --data result=na --data reason="the Tauri webview paints black under Xvfb" --data covered="macos run"
+```
+
+The landing gate ([step 8](#8-report-and-land)) folds every `run` event of the commit and platform: one failed row fails the platform, and a later pass does not undo it. An `na` row neither blocks nor counts as a pass. The gate refuses the app until every platform of `minimal.run_platforms` has at least one pass and no fail for the commit it lands; the platform named in `covered` must pass on its own results. The app's PR stays a draft until then.
 
 ## 8. Report and land
 
@@ -245,5 +251,5 @@ Record one event per row or one per platform. A failed row is `result=fail`, wit
 - [ ] The app compiles; the web shell passes the wasm check where there is one.
 - [ ] No test fails beyond the baseline, or each failure is named in the report with its framework fix.
 - [ ] Every framework fix the port needed is merged and in the pin, or recorded as a fallback with its PR.
-- [ ] The run passed on every platform of `minimal.run_platforms` for the commit that lands.
+- [ ] The run passed on every platform of `minimal.run_platforms` for the commit that lands (each row `pass`, or `na` with its reason and cover).
 - [ ] The report is complete; the landing scan is clean; the PR is open and marked ready.

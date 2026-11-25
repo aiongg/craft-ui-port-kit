@@ -47,7 +47,7 @@ Run `tools/track --help` for the summary. `--config PATH` before the command pic
 | `track answer QID "ANSWER" [--by NAME]` | The answer (default `--by lead`). The task stays `waiting` until its agent or the lead moves it. |
 | `track answer --file TSV [--by NAME]` | Every answer of a file of `qid<TAB>answer[<TAB>...]` lines, such as the rulings file of `prompts/p-rulings.md`. A header line starting `qid` and `#` lines are skipped. A row with an unknown question or no answer records nothing. |
 | `track round N --pass P --fail F [--log PATH] [--data KEY=VALUE]...` | A full test run's result. The page draws failing tests per round. |
-| `track event KIND TEXT [--task ID] [--link NAME=URL]... [--data KEY=VALUE]...` | A free event: `merge`, `landing`, `decision`, or any lowercase kind that is not a command name. |
+| `track event KIND TEXT [--task ID] [--link NAME=URL]... [--data KEY=VALUE]...` | A free event: `merge`, `landing`, `decision`, or any lowercase kind that is not a command name. A `run` event with `result=na` (a checklist row that cannot run on that platform) needs `--data reason=...` and `--data covered=...` and is refused without them; the landing gate reads it as neither pass nor fail ([process/minimal-port.md](../process/minimal-port.md), step 7). |
 | `track phase N [NOTE] [--batch B] [--area A] [--force REASON]` | The port's current phase, in the process/ numbering (0 Setup to 9 Land), after the exit checks of the phase it leaves ([The phase gate](#the-phase-gate)). `--batch` and `--area` name the build batch and area; phases 5 to 7 keep them until given anew. |
 
 ### For the lead and the developer

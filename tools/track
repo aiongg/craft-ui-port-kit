@@ -10,6 +10,7 @@ Agents (judgement):
   track answer QID "ANSWER" [--by NAME] | track answer --file TSV [--by NAME]
   track round N --pass P --fail F [--log PATH] [--data KEY=VALUE]...
   track event KIND TEXT [--task ID] [--link NAME=URL]... [--data KEY=VALUE]...
+  track correct EVENT_ID pass|fail|na --reason R [--covered C] [--task ID] [--data platform=P] [--data sha=S]
   track phase N [NOTE] [--batch B] [--area A] [--force REASON]
         runs the exit checks of the current phase first and refuses (exit 1) when one fails; --force records
         the move as a decision; --force on the current phase checks the exit of the phase before it again
@@ -199,6 +200,39 @@ def cmd_event(a):
     s.write([T.new_event(a.kind, task=a.task, text=" ".join(a.text), links=links_of(a.link),
                          data=data or None)])
     print(f"event {a.kind}: {' '.join(a.text)}")
+
+
+RUN_RESULTS = ("pass", "fail", "na")
+
+
+def cmd_correct(a):
+    """A `correct` event: the replacement result of a recorded `run` event, which stays in the history."""
+    if a.result not in RUN_RESULTS:
+        die(f"correct: result {a.result!r}: one of {', '.join(RUN_RESULTS)}")
+    if not (a.reason or "").strip():
+        die("correct: --reason is required: why the recorded result was wrong")
+    if a.result == "na" and not (a.covered or "").strip():
+        die("correct: result na needs --covered: the platform or run that covers the row instead")
+    s = store(a)
+    events, _, _ = s.read_events()
+    old = next((e for e in events if e.get("id") == a.event_id), None)
+    if old is None:
+        die(f"correct: no event {a.event_id!r} in the store")
+    if old.get("kind") != "run":
+        die(f"correct: event {a.event_id} is a {old.get('kind')!r} event; only `run` events can be corrected")
+    od = old.get("data") or {}
+    given = data_pairs(a.data)
+    if a.task and a.task != old.get("task"):
+        die(f"correct: task {a.task!r} differs from the corrected event's task {old.get('task')!r}")
+    for k in ("platform", "sha"):
+        if k in given and str(given[k]) != str(od.get(k)):
+            die(f"correct: {k} {given[k]!r} differs from the corrected event's {k} {od.get(k)!r}")
+    data = {"event": a.event_id, "result": a.result, "reason": a.reason.strip(),
+            "platform": od.get("platform"), "sha": od.get("sha")}
+    if a.covered:
+        data["covered"] = a.covered.strip()
+    s.write([T.new_event("correct", task=old.get("task"), text=a.reason.strip(), data=data)])
+    print(f"correct {a.event_id}: {od.get('result')} -> {a.result}: {a.reason.strip()}")
 
 
 EXIT_REFUSED = 1
@@ -603,6 +637,12 @@ def main(argv=None):
     c.add_argument("kind"); c.add_argument("text", nargs="+"); c.add_argument("--task")
     c.add_argument("--link", action="append", metavar="NAME=URL"); c.add_argument("--data", action="append", metavar="KEY=VALUE")
     c.set_defaults(fn=cmd_event)
+
+    c = sub.add_parser("correct", help="replace the result of a recorded run event")
+    c.add_argument("event_id"); c.add_argument("result", choices=RUN_RESULTS)
+    c.add_argument("--reason", required=True); c.add_argument("--covered"); c.add_argument("--task")
+    c.add_argument("--data", action="append", metavar="KEY=VALUE")
+    c.set_defaults(fn=cmd_correct)
 
     c = sub.add_parser("phase", help="set the port's phase, after the exit checks of the phase it leaves")
     c.add_argument("n", type=int); c.add_argument("note", nargs="*")

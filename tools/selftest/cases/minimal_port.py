@@ -236,5 +236,64 @@ def case_minimal_mode(s):
     s.run("track", "event", "run", "linux other rows", "--data", "platform=linux", "--data", f"sha={sha3[:12]}", "--data", "result=pass")
     p = s.run("land/exit-gate.py", "app", sha3)
     check(p.returncode == 0, "na beside a pass does not block", p)
+    # rows, replacement and corrections
+    sha4 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    def run_ev(plat, text, result, row=None, sha_=sha4):
+        args = ["track", "event", "run", text, "--data", f"platform={plat}", "--data", f"sha={sha_[:12]}", "--data", f"result={result}"]
+        if row:
+            args += ["--data", f"row={row}"]
+        s.run(*args)
+    run_ev("linux", "r1 bad", "fail", "r1")
+    run_ev("linux", "r2 ok", "pass", "r2")
+    run_ev("macos", "r1 ok", "pass", "r1")
+    p = s.run("land/exit-gate.py", "app", sha4)
+    check(p.returncode == 1 and "linux: a run" in p.stderr and "macos: a run" not in p.stderr, "a failed row blocks its platform only", p)
+    run_ev("macos", "r1 other commit ok", "pass", "r1", sha_=sha3)
+    run_ev("linux", "r3 other row ok", "pass", "r3")
+    p = s.run("land/exit-gate.py", "app", sha4)
+    check(p.returncode == 1, "no replacement across rows or commits", p)
+    run_ev("macos", "r1 rerun ok", "pass", "r1")
+    run_ev("linux", "r1 rerun ok", "pass", "r1")
+    p = s.run("land/exit-gate.py", "app", sha4)
+    check(p.returncode == 0 and "replaces" in p.stdout and "'fail' -> 'pass'" in p.stdout, "a later result on the same row replaces the earlier and is printed", p)
+    # id-less events are unchanged: a pass after a fail does not clear it (above); corrections
+    sha5 = "cccccccccccccccccccccccccccccccccccccccc"
+    run_ev("linux", "idless bad", "fail", sha_=sha5)
+    run_ev("macos", "idless ok", "pass", sha_=sha5)
+    run_ev("linux", "idless ok", "pass", sha_=sha5)
+    p = s.run("land/exit-gate.py", "app", sha5)
+    check(p.returncode == 1, "an id-less fail keeps blocking", p)
+    evfile = next(iter(s.work.rglob("events.jsonl")), None)
+    def events():
+        return [json.loads(l) for l in evfile.read_text().splitlines()] if evfile else []
+    ev = events()
+    bad = next((e for e in ev if e.get("text") == "idless bad"), None)
+    check(bad is not None, "the fail event is readable from the store", None)
+    if bad:
+        p = s.run("track", "correct", "nonesuch", "pass", "--reason", "x")
+        check(p.returncode != 0 and "no event" in p.stderr, "a correction of an unknown id is rejected", p)
+        okev = next(e for e in ev if e.get("text") == "idless ok")
+        s.run("track", "event", "decision", "not a run")
+        dec = events()[-1]
+        p = s.run("track", "correct", dec["id"], "pass", "--reason", "x")
+        check(p.returncode != 0 and "only `run` events" in p.stderr, "a correction of a non-run event is rejected", p)
+        p = s.run("track", "correct", bad["id"], "pass")
+        check(p.returncode != 0, "a correction without a reason is rejected", p)
+        p = s.run("track", "correct", bad["id"], "na", "--reason", "unreachable")
+        check(p.returncode != 0 and "covered" in p.stderr, "a correction to na without covered is rejected", p)
+        p = s.run("track", "correct", bad["id"], "pass", "--reason", "x", "--data", "platform=macos")
+        check(p.returncode != 0 and "platform" in p.stderr, "a correction naming another platform is rejected", p)
+        p = s.run("track", "correct", bad["id"], "pass", "--reason", "x", "--data", f"sha={sha4[:12]}")
+        check(p.returncode != 0 and "sha" in p.stderr, "a correction naming another commit is rejected", p)
+        p = s.run("track", "correct", bad["id"], "pass", "--reason", "x", "--task", "other")
+        check(p.returncode != 0 and "task" in p.stderr, "a correction naming another task is rejected", p)
+        p = s.run("track", "correct", bad["id"], "pass", "--reason", "recorded wrongly")
+        check(p.returncode == 0, "a correction is accepted", p)
+        p = s.run("land/exit-gate.py", "app", sha5)
+        check(p.returncode == 0 and "correction" in p.stdout and "'fail' -> 'pass'" in p.stdout and "recorded wrongly" in p.stdout,
+              "the corrected fail no longer blocks and the gate prints the correction", p)
+        s.run("track", "correct", bad["id"], "fail", "--reason", "second look")
+        p = s.run("land/exit-gate.py", "app", sha5)
+        check(p.returncode == 1, "the later correction of the same event counts", p)
     p = s.run("land/exit-gate.py", "framework", sha)
     check(p.returncode == 0, "a framework fix lands with no run gate", p)

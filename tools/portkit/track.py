@@ -57,7 +57,7 @@ STATES = ("todo", "running", "review", "waiting", "blocked", "failed", "done")
 STEPS = ("plan", "write", "compile", "test", "fix", "merge")
 ASK_FOR = ("developer", "lead")
 # Kinds the fold gives a meaning; `track event` and track.event() take any other lowercase kind.
-RESERVED = ("status", "step", "task", "ask", "answer", "round", "phase", "pause", "resume", "head")
+RESERVED = ("status", "step", "task", "ask", "answer", "round", "phase", "pause", "resume", "head", "correct")
 KIND_RE = re.compile(r"[a-z][a-z0-9-]{0,39}")
 TASK_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,79}")
 PHASES = {0: "Setup", 1: "Inventory and map", 2: "Plan", 3: "Contract stubs", 4: "Plan check and decisions",

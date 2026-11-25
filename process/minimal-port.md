@@ -231,19 +231,20 @@ Record each platform's result for the commit that ran:
 tools/track event run "linux: checklist passed" --task mp-run --data platform=linux --data sha=<commit> --data result=pass
 ```
 
-Record one event per row or one per platform. A failed row is `result=fail`, with the row in the text. A row that cannot be reached on a platform (a webview that paints black under Xvfb) is `result=na`, which needs `--data reason=<why it cannot run here>` and `--data covered=<where it is covered instead, for example "macos run">`; `track event` refuses `na` without both:
+Record one event per row or one per platform. Pass `--data row=<id>` for every checklist row (a short stable id such as `dialogs-update`), so a rerun of the row replaces its earlier result. A failed row is `result=fail`, with the row in the text. A row that cannot be reached on a platform (a webview that paints black under Xvfb) is `result=na`, which needs `--data reason=<why it cannot run here>` and `--data covered=<where it is covered instead, for example "macos run">`; `track event` refuses `na` without both:
 
 ```sh
-tools/track event run "linux: update dialog" --task mp-run --data platform=linux --data sha=<commit> --data result=na --data reason="the Tauri webview paints black under Xvfb" --data covered="macos run"
+tools/track event run "linux: update dialog" --task mp-run --data platform=linux --data sha=<commit> --data row=dialogs-update --data result=na --data reason="the Tauri webview paints black under Xvfb" --data covered="macos run"
 ```
 
-The landing gate ([step 8](#8-report-and-land)) folds every `run` event of the commit and platform: one failed row fails the platform, and a later pass does not undo it. An `na` row neither blocks nor counts as a pass. The gate refuses the app until every platform of `minimal.run_platforms` has at least one pass and no fail for the commit it lands; the platform named in `covered` must pass on its own results. The app's PR stays a draft until then.
+The landing gate ([step 8](#8-report-and-land)) folds every `run` event of the commit and platform. A later event with the same row id, platform and commit replaces the earlier one (rerun the row and record its new result with the same `row=`). Events without a row id all count: one failed row fails the platform, and a later pass does not undo it. An `na` row neither blocks nor counts as a pass. The gate refuses the app until every platform of `minimal.run_platforms` has at least one pass and no fail for the commit it lands; the platform named in `covered` must pass on its own results. The app's PR stays a draft until then.
 
 ## 8. Report and land
 
 1. **Report.** The writers fill `templates/minimal-port-report.md` and the lead completes it: size (files and lines, with and without tests), per item what changed, behaviour differences, deleted tests with reasons, the framework findings table (fix PR or fallback), the run results with screenshots, and the PR text.
-2. **Land.** `tools/land/land-app.sh <app tree> <port branch> <plan.base>`. It runs the run gate (`land/exit-gate.py`), scans and scrubs the range, checks the pin, and runs `cl check all` in a clean clone. It prints the push command and never pushes. The developer pushes and opens one PR per app, pinning `next` by rev. The PR text lists the visible differences and links the framework PRs; it carries no AI attribution.
-3. **Order with the framework.** craft-libs `next` merges into main only after every app that had a minimal port has passed its run step.
+2. **Correct a wrong record.** A result recorded wrongly (for example a row recorded as `fail` before `na` existed) is replaced with `tools/track correct <event id> pass|fail|na --reason "<why it was wrong>" [--covered "<where covered>"]`. `--covered` is required for `na`. The correction names the run event, so its task, platform and commit are those of that event; the old event stays in the history. The latest correction of an event counts. The landing gate prints every replacement and correction it applied (event id, old result, new result, reason). A row that was rerun is not a correction: record the new result on the same `row=` id.
+3. **Land.** `tools/land/land-app.sh <app tree> <port branch> <plan.base>`. It runs the run gate (`land/exit-gate.py`), scans and scrubs the range, checks the pin, and runs `cl check all` in a clean clone. It prints the push command and never pushes. The developer pushes and opens one PR per app, pinning `next` by rev. The PR text lists the visible differences and links the framework PRs; it carries no AI attribution.
+4. **Order with the framework.** craft-libs `next` merges into main only after every app that had a minimal port has passed its run step.
 
 ## Exit
 

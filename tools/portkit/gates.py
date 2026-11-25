@@ -628,7 +628,9 @@ def minimal_land_check(store, which: str, sha: str) -> tuple[bool, list[str]]:
     whose `sha` data names this commit (either may be the shorter prefix) has `result=pass` and none has a result
     other than `pass` or `na`: every row may record its own event, and any failed row fails the platform. An `na`
     event (a row that cannot run on that platform, with its reason and where it is covered) neither blocks nor
-    counts as a pass. Framework fixes land
+    counts as a pass. A run event may carry a `row` id: a later event on the same platform, commit and row
+    replaces the earlier one. A `correct` event replaces the result of the run event it names. The gate prints each
+    replacement and correction it applied. Framework fixes land
     as their own PRs to the framework branch, with no gate here. Returns (ok, lines to print)."""
     if which == "framework":
         return True, ["run gate: a framework fix of a minimal port lands as its own PR; no run gate"]
@@ -640,22 +642,61 @@ def minimal_land_check(store, which: str, sha: str) -> tuple[bool, list[str]]:
         run_sha = str(d.get("sha") or "")
         if e.get("kind") == "run" and len(run_sha) >= 7 and (sha.startswith(run_sha) or run_sha.startswith(sha)):
             runs.setdefault(str(d.get("platform")), []).append(e)
+    # The latest `correct` event of a run event replaces its result; a correction whose platform or sha differs
+    # from the event's is ignored.
+    notes: list[str] = []
+    corr: dict[str, dict] = {}
+    for c in events:
+        cd = c.get("data") or {}
+        if c.get("kind") == "correct":
+            corr[str(cd.get("event"))] = c
+    result: dict[str, object] = {}
+    for plat, evs in runs.items():
+        for e in evs:
+            d = e.get("data") or {}
+            result[e["id"]] = d.get("result")
+            c = corr.get(e.get("id"))
+            cd = (c or {}).get("data") or {}
+            if c and str(cd.get("platform")) == str(d.get("platform")) and str(cd.get("sha")) == str(d.get("sha")) \
+                    and cd.get("result") in ("pass", "fail", "na"):
+                result[e["id"]] = cd["result"]
+                notes.append(f"  correction {c.get('id')} of run event {e['id']} ({d.get('platform')}): "
+                             f"{d.get('result')!r} -> {cd['result']!r}: {cd.get('reason')}")
+    # A later run event on the same platform and row replaces the earlier ones; events without a row id all count.
+    for plat, evs in list(runs.items()):
+        last: dict[str, dict] = {}
+        keep = []
+        for e in evs:
+            row = (e.get("data") or {}).get("row")
+            if row is None or str(row) == "":
+                keep.append(e)
+                continue
+            old = last.get(str(row))
+            if old is not None:
+                keep.remove(old)
+                notes.append(f"  run event {e['id']} ({plat}, row {row}) replaces {old['id']}: "
+                             f"{result[old['id']]!r} -> {result[e['id']]!r}")
+            last[str(row)] = e
+            keep.append(e)
+        runs[plat] = keep
     fails = []
     for p in want:
         if not runs.get(p):
             fails.append(f"{p}: no run recorded for {sha[:12]}")
             continue
-        results = [(e.get("data") or {}).get("result") for e in runs[p]]
-        bad = [e for e in runs[p] if (e.get("data") or {}).get("result") not in ("pass", "na")]
+        results = [result[e["id"]] for e in runs[p]]
+        bad = [e for e in runs[p] if result[e["id"]] not in ("pass", "na")]
         if not bad and "pass" not in results:
             fails.append(f"{p}: no pass recorded for {sha[:12]} (result na does not count as a pass)")
         for e in bad:
             fails.append(f"{p}: a run for {sha[:12]} ({e.get('t')}) has result "
-                         f"{(e.get('data') or {}).get('result')!r}: {e.get('text', '')}")
+                         f"{result[e['id']]!r}: {e.get('text', '')}")
+    if notes:
+        notes.insert(0, "run gate: replacements and corrections applied:")
     if not fails:
-        return True, [f"run gate: {len(want)} of {len(want)} platforms passed the run of {sha[:12]}"]
+        return True, [f"run gate: {len(want)} of {len(want)} platforms passed the run of {sha[:12]}"] + notes
     return False, [f"run gate: {len(fails)} of {len(want)} platforms not passed (process/minimal-port.md, step 7):"] + \
-        [f"  - {f}" for f in fails]
+        [f"  - {f}" for f in fails] + notes
 
 
 def land_check(store, which: str, sha: str, group: str) -> tuple[bool, list[str]]:

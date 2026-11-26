@@ -108,6 +108,10 @@ A headless agent's shell denies what its allow list does not name, and each deni
 - Do not regenerate generated docs (component indexes, API listings) unless your prompt says so. The lead does that once.
 - Commit messages and code carry no attribution lines and nothing that names your machine, your accounts or personal data.
 
+## Before your final reply
+
+Stop every background command you started, or wait for it with a bounded wait, before you give your final reply. A command still running after the reply is lost work and holds the machine.
+
 ## Report
 
 Write your report where your prompt says (its template is `templates/task-report.md` unless your prompt gives another), and give the same content as your final reply:

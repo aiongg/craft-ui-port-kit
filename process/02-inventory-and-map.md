@@ -72,7 +72,7 @@ Edit `areas.json` where you disagree. Then write each area into `port.toml` as a
 
 ## Step 4: check the framework listing
 
-The area-map agents learn what the framework has from the framework snapshot: `docs/components-index.md` (every component with its shape and purpose), `docs/porting.md` and `docs/craft-framework.md`. Check that `components-index.md` at `plan.base` is current: it is generated from the registered components (`cargo run -p craft-ui-gallery --bin components-index`), and the framework commits it with each change. If it is behind, regenerate it in the framework integration tree through cl and tell the mappers where the fresh copy is.
+The area-map agents learn what the framework has from the framework snapshot: `docs/components-index.md` (every component with its shape and purpose), `docs/porting.md` and `docs/craft-framework.md`, and from `<work.inventory>/framework-ui-types.md`, which `render-prompt --stage maps` writes: every public item in a `src/ui` module of every framework crate, so the family crates' UI that the index leaves out is weighed before a gap is named. Check that `components-index.md` at `plan.base` is current: it is generated from the registered components (`cargo run -p craft-ui-gallery --bin components-index`), and the framework commits it with each change. If it is behind, regenerate it in the framework integration tree through cl and tell the mappers where the fresh copy is.
 
 ## Step 5: run the maps
 

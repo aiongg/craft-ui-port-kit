@@ -118,20 +118,53 @@ def case_verdict_guard_restores_rows(s):
     check("verdicts:" not in r.stderr, "a second rebuild finds nothing to restore", r)
 
 
-def case_one_confirming_evaluation(s):
-    p = plan(s)
-    s.config({"app.snapshot": str(s.root / "snap")})
+def reconcile_config(s, fw_files=None):
+    """Both repos at the plan base (the readers audit reads them) and the two fixture areas."""
+    s.tree("fw", fw_files or {"crates/ui/src/chrome.rs": "pub fn draw_title_bar() {}\n"})
+    s.tree("app", {"src/window.rs": "fn opens() {}\n"})
+    s.config({"app.snapshot": str(s.root / "snap"), "framework.snapshot": str(s.root / "snap-fw"),
+              "plan.base": "main", "plan.app_base": "main"})
     with open(s.root / "port.toml", "a") as f:
         f.write('[[areas]]\nid = "shell"\ncode = "sh"\n[[areas]]\nid = "dock"\ncode = "dk"\n')
-    r = s.run("render-prompt", "--workflow-args", "phase2-reconcile", "--stage", "evaluate")
-    check(r.returncode == 1 and "waits until the rebuild is clean" in r.stderr and "path in two sheets" in r.stderr,
-          "a rebuild with findings refuses the confirming evaluation", r)
+
+
+def clean_rebuild(s, p):
     for f in ("shell-w1", "shell-w2"):
         sh = p / "sheets" / f"{f}.md"
         sh.write_text(sh.read_text().replace("| `crates/ui/src/chrome.rs` (fw) | edit | 5 | 0 | Also edits the chrome. |\n", "")
                       .replace(", sh.C9", ""))
     (s.root / "snap" / "src").mkdir(parents=True)
     (s.root / "snap" / "src" / "window.rs").write_text("fn opens() {}\n")
+
+
+def case_readers_audit_in_reconcile(s):
+    p = plan(s)
+    reconcile_config(s, {"crates/ui/src/chrome.rs": "pub fn draw_title_bar() {}\n",
+                         "crates/ui/src/other.rs": "fn x() {\n    draw_title_bar();\n}\n"})
+    clean_rebuild(s, p)
+    sh = p / "sheets" / "shell-w1.md"
+    sh.write_text(sh.read_text() + "\n## Replaced mechanisms and their readers\n\n| Mechanism (removed or changed) | "
+                  "Reader (path:line at the base) | Owner set | What the reader does instead |\n|---|---|---|---|\n"
+                  "| `draw_title_bar` | `crates/ui/src/chrome.rs:1` | shell-w1 | Calls sh.C1. |\n")
+    r = s.run("render-prompt", "--workflow-args", "phase2-reconcile", "--stage", "sheets")
+    check(r.returncode == 0, "stage sheets renders", r)
+    w1 = inbox(p, "shell-w1")
+    check("audit readers" in w1 and "crates/ui/src/other.rs" in w1 and "draw_title_bar" in w1,
+          f"the reader the sheet misses reaches its inbox: {w1}", r)
+    r = s.run("render-prompt", "--workflow-args", "phase2-reconcile", "--stage", "evaluate")
+    check(r.returncode == 1 and "readers audit reports 0" in r.stderr, "a readers finding refuses the confirming evaluation", r)
+    sh.write_text(sh.read_text().replace("`crates/ui/src/chrome.rs:1` |", "`crates/ui/src/chrome.rs:1`, `crates/ui/src/other.rs:2` |"))
+    r = s.run("render-prompt", "--workflow-args", "phase2-reconcile", "--stage", "evaluate")
+    check(r.returncode == 0, "with the reader named, the confirming evaluation runs", r)
+
+
+def case_one_confirming_evaluation(s):
+    p = plan(s)
+    reconcile_config(s)
+    r = s.run("render-prompt", "--workflow-args", "phase2-reconcile", "--stage", "evaluate")
+    check(r.returncode == 1 and "waits until the rebuild is clean" in r.stderr and "path in two sheets" in r.stderr,
+          "a rebuild with findings refuses the confirming evaluation", r)
+    clean_rebuild(s, p)
     r = s.run("render-prompt", "--workflow-args", "phase2-reconcile", "--stage", "evaluate")
     check(r.returncode == 0, "a clean rebuild allows it", r)
     args = json.loads(r.stdout)

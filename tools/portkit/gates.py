@@ -370,6 +370,11 @@ def x_audit(ctx):
     return None if rc == 0 else f"port-set audit exit {rc}: {last}"
 
 
+def x_readers_at_plan(ctx):
+    rc, last = ctx.tool("port-set", "audit", "--only", "readers", "--at", "plan")
+    return None if rc == 0 else f"port-set audit --only readers --at plan exit {rc}: {last}"
+
+
 def x_written_checked(ctx):
     sets = sorted({e["task"] for e in ctx.events if e.get("task") and e.get("kind") in ("port-set-run", "port-set-agent")})
     if not sets:
@@ -610,6 +615,7 @@ PHASE_EXITS: list[ExitCheck] = [
     ExitCheck(1, "Production reaches every state", x_look_production),
     ExitCheck(2, "tools/coverage.py reports 0 gaps", x_coverage),
     ExitCheck(2, "The last tools/plan-rebuild.py run reports no check finding and no coverage gap", _ok_since("plan-rebuild")),
+    ExitCheck(2, "The readers audit at the plan base reports 0", x_readers_at_plan),
     ExitCheck(2, "Every area has its confirming evaluation and the pooled rate is recorded", x_confirmed),
     ExitCheck(2, "Every set is on the board", x_sheets_on_board),
     ExitCheck(2, "sizing.md exists", x_sizing),

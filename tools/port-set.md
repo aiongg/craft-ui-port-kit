@@ -46,7 +46,7 @@ Options before the command: `--config PATH` (a port.toml; default `PORT_KIT_CONF
 | `fix SET FINDINGS.md` | One call that fixes review findings on the written set | 1 | edits, `apply.md`, `check.md`, a commit |
 | `usage [SET]` | Prints the usage log | 0 | - |
 | `validate [--sheets DIR] [--parts DIR]` | Parses every sheet; reports what the writing commands cannot place | 0 | - |
-| `audit [SET...] [--only CHECK,...]` | Token-free plan checks; four of them gate writing | 0 | `<work.dir>/audit/` |
+| `audit [SET...] [--only CHECK,...] [--at plan]` | Token-free plan checks; four of them gate writing | 0 | `<work.dir>/audit/` |
 | `remap [--dry-run]` | Moves framework line references in sheets and contract parts to the writing base | 0 | sheets, parts, `plan.linebase` |
 | `collect` | Open DECIDE items by area, and `owners.tsv` | 0 | `<work.decide>/<area>.md`, `owners.tsv` |
 | `status [SET...]` | Each set's stage from its set dir, beside its dashboard task | 0 | dashboard (with `--post`) |
@@ -280,7 +280,7 @@ Warnings: a head key of the template (`Contract items it writes`, `Contract item
 
 ### audit [SET...] [--only CHECK,...]
 
-Token-free plan checks over every sheet, the contract parts, the `decisions.md` files and both repos at their writing bases (read from the base checkouts when they exist, else from the integration repos with `git show`). No model call, no worktree. With SETs it audits only those sets; `markers` and `waves` always read every sheet. `--only` runs the named checks.
+Token-free plan checks over every sheet, the contract parts, the `decisions.md` files and both repos at their writing bases (read from the base checkouts when they exist, else from the integration repos with `git show`). No model call, no worktree. With SETs it audits only those sets; `markers` and `waves` always read every sheet. `--only` runs the named checks. `--at plan` reads both repos at `plan.base` and `plan.app_base` instead, from the snapshots: phase 2 runs `--only readers --at plan` before the confirming evaluation, before any writing base exists ([process/03-plan.md](../process/03-plan.md), step 6). The readers check also writes `readers.json`, the same findings by set, which the phase 2 collation puts into the sheets' inboxes.
 
 Each check writes `<work.dir>/audit/<check>.md`, which opens with how it decides; `README.md` is the summary. The four gating checks must report 0 before writing starts ([process/05-plancheck-decide.md](../process/05-plancheck-decide.md), step 8). Run it again before an app batch, after the framework writing base moves ([process/07-review-combine-compile.md](../process/07-review-combine-compile.md)).
 

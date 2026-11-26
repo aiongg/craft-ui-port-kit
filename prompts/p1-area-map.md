@@ -14,6 +14,7 @@ Read only. Edit no code, run no build, run no git command that writes. Your only
 - Your area's inventory: the chunks and entry moves listed under "Your area" at the end of this prompt, from `{{INVENTORY}}/chunk-*.json`. Entry ids are `<chunk>.<index>` (index from 0).
 - What the framework has:
   - `{{FW}}/docs/components-index.md`: every component, with its shape and purpose;
+  - `{{INVENTORY}}/framework-ui-types.md`: every public item in a `src/ui` module of every framework crate, with its file and line. The index covers the shared component crates; this list also holds the family crates' UI (panels, property fields, rows);
   - `{{FW}}/docs/porting.md`, sections "Map" and "Reuse before adding": the map fields and the reuse ladder;
   - `{{FW}}/docs/craft-framework.md` sections 1-4, and the component's own source and stories when you cite it.
 - The rules every port follows: `{{RULES}}/porting-rules.md` and `{{RULES}}/framework-decisions.md`. The testing rule: `{{RULES}}/testing-rule.md`.
@@ -29,7 +30,7 @@ Read only. Edit no code, run no build, run no git command that writes. Your only
    - **App code**: files and line ranges, with the functions that matter.
    - **Framework**: the component or components that replace it, each with fw path:line. Walk the reuse ladder in porting.md and stop at the first step that works.
    - **Fit**: `direct` (use as is), `needs props` (list them), `missing component` (describe it), `app-only` (stays app code, built from framework components).
-   - **Gaps**: framework changes the section needs. Give each an area-local id (`FG-n`) and list them all again at the end of the map. Before naming a gap, grep the framework for the concept, not only the name: a gap that duplicates an existing mechanism is wrong.
+   - **Gaps**: framework changes the section needs. Give each an area-local id (`FG-n`) and list them all again at the end of the map. Before naming a gap, search `framework-ui-types.md` and grep the framework for the concept, not only the name: a gap that duplicates an existing mechanism, in a shared or a family crate, is wrong.
    - **App glue**: what the app still does (commands it sends, state it owns, settings it saves), and what app code is deleted.
    - **Tests**: per test file, `(n)` its `#[test]` count, then verdicts: `delete` (the framework now owns the behaviour, or the code goes), `table` (event-to-command mapping, folded into a few table-driven tests per event family), `keep` (the app's own decisions: command ids, engine effects, saved settings), `new`. One-line reason each, under the testing rule.
    - **States**: the states that show old and new match (default, empty, filled, open, disabled, error, long text), each with the control-channel steps that reach it. Where no control call reaches a state, name the missing hook (`CH-n`) and list it at the end. Every section has this field: write `none` and the reason only for a part with nothing to show (infrastructure, a model with no surface).

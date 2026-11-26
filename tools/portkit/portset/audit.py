@@ -16,6 +16,7 @@ summary) and markers.tsv. tools/port-set.md describes each report.
 """
 from __future__ import annotations
 
+import json
 import re
 import time
 from pathlib import Path
@@ -995,6 +996,7 @@ def fmt_names(res, n, sheets) -> str:
 
 def cmd_audit(a) -> Outcome:
     t0 = time.time()
+    ctx.at_plan = a.at == "plan"
     every = all_sheets()
     known = {s.id for s in every}
     for x in a.sets:
@@ -1029,6 +1031,11 @@ def cmd_audit(a) -> Outcome:
         res, n, skipped, exact = audit_readers(sheets, every, T, owners)
         emit("readers", fmt_readers(res, skipped, sheets, exact), n, f"files missed in {len(res)} sheets"
              + ("" if exact else " (text hits: no SCIP index)"))
+        (out_dir / "readers.json").write_text(json.dumps({
+            sid: {"files": [{"path": f"{repo}:{p}", "idents": e["idents"], "owner": list(e["owner"])}
+                            for (repo, p), e in sorted(pf.items())],
+                  "wide": {k: list(v) for k, v in wide.items()}}
+            for sid, (pf, wide) in res.items()}, indent=1) + "\n")
     if "line-refs" in only:
         lr, n = audit_linerefs(sheets, T)
         emit("line-refs", fmt_linerefs(lr, n, sheets), n, f"stale refs in {len(lr)} sheets")
@@ -1069,4 +1076,7 @@ def register(sub) -> None:
     s = sub.add_parser("audit", help="token-free plan checks over the sheets, decisions and both trees (<work.dir>/audit/)")
     s.add_argument("sets", nargs="*", metavar="SET", help="audit only these sets (markers and waves always read all)")
     s.add_argument("--only", metavar="CHECK,...", help=f"run only these checks: {', '.join(GATING + ADVISORY)}")
+    s.add_argument("--at", choices=("writing", "plan"), default="writing",
+                   help="the code the sheets are checked against: the writing bases (default), or plan.base and "
+                        "plan.app_base with the snapshots (phase 2, before the writing bases exist)")
     s.set_defaults(func=cmd_audit, owns_state=False, fail_exit=True)

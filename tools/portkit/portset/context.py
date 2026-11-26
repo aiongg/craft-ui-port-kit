@@ -37,6 +37,7 @@ class Ctx:
     """Config-derived values. `ctx.load(cfg)` runs once in tools/port-set; modules read `ctx.<name>`."""
 
     cfg: config.Config | None = None
+    at_plan = False   # `audit --at plan`: the repos at the plan's commits and the snapshots, before any writing base
 
     def load(self, cfg: config.Config) -> None:
         self.__dict__.clear()
@@ -83,11 +84,16 @@ class Ctx:
         return self.cfg.path("framework.integration" if repo == "fw" else "app.integration")
 
     def base(self, repo: str) -> str:
-        """The writing base branch of a repo: every set tree starts there."""
+        """The writing base branch of a repo: every set tree starts there (the plan's commit under at_plan)."""
+        if self.at_plan:
+            return self.cfg.require("plan.base" if repo == "fw" else "plan.app_base")
         return self.cfg.require("framework.writing_base" if repo == "fw" else "app.writing_base")
 
     def ref_tree(self, repo: str) -> Path:
-        """The read-only checkout of a repo at its writing base (the racheck daemon's root)."""
+        """The read-only checkout of a repo at its writing base (the racheck daemon's root; the snapshot under
+        at_plan)."""
+        if self.at_plan:
+            return self.cfg.path("framework.snapshot" if repo == "fw" else "app.snapshot")
         return self.cfg.path("racheck.fw_base" if repo == "fw" else "racheck.app_base")
 
     @cached_property

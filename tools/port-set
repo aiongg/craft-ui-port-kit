@@ -14,8 +14,10 @@ Subcommands (SET is a set id such as panels-w1; its sheet is <work.sheets>/SET.m
   fix SET FINDINGS.md         one call that fixes review findings on the written set
   usage [SET]                 print the usage log (every model call's tokens and cost)
   validate [--sheets DIR]     parse every sheet and report what the writing commands cannot place
-  audit [SET...] [--only C]   token-free plan checks: stubs, stories, decision files, readers (these four gate
-                              writing), line refs, tests, markers, waves, sizes, names (<work.dir>/audit/)
+  audit [SET...] [--only C] [--at plan]
+                              token-free plan checks: stubs, stories, decision files, readers (these four gate
+                              writing), line refs, tests, markers, waves, sizes, names (<work.dir>/audit/); --at plan
+                              checks against plan.base, plan.app_base and the snapshots (phase 2)
   remap [--dry-run]           move framework line refs in sheets and contract parts from plan.linebase to the
                               framework writing base
   collect                     open DECIDE items by area (<work.decide>/<area>.md) and owners.tsv

@@ -202,6 +202,30 @@ class Collation:
                              f"{it['kind']}: {it['what']} (evidence: {it['evidence']})")
         return n
 
+    def readers(self) -> int:
+        """Each file the readers audit (`port-set audit --only readers --at plan`, <work.dir>/audit/readers.json)
+        found reading a replaced mechanism outside a sheet goes to that sheet's inbox."""
+        f = self.cfg.path("work.dir") / "audit" / "readers.json"
+        try:
+            data = json.loads(f.read_text())
+        except (OSError, ValueError):
+            return 0
+        n = 0
+        for sid, r in sorted(data.items()):
+            if sid not in self.sheets:
+                continue
+            for e in r.get("files", []):
+                ids = "; ".join(f"`{k}` :{','.join(map(str, v))}" for k, v in sorted(e.get("idents", {}).items()))
+                own = ", ".join(e.get("owner") or []) or "no set"
+                self.inbox[sid].append(("audit readers", e["path"], f"reader the sheet misses: uses {ids} (owner: "
+                                        f"{own}); add it to Replaced mechanisms and Files, or request it from the owner"))
+                n += 1
+            for name, (hits, total) in sorted(r.get("wide", {}).items()):
+                self.inbox[sid].append(("audit readers", "", f"`{name}` is read in {hits} of {total} files the sheet "
+                                        "does not name: give a rule for its readers, not a list"))
+                n += 1
+        return n
+
     def routes(self) -> None:
         by_path: dict[str, list] = defaultdict(list)
         for row in self.route_rows:
@@ -253,7 +277,8 @@ def collate(cfg: config.Config) -> dict:
         raise FileNotFoundError(f"{c.fix} has no requests/ or logs/: run phase2-fix first")
     if not (cfg.path("work.plan") / VERDICTS).is_file():
         save_verdicts(cfg, c.sheets)
-    counts = {"requests": c.requests(), "contract_logs": c.contract_logs(), "must_fix": c.must_fix()}
+    counts = {"requests": c.requests(), "contract_logs": c.contract_logs(), "must_fix": c.must_fix(),
+              "readers": c.readers()}
     c.routes()
     out = c.write()
     out["counts"] = counts

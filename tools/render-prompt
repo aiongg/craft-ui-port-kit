@@ -28,6 +28,9 @@ Workflow args
     phase1-inventory-map  stage inventory: chunks (the chunk split of process/02 step 1) and chunkSchema;
                           stage areas: chunks and inventoryList (from the chunk files on disk);
                           stages maps and index: areas joined with <inventory>/areas.json (their chunks) and moves.
+                          Stage maps also writes <inventory>/framework-ui-types.md, the area mappers' list of every
+                          public item at the top level of a `src/ui` module in every framework crate at plan.base
+                          (from framework.snapshot), with file and line.
     phase2-part           chunks: each area map cut at section boundaries into plan chunks of about
                           plan.chunk_map_lines lines, with the map's preamble; also written to <plan>/chunks.json,
                           which the phase 2 prompts read.
@@ -43,12 +46,15 @@ Workflow args
                           <plan>/eval-coverage.md ({id, scope}); classes: the error classes of every
                           <plan>/eval-<area>.json ({area, name, kind, count, pattern, find}); fixDir: <plan>/fix.
     phase2-reconcile      --stage contract, sheets or evaluate (required). Every stage: partList (the NN.md files of
-                          <parts>, with their crates) and fixDir. Stages contract and sheets first run the collation
-                          of tools/plan-collate.py and pass its summary as collated (groups, routes, parts); stage
-                          evaluate first runs the rebuild of tools/plan-rebuild.py and passes its summary as rebuild,
-                          with evalSchema and round 2, the confirming evaluation. It refuses while the rebuild reports
-                          a check finding or a coverage gap, and runs only the areas (of --only, or all) that have no
-                          eval-<area>-r2.json yet: when none is left, it refuses, since there is no third evaluation.
+                          <parts>, with their crates) and fixDir. Stages sheets and evaluate first run the readers
+                          audit (`port-set audit --only readers --at plan`). Stages contract and sheets run the
+                          collation of tools/plan-collate.py, which puts each reader the audit found into its sheet's
+                          inbox, and pass its summary as collated (groups, routes, parts); stage evaluate first runs
+                          the rebuild of tools/plan-rebuild.py and passes its summary as rebuild, with evalSchema and
+                          round 2, the confirming evaluation. It refuses while the rebuild reports a check finding or
+                          a coverage gap or the readers audit reports a finding, and runs only the areas (of --only,
+                          or all) that have no eval-<area>-r2.json yet: when none is left, it refuses, since there is
+                          no third evaluation.
   Exit 1 when an input is missing or a phase 2 stage is refused (the message names it), 2 for a usage or config
   error.
 """
@@ -56,6 +62,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -373,7 +380,36 @@ def phase1_args(cfg: config.Config, a, base: dict) -> dict:
         base["areas"], moves = joined_areas(cfg)
         if stage == "maps":
             base["moves"] = moves
+            out = framework_ui_types(cfg)
+            print(f"render-prompt: {out}", file=sys.stderr)
     return base
+
+
+UI_ITEM = re.compile(r"^pub (struct|enum|trait|type|fn) ([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def framework_ui_types(cfg: config.Config) -> Path:
+    """<inventory>/framework-ui-types.md: every public top-level item in a `src/ui` module of every framework crate.
+    The components index lists the shared component crates; this list also holds the family crates' UI."""
+    snap = cfg.path("framework.snapshot")
+    if not snap.is_dir():
+        raise Missing(f"framework.snapshot {snap} does not exist: make it in phase 0 (process/01-setup.md, step 5)")
+    files = subprocess.run(["git", "-C", str(snap), "ls-files", "*.rs"], capture_output=True, text=True).stdout.split()
+    rows = []
+    for f in sorted(files):
+        if "/src/ui/" not in f and not f.endswith("/src/ui.rs"):
+            continue
+        crate = f.split("/src/", 1)[0]
+        for n, line in enumerate((snap / f).read_text(errors="replace").splitlines(), 1):
+            if m := UI_ITEM.match(line):
+                rows.append(f"| {crate} | {m.group(2)} | {m.group(1)} | {f}:{n} |")
+    out = Path(cfg.get("work.inventory")) / "framework-ui-types.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("# Framework UI items\n\nEvery public top-level item in a `src/ui` module of every framework crate at "
+                   f"plan.base, {len(rows)} items. `docs/components-index.md` lists the shared components; this list "
+                   "also holds the family crates' panels, fields and rows. Generated by render-prompt; do not edit.\n\n"
+                   "| Crate | Item | Kind | Where |\n|---|---|---|---|\n" + "".join(r + "\n" for r in rows))
+    return out
 
 
 # ---------------------------------------------------------------- phase 2: plan chunks
@@ -549,6 +585,21 @@ def phase2_fix_args(cfg: config.Config, a, base: dict) -> dict:
 RECONCILE_STAGES = ("contract", "sheets", "evaluate")
 
 
+def readers_audit(cfg: config.Config) -> str | None:
+    """Run `port-set audit --only readers --at plan`: None when it reports 0, else its summary line. Its readers.json
+    feeds the sheet inboxes (planfix.Collation.readers)."""
+    env = dict(os.environ)
+    if cfg.file:
+        env[config.ENV_CONFIG] = str(cfg.file)
+    r = subprocess.run([sys.executable, "-I", str(KIT / "tools" / "port-set"), "audit", "--only", "readers", "--at", "plan"],
+                       capture_output=True, text=True, env=env)
+    line = next((l for l in r.stdout.splitlines() if l.startswith("readers:")), None)
+    print(f"render-prompt: readers audit: {line or (r.stderr.strip().splitlines() or ['no output'])[-1]}", file=sys.stderr)
+    if r.returncode == 0:
+        return None
+    return line or f"port-set audit exit {r.returncode}: {(r.stderr.strip().splitlines() or ['no output'])[-1]}"
+
+
 def phase2_reconcile_args(cfg: config.Config, a, base: dict) -> dict:
     """Stages contract and sheets run the collation first (portkit.planfix.collate, as tools/plan-collate.py) and pass
     its result as `collated`; stage evaluate runs the rebuild first (planfix.rebuild, as tools/plan-rebuild.py) and
@@ -560,6 +611,7 @@ def phase2_reconcile_args(cfg: config.Config, a, base: dict) -> dict:
     if not files:
         raise Missing(f"no contract parts in {cfg.path('work.parts')}: run phase2-fix first")
     base["partList"] = [part_job(f.name, f.read_text().split("\n")) for f in files]
+    readers = readers_audit(cfg) if a.stage in ("sheets", "evaluate") else None
     if a.stage in ("contract", "sheets"):
         try:
             base["collated"] = planfix.collate(cfg)
@@ -581,6 +633,10 @@ def phase2_reconcile_args(cfg: config.Config, a, base: dict) -> dict:
             raise Missing("phase2-reconcile: the confirming evaluation waits until the rebuild is clean (coverage gaps "
                           f"{r['gaps']}, {len(r['checks'])} check findings; <plan>/eval-coverage.md has the gaps). Clear "
                           "them by hand or with a rerun of stage sheets:\n  " + "\n  ".join(listed))
+        if readers:
+            raise Missing(f"phase2-reconcile: the confirming evaluation waits until the readers audit reports 0 ({readers}; "
+                          f"{cfg.path('work.dir') / 'audit' / 'readers.md'}). Add the readers to the sheets by hand or "
+                          "with a rerun of stage sheets, whose inboxes carry them")
         wanted = a.only or [x["id"] for x in cfg.areas]
         done = set(planfix.confirmed(cfg))
         base["only"] = [x for x in wanted if x not in done]

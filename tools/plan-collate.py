@@ -7,7 +7,8 @@ Reads <work.plan>/fix/requests/*.md (tables whose first header cell starts with 
 <work.plan>/fix/logs/contract-*.md (rows whose first cell is a contract id, "## Reconcile" sections included) and the
 must-fix items of each area's newest re-evaluation, <work.plan>/eval-<area>-r<n>.json. Each must-fix item is checked
 against templates/eval-result.schema.json; an item that fails is rejected and listed, the rest are routed like
-requests. Routing by the To cell:
+requests. Each file the readers audit found (<work.dir>/audit/readers.json, written by
+`port-set audit --only readers --at plan`) goes to the inbox of the sheet that misses it. Routing by the To cell:
   a set id                 inbox/<set>.md (the set needs a sheet in work.sheets)
   `contract <id>`          inbox/contract-NN.md of the part in work.parts that holds the id
   unowned, lead, ownership inbox/route-1.md or route-2.md, alternating by path, every row of one path together

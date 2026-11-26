@@ -100,9 +100,9 @@ Jobs never edit a file another job owns. What another part must change goes into
 1. **Inbox** (`tools/plan-collate.py`): every request, routing decision, contract change-log row and must-fix item of the newest re-evaluation goes to the inbox of the set, contract part or routing job it addresses. Rows that name no sheet, part or `unowned`, and must-fix items that fail the schema, are listed in `fix/inbox/unrouted.md`.
 2. **Contract and routing** (stage `contract`): each contract part applies its inbox, after checking each row against the code (a request can be wrong); routing jobs give every "unowned" path an owner set.
 3. **Inbox again**, so the sets also get the parts' Reconcile logs and the routing decisions.
-4. **Sheets** (stage `sheets`): each group of sets with inbox rows applies its inbox, then checks that every reader row of the set appears in its Files table, every `#[test]` function of each owned file has one verdict, and the header's line totals match the Files table.
+4. **Sheets** (stage `sheets`): `render-prompt` first runs the readers audit, `tools/port-set audit --only readers --at plan` (a script, no model: every file outside a sheet that uses a mechanism the sheet replaces, at `plan.base` and `plan.app_base`), and the collation puts each reader it finds into that sheet's inbox. Each group of sets with inbox rows applies its inbox, then checks that every reader row of the set appears in its Files table, every `#[test]` function of each owned file has one verdict, and the header's line totals match the Files table.
 5. **Rebuild** (`tools/plan-rebuild.py`): `ownership.md`, the joined contract, coverage and sizing from the sheets, with the consistency checks it lists. It also guards the test verdicts: it keeps every sheet's Tests rows in `verdicts.tsv`, names each sheet whose rows fell since the last rebuild with the job that owns it, and restores each dropped row unless that job's log names the test with `delete` or `move`.
-6. **Confirming evaluation** (stage `evaluate`, round 2): fresh Opus evaluators sample each area again (at least 20 contract items, file rows, reader rows and test verdicts each) and return the error rate by kind, the error classes and the must-fix items (`templates/eval-result.schema.json`), also written to `eval-<area>-r2.json`. It starts only when the rebuild reports no check finding and no coverage gap: clear those first, by hand or with a rerun of stage `sheets`, so the one confirming evaluation is not spent on errors a script finds.
+6. **Confirming evaluation** (stage `evaluate`, round 2): fresh Opus evaluators sample each area again (at least 20 contract items, file rows, reader rows and test verdicts each) and return the error rate by kind, the error classes and the must-fix items (`templates/eval-result.schema.json`), also written to `eval-<area>-r2.json`. It starts only when the rebuild reports no check finding and no coverage gap and the readers audit reports 0: clear those first, by hand or with a rerun of stage `sheets`, so the one confirming evaluation is not spent on errors a script finds.
 
 `render-prompt --workflow-args phase2-reconcile --stage <stage>` runs the script of steps 1, 3 and 5 before it builds the stage's args. Under swarm, one command runs all of it as a background task:
 
@@ -134,7 +134,7 @@ Then put the sets on the board, so phases 4 to 7 have a task per set from the st
 
 ## Exit
 
-- [ ] `tools/coverage.py` reports 0 gaps, its settled-decision and open-marker audits included; the last `tools/plan-rebuild.py` run reports no check finding.
+- [ ] `tools/coverage.py` reports 0 gaps, its settled-decision and open-marker audits included; the last `tools/plan-rebuild.py` run reports no check finding; `tools/port-set audit --only readers --at plan` reports 0.
 - [ ] Every area has its confirming evaluation (`eval-<area>-r2.json`), and its pooled error rate is on the dashboard (`plan-eval`).
 - [ ] Every area above `plan.max_error_rate` had the lead's read of its classes, recorded in `log.md`.
 - [ ] The sampled wrong-answer rate is at most `plan.max_wrong_answers`.

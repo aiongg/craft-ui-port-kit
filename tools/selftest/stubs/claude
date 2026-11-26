@@ -24,10 +24,12 @@ n = (len(calls.read_text().splitlines()) if calls.exists() else 0) + 1
 with open(calls, "a") as f:
     f.write(json.dumps({"argv": argv, "prompt": prompt, "cwd": os.getcwd()}) + "\n")
 sid = argv[argv.index("--resume") + 1] if "--resume" in argv else f"session-{n}"
-reply = (d / "reply.txt").read_text() if (d / "reply.txt").exists() else f"reply {n}"
+reply = (d / "reply.txt").read_text(encoding="utf-8") if (d / "reply.txt").exists() else f"reply {n}"
 subtype = (d / "subtype.txt").read_text().strip() if (d / "subtype.txt").exists() else "success"
-print(json.dumps({"type": "result", "subtype": subtype, "is_error": False, "session_id": sid, "result": reply,
-                  "num_turns": 1, "total_cost_usd": 0.01, "usage": {"input_tokens": 1, "output_tokens": 1}}))
+out = json.dumps({"type": "result", "subtype": subtype, "is_error": False, "session_id": sid, "result": reply,
+                  "num_turns": 1, "total_cost_usd": 0.01, "usage": {"input_tokens": 1, "output_tokens": 1}}, ensure_ascii=not (d / "utf8").exists())
+sys.stdout.buffer.write((out + "\n").encode("utf-8"))
+sys.stdout.flush()
 ctx = d / "context.txt"
 if ctx.exists() and os.environ.get("CLAUDE_CONFIG_DIR"):
     t = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / re.sub(r"[^A-Za-z0-9]", "-", os.getcwd()) / f"{sid}.jsonl"

@@ -17,6 +17,7 @@ def con(repo: str) -> sqlite3.Connection | None:
     if not db.exists():
         return None
     c = sqlite3.connect(db)
+    c.execute("update occ set path=replace(path, char(92), '/') where path like '%' || char(92) || '%'")   # a database built on Windows
     c.execute("create index if not exists occ_qual on occ(qual)")   # framework definitions look methods up by type
     return c
 

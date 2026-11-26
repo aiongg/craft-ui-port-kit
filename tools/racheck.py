@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """racheck: rust-analyzer diagnostics for the files a set changed, without a cargo build.
 
-  racheck.py serve fw|app                daemon: loads a dedicated read-only checkout once, then answers requests on a unix socket
+  racheck.py serve fw|app                daemon: loads a dedicated read-only checkout once, then answers requests on a unix socket (TCP on 127.0.0.1 with a port file where AF_UNIX is missing)
   racheck.py check TREE --repo fw|app --changed P... [--also P...]   one request; prints JSON
   racheck.py stop fw|app                 ask the daemon to exit
   racheck.py status fw|app               rust-analyzer's last server status, or "not running"
@@ -43,6 +43,47 @@ def repos(cfg):
 
 def sock_path(cfg, repo):
     return str(cfg.path("racheck.sockets") / f"racheck-{repo}.sock")
+
+
+def port_path(cfg, repo):
+    return sock_path(cfg, repo) + ".port"
+
+
+def endpoint_path(cfg, repo):
+    """The file that exists while the daemon listens: the unix socket, or the port file."""
+    return port_path(cfg, repo) if not hasattr(socket, "AF_UNIX") else sock_path(cfg, repo)
+
+
+def listen(cfg, repo):
+    """The daemon's listening socket: a unix socket at sock_path, or without AF_UNIX (Windows) a TCP socket on
+    127.0.0.1 whose port goes into port_path for the clients."""
+    sp = sock_path(cfg, repo)
+    if hasattr(socket, "AF_UNIX"):
+        if os.path.exists(sp):
+            os.unlink(sp)
+        srv = socket.socket(socket.AF_UNIX)
+        srv.bind(sp)
+    else:
+        srv = socket.socket(socket.AF_INET)
+        srv.bind(("127.0.0.1", 0))
+        Path(port_path(cfg, repo)).write_text(str(srv.getsockname()[1]))
+    srv.listen(4)
+    return srv
+
+
+def connect(cfg, repo):
+    """A connected client socket; OSError when no daemon listens (or the port file is missing or stale)."""
+    if hasattr(socket, "AF_UNIX"):
+        s = socket.socket(socket.AF_UNIX)
+        target = sock_path(cfg, repo)
+    else:
+        s = socket.socket(socket.AF_INET)
+        try:
+            target = ("127.0.0.1", int(Path(port_path(cfg, repo)).read_text()))
+        except ValueError as e:
+            raise OSError(str(e))
+    s.connect(target)
+    return s
 
 
 def memory_prefix(cfg):
@@ -225,12 +266,7 @@ def serve(cfg, repo):
     init(lsp, root, rc["target"])
     lsp.wait_quiescent(timeout=3600, settle=3)
     print(f"loaded in {time.time() - t0:.0f}s", flush=True)
-    sp = sock_path(cfg, repo)
-    if os.path.exists(sp):
-        os.unlink(sp)
-    srv = socket.socket(socket.AF_UNIX)
-    srv.bind(sp)
-    srv.listen(4)
+    srv = listen(cfg, repo)
     opened = set()
     while True:
         c, _ = srv.accept()
@@ -263,13 +299,13 @@ def serve(cfg, repo):
         lsp.notify("exit", None)
     except Exception:
         lsp.p.kill()
-    os.unlink(sp)
+    if os.path.exists(endpoint_path(cfg, repo)):
+        os.unlink(endpoint_path(cfg, repo))
 
 
 def query(cfg, repo, req):
-    s = socket.socket(socket.AF_UNIX)
     try:
-        s.connect(sock_path(cfg, repo))
+        s = connect(cfg, repo)
     except OSError:
         return None
     # A daemon that dies mid-reply is the same to a caller as one that is not running: no answer.

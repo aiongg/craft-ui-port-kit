@@ -33,6 +33,8 @@ track_self() {
   guard=PORTKIT_TRACKED_${name//[^A-Za-z0-9]/_}
   [ -z "${!guard:-}" ] && [ -x "$TOOLS/track" ] || return 0
   export "$guard=1"
+  # Windows cannot start an extensionless script directly, so `track run` gets it as an argument of bash.
+  case $(uname -s) in MINGW*|MSYS*|CYGWIN*) set -- bash "$@" ;; esac
   exec "$TOOLS/track" run "$name" -- "$@"
 }
 

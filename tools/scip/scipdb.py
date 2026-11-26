@@ -5,14 +5,14 @@
   scipdb.py refs DB NAME [QUAL]            files and lines that reference NAME (optionally only QUAL::NAME)
 
 name is the last identifier of the SCIP symbol's descriptors, qual the one before it (a type for methods, fields and
-variants; a module for free items). Lines are 1-based. Local symbols (`local N`) are skipped.
+variants; a module for free items). Paths use `/` on every platform. Lines are 1-based. Local symbols (`local N`) are skipped.
 """
 import sys as _sys
 if _sys.argv[1:2] in (["-h"], ["--help"]):
     print(__doc__)
     _sys.exit(0)
-import re, sqlite3, sys
-sys.path.insert(0, __file__.rsplit("/", 1)[0])
+import os, re, sqlite3, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import scip_pb2
 
 IDENT = re.compile(r"`[^`]+`|[A-Za-z_][A-Za-z0-9_]*")
@@ -43,7 +43,7 @@ def build(index, db):
         for o in doc.occurrences:
             nq = name_qual(o.symbol)
             if nq:
-                rows.append((nq[0], nq[1], nq[2], doc.relative_path, o.range[0] + 1, o.symbol_roles & 1))
+                rows.append((nq[0], nq[1], nq[2], doc.relative_path.replace("\\", "/"), o.range[0] + 1, o.symbol_roles & 1))
         if len(rows) > 200_000:
             con.executemany("insert into occ values (?,?,?,?,?,?)", rows); rows = []
     con.executemany("insert into occ values (?,?,?,?,?,?)", rows)

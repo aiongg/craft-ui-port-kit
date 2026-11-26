@@ -34,7 +34,7 @@ def main():
     cfg = config.load(a.config)
     rd = gates.run_dir(cfg, a.label)
     app, fw = cfg.path("app.integration"), cfg.path("framework.integration")
-    sock = Path(racheck.sock_path(cfg, "app"))
+    sock = Path(racheck.endpoint_path(cfg, "app"))
     end = time.time() + a.wait
     while not sock.exists() and time.time() < end:
         time.sleep(2)

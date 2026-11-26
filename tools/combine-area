@@ -39,7 +39,7 @@ for a in "$@"; do
   [[ $n == 0 ]] && { echo "$s: no commits, skipped"; continue; }
   # Each set lands as its net change (one commit), so a set whose review drops a line it wrote does not drop the same
   # line an earlier set wrote.
-  sq=$(git log --reverse --format='- %s' "$b..$h" | git commit-tree "$(git -C "$t" rev-parse "$h^{tree}")" -p "$b" -F <(printf '%s: net change of %s commits\n\n' "$s" "$n"; cat))
+  sq=$({ printf '%s: net change of %s commits\n\n' "$s" "$n"; git log --reverse --format='- %s' "$b..$h"; } | git commit-tree "$(git -C "$t" rev-parse "$h^{tree}")" -p "$b" -F -)
   if git cherry-pick --allow-empty "$sq" >/dev/null 2>&1; then echo "$s: $n commits"; continue; fi
   # A change the base already holds (a fix that landed earlier) picks as empty: skip it.
   if [[ -z $(git diff --name-only --diff-filter=U) ]] && git diff --cached --quiet && git diff --quiet; then

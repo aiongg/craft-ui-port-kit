@@ -6,7 +6,7 @@ The store lives in the port workspace (port.toml `track.dir`):
                  several agents and tools can write at once without a lock server.
   state.json     derived: a fold over every event, rewritten after each write. Never edited by hand; delete it and
                  `track publish` rebuilds it.
-  .lock          serialises the fold and the publish (fcntl.flock). Appends never take it.
+  .lock          serialises the fold and the publish (fcntl.flock, or msvcrt.locking on Windows). Appends never take it.
   .folded        byte offset of events.jsonl that state.json covers; a writer whose event is already covered skips
                  its own fold.
 
@@ -44,8 +44,12 @@ from pathlib import Path
 
 try:
     import fcntl
-except ImportError:  # no flock: folds may race, the events stay correct and the next write repairs the state
+except ImportError:  # Windows: msvcrt.locking serves
     fcntl = None
+try:
+    import msvcrt
+except ImportError:
+    msvcrt = None
 
 from . import config as _config
 
@@ -180,13 +184,11 @@ class Store:
     def _locked(self):
         self.dir.mkdir(parents=True, exist_ok=True)
         with open(self.lock_path, "a") as f:
-            if fcntl:
-                fcntl.flock(f, fcntl.LOCK_EX)
+            _lock(f)
             try:
                 yield
             finally:
-                if fcntl:
-                    fcntl.flock(f, fcntl.LOCK_UN)
+                _unlock(f)
 
     def refresh(self, upto: int | None = None) -> dict | None:
         """Fold events.jsonl into state.json and publish. With `upto`, skip when the state already covers that offset."""
@@ -304,13 +306,46 @@ def _dumps(obj) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=1)
 
 
+def _lock(f) -> None:
+    if fcntl:
+        fcntl.flock(f, fcntl.LOCK_EX)
+    elif msvcrt:
+        f.seek(0)
+        while True:
+            try:
+                msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)  # blocks for about 10 s, then raises
+                return
+            except OSError:
+                time.sleep(0.05)
+
+
+def _unlock(f) -> None:
+    if fcntl:
+        fcntl.flock(f, fcntl.LOCK_UN)
+    elif msvcrt:
+        f.seek(0)
+        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+
+
+def _replace(tmp: Path, path: Path) -> None:
+    """os.replace, retried briefly: on Windows a reader holding the target open makes it fail with PermissionError."""
+    for i in range(50):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if i == 49:
+                raise
+            time.sleep(0.05)
+
+
 def _write_atomic(path: Path, data) -> None:
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     if isinstance(data, str):
         data = data.encode()
     with open(tmp, "wb") as f:
         f.write(data)
-    os.replace(tmp, path)
+    _replace(tmp, path)
 
 
 # ---------------------------------------------------------------- the fold

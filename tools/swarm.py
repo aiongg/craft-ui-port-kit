@@ -124,6 +124,11 @@ FIXER_TURNS = 1.3
 TASK_IN_PROMPT = re.compile(r"\btrack\s+(?:step|status|ask)\s+([A-Za-z0-9][A-Za-z0-9._/-]{0,79})\b")
 
 
+def _write(path: Path, text: str) -> None:
+    """Files the kit writes are UTF-8 with LF endings on every platform."""
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
 def json_from_text(text: str):
     text = (text or "").strip()
     for cand in (text, *re.findall(r"```(?:json)?\s*\n(.*?)\n```", text, re.S)):
@@ -209,7 +214,7 @@ class Swarm:
         stamp = time.strftime("%H:%M:%S", time.gmtime())
         with self.lock:
             print(f"{stamp} {line}", flush=True)
-            with open(self.run_dir / "log.txt", "a") as f:
+            with open(self.run_dir / "log.txt", "a", encoding="utf-8", newline="\n") as f:
                 f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {line}\n")
 
     def board(self, job: Job, state: str, note: str | None = None, new: bool = False) -> None:
@@ -283,8 +288,8 @@ class Swarm:
                     return d.get("value")
             except json.JSONDecodeError:
                 pass
-        (jd / "prompt.md").write_text(job.prompt)
-        (jd / "job.json").write_text(json.dumps(job.record(), indent=1))
+        _write(jd / "prompt.md", job.prompt)
+        _write(jd / "job.json", json.dumps(job.record(), indent=1))
         if self.a.dry_run:
             self.say(f"{job.task}: would run {job.model}, max_turns {self.turns(job)}, {len(job.prompt)} chars"
                      f"{', schema' if job.schema else ''}, key {job.key()} ({jd / 'prompt.md'})")
@@ -301,7 +306,7 @@ class Swarm:
         except Exception as e:  # a broken job must not stop the batch
             value, err = None, f"{type(e).__name__}: {e}"
         if err is None:
-            res.write_text(json.dumps({"ok": True, "task": job.task, "label": job.label, "model": job.model,
+            _write(res, json.dumps({"ok": True, "task": job.task, "label": job.label, "model": job.model,
                                        "value": value}, indent=1, ensure_ascii=False))
             with self.lock:
                 self.stats["ok"] += 1
@@ -365,7 +370,7 @@ class Swarm:
         while True:
             d, err = self.one_call(job, jd, prompt, resume, tries, tag)
             if d and d.get("session_id"):
-                (jd / "session").write_text(d["session_id"])
+                _write(jd / "session", d["session_id"])
             if err:
                 return None, err
             if not job.schema:
@@ -394,7 +399,8 @@ class Swarm:
         t0 = time.time()
         try:
             p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 text=True, cwd=cwd, env=self.env(), start_new_session=True)
+                                 text=True, encoding="utf-8", errors="replace", cwd=cwd, env=self.env(),
+                                 start_new_session=True)
         except OSError as e:
             return None, f"cannot start {cmd[0]}: {e}"
         with self.lock:
@@ -405,7 +411,7 @@ class Swarm:
             with self.lock:
                 self.procs.discard(p)
         secs = time.time() - t0
-        (jd / f"{tag or 'call'}-{n}.out").write_text(out + ("\n--- stderr ---\n" + errout if errout else ""))
+        _write(jd / f"{tag or 'call'}-{n}.out", out + ("\n--- stderr ---\n" + errout if errout else ""))
         try:
             d = json.loads(out)
             if isinstance(d, list):
@@ -435,8 +441,8 @@ class Swarm:
             log = Path(self.cfg.get("work.usage_log"))
             log.parent.mkdir(parents=True, exist_ok=True)
             if not log.exists():
-                log.write_text(USAGE_HEAD)
-            with log.open("a") as fh:
+                _write(log, USAGE_HEAD)
+            with log.open("a", encoding="utf-8", newline="\n") as fh:
                 fh.write("\t".join(row) + "\n")
         track.event("model-call", f"{step}: {d.get('num_turns')} turns, out {nums['output']}, ${cost:.2f}, "
                     f"{secs:.0f} s ({job.model})", task=job.task,
@@ -515,8 +521,8 @@ def run_workflow(sw: Swarm, script: Path, args_file: Path, name: str):
     if not node:
         raise SystemExit("swarm: node 18 or later is needed to run a workflow script (a job list needs no node)")
     env = dict(os.environ, SWARM_SCRIPT=str(script), SWARM_ARGS=str(args_file))
-    p = subprocess.Popen([node, "-e", RUNTIME], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env=env,
-                         bufsize=1)
+    p = subprocess.Popen([node, "-e", RUNTIME], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding="utf-8",
+                         errors="replace", env=env, bufsize=1)
     wlock = threading.Lock()
     noted: set[str] = set()
 
@@ -702,7 +708,7 @@ def follow_up(cfg: config.Config, a) -> int:
     out.update(context=ctx, fresh=fresh)
     if fresh:
         prompt = fresh_prompt(job, jd, prompt, ctx)
-    (jd / f"{tag}-prompt.md").write_text(prompt)
+    _write(jd / f"{tag}-prompt.md", prompt)
     sw = Swarm(cfg, jd.parent.parent, a)
     with track.recorded("swarm follow-up", task=task) as r:
         sw.board(job, "running", f"follow-up {n} ({job.model})" + (f", fresh session at {ctx} tokens" if fresh else ""))
@@ -712,7 +718,7 @@ def follow_up(cfg: config.Config, a) -> int:
             value, err = None, f"{type(e).__name__}: {e}"
         sw.pool.shutdown(wait=False)
         out.update(ok=err is None, value=value, session_id=session_of(jd), cost_usd=round(sw.stats["cost"], 3))
-        (jd / f"{tag}.json").write_text(json.dumps({k: out[k] for k in ("ok", "value", "session_id")} | {"error": err},
+        _write(jd / f"{tag}.json", json.dumps({k: out[k] for k in ("ok", "value", "session_id")} | {"error": err},
                                                    indent=1, ensure_ascii=False))
         sw.board(job, "done" if err is None else "failed", None if err is None else err[:300])
         r.result(f"{task} follow-up {n}: {'ok' if err is None else 'FAILED: ' + err[:200]}", log=str(jd), ok=err is None)
@@ -801,7 +807,7 @@ def main(argv=None) -> int:
                    f"${st['cost']:.2f}")
         out = run_dir / ("results.json" if not is_workflow else f"result{'-' + stage if stage else ''}.json")
         if outcome["op"] == "return":
-            out.write_text(json.dumps(outcome["value"], indent=1, ensure_ascii=False) + "\n")
+            _write(out, json.dumps(outcome["value"], indent=1, ensure_ascii=False) + "\n")
             sw.say(f"{summary}; result in {out}")
             print(json.dumps(outcome["value"], indent=1, ensure_ascii=False))
         else:

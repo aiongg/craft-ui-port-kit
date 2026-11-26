@@ -8,10 +8,11 @@
 # It takes:
 # - work.dir without its worktrees (work.trees), build output, compiled artifacts and files over 50 MB: plans, maps,
 #   sheets, set output (sets/), swarm job prompts and replies, runs/ logs and shots, usage.tsv, the dashboard events,
-#   STATE.md and port.toml;
+#   STATE.md, log.md and port.toml;
 # - the Claude Code sessions whose folder under ~/.claude/projects/ belongs to a directory of this port (work.dir and
-#   everything under it, app.checkout, framework.checkout): the lead's session with its subagents, every headless
-#   agent's session, the memory files and the background task outputs and scratchpads;
+#   everything under it, app.checkout, framework.checkout, every worktree of both checkouts, and the working
+#   directory of every swarm job): the lead's session with its subagents, every headless agent's session, the memory
+#   files and the background task outputs and scratchpads;
 # - the kit's commit and the claude version.
 # A machine without port.toml (a build machine that only ran builds) gets the sessions only; set PORT_KIT_WORK_DIR and
 # PORT_KIT_APP_ID there if the port's directories have other names than on the lead's machine.
@@ -62,6 +63,23 @@ if [ -n "$work" ] && [ -d "$work" ]; then
   [ "$b" -gt 0 ] 2>/dev/null || b=$(stat -c %Y "$work/port.toml" 2>/dev/null || echo 0)
   since=@$b
 fi
+# Worktrees and job directories can lie anywhere; their sessions hold most of a port's agent work.
+swarm=$(cfg work.swarm 2>/dev/null || true)
+extra=$({
+  for co in $(cfg app.checkout 2>/dev/null || true) $(cfg framework.checkout 2>/dev/null || true); do
+    [ -d "$co" ] && git -C "$co" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p'
+  done
+  [ -n "$swarm" ] && [ -d "$swarm" ] && find "$swarm" -path '*/jobs/*/job.json' -print0 2>/dev/null |
+    xargs -0 -r python3 -I -c 'import json, sys
+for f in sys.argv[1:]:
+    try:
+        c = json.load(open(f)).get("cwd")
+    except (OSError, ValueError):
+        continue
+    if c:
+        print(c)' || true
+} | sort -u)
+[ -z "$extra" ] || dirs=$(printf '%s\n%s\n' "$dirs" "$extra" | sed '/^$/d' | sort -u)
 mkdir -p "$stage/sessions/tmp"
 if [ -d "$HOME/.claude/projects" ]; then
   while IFS= read -r d; do
@@ -90,6 +108,20 @@ fi
 # Personal data and secrets out before anything is packed; see tools/portkit/redact.py for what it can and cannot find.
 priv=$(cfg land.private_patterns 2>/dev/null || true)
 python3 -I "$TOOLS/portkit/redact.py" "$stage" ${priv:+--private "$priv"}
+
+# Every job's session id is in its jobs/<key>/session; say how many of those sessions made it into the archive.
+packed=$(find "$stage/sessions" -name '*.jsonl' | wc -l)
+if [ -n "$swarm" ] && [ -d "$swarm" ]; then
+  ids=$(find "$swarm" -path '*/jobs/*/session' -type f -exec awk 1 {} + 2>/dev/null | sort -u | sed '/^$/d')
+  total=$(printf '%s' "$ids" | grep -c . || true)
+  have=0
+  for id in $ids; do
+    [ -n "$(find "$stage/sessions" -name "$id.jsonl" -print -quit)" ] && have=$((have + 1))
+  done
+  echo "agent sessions packed: $have of $total swarm job sessions; $packed session files in all"
+else
+  echo "session files packed: $packed"
+fi
 
 tar -C "$stage" -czf "$file" .
 echo "wrote $file ($(du -h "$file" | cut -f1)): $(find "$stage/sessions" -name '*.jsonl' | wc -l) session files," \

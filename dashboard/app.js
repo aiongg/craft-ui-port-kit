@@ -96,6 +96,7 @@ function render() {
   S.sig = sig
   if (changed) {
     renderHeader()
+    renderSkips()
     renderRounds()
     renderEta()
     renderHeads()
@@ -140,6 +141,8 @@ function renderSummary() {
   const chips = []
   if (open) chips.push(`<a class="chip hot" href="#questions"><b>${open}</b> open question${open > 1 ? 's' : ''}</a>`)
   if (stale) chips.push(`<a class="chip hot" href="#attention"><b>${stale}</b> stale</a>`)
+  const skips = (st.skips || []).length
+  if (skips) chips.push(`<a class="chip hot" href="#skips"><b>${skips}</b> phase move${skips > 1 ? 's' : ''} past failing exit checks</a>`)
   for (const s of STATES) {
     const n = (st.counts || {})[s]
     if (n) chips.push(`<span class="chip" style="--c:var(--${s})"><i></i>${esc(STATE_LABEL[s])} <b>${num(n)}</b></span>`)
@@ -221,6 +224,14 @@ function renderAttention() {
   const stale = Object.values(S.state.tasks || {}).filter((t) => staleMin(t) != null).sort((a, b) => staleMin(b) - staleMin(a))
   $('attention').innerHTML = stale.length ? head('attention-h', 'Stale', stale.length) +
     stale.map((t) => taskRow(t, `No update for ${staleMin(t)} min (limit ${S.state.stale_min}).`)).join('') : ''
+}
+
+// Phase moves recorded with `track phase N --force`: each failing exit item and the lead's reason.
+function renderSkips() {
+  const sk = (S.state.skips || []).slice().reverse()
+  $('skips').innerHTML = sk.length ? head('skips-h', 'Skipped exit checks', sk.length) +
+    sk.map((s) => `<div class="row" style="--c:var(--blocked)"><div class="head"><span class="tid">Phase ${esc(s.from)} to ${esc(s.to)}</span><span class="right">${timeEl(s.t)}</span></div>` +
+      `<div class="note">Reason: ${esc(s.reason)}</div><ul class="items">${s.items.map((i) => `<li>${esc(i)}</li>`).join('')}</ul></div>`).join('') : ''
 }
 
 function taskRow(t, extra) {

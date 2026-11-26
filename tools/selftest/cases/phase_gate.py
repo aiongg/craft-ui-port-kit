@@ -167,6 +167,9 @@ expect(3, True, extra=("--force", "scratch plan"))
 st = json.loads((W / "track/state.json").read_text())
 if not any(e["kind"] == "decision" and "forced past" in e["text"] for e in st["log"]):
     fail("--force recorded no decision event")
+skip = (st.get("skips") or [{}])[-1]
+if skip.get("from") != 2 or skip.get("to") != 3 or skip.get("reason") != "scratch plan" or not skip.get("items"):
+    fail(f"the forced move is not in the state's skips: {st.get('skips')}")
 
 # ---- phase 3
 (W / "plan/LINEBASE").write_text("0000000\n")

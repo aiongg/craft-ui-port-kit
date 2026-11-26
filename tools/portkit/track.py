@@ -393,6 +393,7 @@ def fold(events: list[dict], now: datetime, stale_min: int = 20, build_batches: 
     rounds: list[dict] = []
     cycles: list[dict] = []
     heads: dict[str, dict] = {}
+    skips: list[dict] = []                 # phase moves forced past failing exit items (`track phase --force`)
     lead: dict[str, dict] = {}             # lead session id -> its newest recorded cost
     started = None                          # time of the first event
     phase = None
@@ -502,6 +503,10 @@ def fold(events: list[dict], now: datetime, stale_min: int = 20, build_batches: 
                                      "prev": e.get("prev"), "since": t}
         elif tk is not None and k not in RESERVED:
             tk["last"] = {"kind": k, "text": e.get("text", ""), "ok": e.get("ok"), "t": t}
+        if k == "decision" and isinstance(e.get("forced"), dict):
+            f = e["forced"]
+            skips.append({"t": t, "from": f.get("from"), "to": f.get("to"), "items": list(f.get("items") or []),
+                          "reason": f.get("reason")})
         item = {"t": t, "kind": k, "task": e.get("task"), "text": summary(e)}
         for f in ("ok", "links", "data", "by"):
             if e.get(f) not in (None, {}, ""):
@@ -522,6 +527,7 @@ def fold(events: list[dict], now: datetime, stale_min: int = 20, build_batches: 
         "version": STATE_VERSION, "generated": iso(now), "events": len(events), "stale_min": stale_min,
         "phase": phase, "paused": paused, "counts": counts, "tasks": tasks, "questions": questions,
         "rounds": rounds, "cycles": cycles[-CYCLES_CAP:], "heads": heads, "stale": stale, "started": started,
+        "skips": skips,
         "lead": {"sessions": lead, "cost_usd": builtins.round(sum(v["cost_usd"] for v in lead.values()), 2)},
         "eta": {**eta(tasks, first_run, done_at, spans, now),
                 "cycles": cycle_eta(cycles, tasks, first_run, done_at, now, build_batches)},
@@ -825,6 +831,9 @@ def show_text(state: dict, task: str | None = None, now: datetime | None = None)
          + (f" ({ph['note']})" if ph.get("note") else "")]
     if (state.get("paused") or {}).get("on"):
         L.append("PAUSED" + (f": {state['paused']['note']}" if state["paused"].get("note") else ""))
+    for sk in state.get("skips") or []:
+        L.append(f"skipped exit checks: phase {sk['from']} to {sk['to']} at {sk['t']}: {'; '.join(sk['items'])} "
+                 f"(reason: {sk['reason']})")
     c = state.get("counts", {})
     L.append("tasks: " + ", ".join(f"{s} {c.get(s, 0)}" for s in STATES if c.get(s)) if tasks else "tasks: none yet")
     if state.get("rounds"):
@@ -868,6 +877,9 @@ def md_text(state: dict, now: datetime | None = None) -> str:
          (f"- Phase: {phase_label(ph)[6:]}" if ph else "- Phase: not set") + (f" ({esc(ph['note'])})" if ph.get("note") else "")]
     if (state.get("paused") or {}).get("on"):
         L.append("- Paused" + (f": {esc(state['paused'].get('note'))}" if state["paused"].get("note") else ""))
+    for sk in state.get("skips") or []:
+        L.append(f"- Skipped exit checks, phase {sk['from']} to {sk['to']} ({sk['t']}): {esc('; '.join(sk['items']))}. "
+                 f"Reason: {esc(sk['reason'])}")
     c = state.get("counts", {})
     L.append("- Tasks: " + (", ".join(f"{s} {c[s]}" for s in STATES if c.get(s)) or "none"))
     e = state.get("eta") or {}

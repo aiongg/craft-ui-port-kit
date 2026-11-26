@@ -88,6 +88,7 @@ details.group>summary .n{font-weight:400;color:var(--muted)}
 .on{color:var(--waiting);font-weight:600}
 .tags{display:flex;gap:2px 14px;flex-wrap:wrap;font-size:.84rem;color:var(--muted);margin-top:2px}
 .last{font-size:.84rem;color:var(--muted);margin-top:2px;overflow-wrap:anywhere}
+.items{margin:2px 0 0;padding-left:18px;overflow-wrap:anywhere}
 .last.ok::before,.log .ok::before{content:"\2713 ";color:var(--done)}
 .last.fail::before,.log .fail::before{content:"\2717 ";color:var(--blocked)}
 .more{margin:8px 0;padding:4px 12px;border:1px solid var(--rule);border-radius:6px;background:var(--surface);cursor:pointer}

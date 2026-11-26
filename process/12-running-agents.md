@@ -101,7 +101,7 @@ The dashboard (`tools/track.md`) shows every task's state. Agents keep it curren
 
 A lead session's context grows with every turn, and every turn re-reads all of it. The lead never stops by itself at a stopping point: it writes `STATE.md` and continues, and only the developer ends the session or asks for a hand-off. When the developer does, or a session ends for any other reason:
 
-1. Write the current state into `STATE.md`: phase, step, next action, running agents with their task ids, open questions, and pointers to reports. Pointers, not copies of earlier hand-offs.
+1. Write the current state into `STATE.md`: phase, step, next action, running agents with their task ids, open questions, and pointers to reports. Pointers, not copies of earlier hand-offs; history goes in `log.md`.
 2. Run `track md`, so STATUS.md in the workspace matches the board.
 3. Stop `track watch`.
 4. Start the next session with the kit's skill. A session that starts without context reads `STATE.md` and `track show` before anything else, then starts `track watch` again.

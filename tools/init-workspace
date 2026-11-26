@@ -12,7 +12,7 @@ or STATE.md (unless --force), creates only what is missing, and repeats the chec
      (`minimal` for a minimal port, process/minimal-port.md).
   2. The workspace layout: every configured workspace directory that lies inside DIR (trees, inventory, port-map,
      plan with sheets and contract-parts, sets, decide, runs, scip, swarm, landing, the dashboard store).
-  3. STATE.md from templates/STATE.md, filled from port.toml (placeholders without a value stay as `{{NAME}}`).
+  3. STATE.md from templates/STATE.md and an empty log.md from templates/log.md, filled from port.toml (placeholders without a value stay as `{{NAME}}`).
      On a rerun it refills the "Pins" rows (plan bases, framework branch, port and writing branches) from the
      current port.toml and keeps every other line, so run it again after setting plan.base and framework.branch.
   4. plan.linebase: once plan.base is set (phase 0, step 4), writes it into the LINEBASE file when that file does
@@ -289,6 +289,15 @@ def main(argv=None) -> int:
                 print(f"kept {state}; refilled from port.toml: {', '.join(changed)}")
             else:
                 print(f"kept {state}")
+
+        log = state.with_name("log.md")
+        if not log.exists():
+            r = subprocess.run([sys.executable, str(TOOLS / "render-prompt"), "log.md", "--keep-header",
+                                "--config", str(toml)], capture_output=True, text=True)
+            if r.returncode == 0:
+                log.write_text(r.stdout)
+            else:
+                notes.append(f"log.md not written: {r.stderr.strip()}")
 
         lb = Path(cfg.get("plan.linebase"))
         base = cfg.get("plan.base")

@@ -147,6 +147,6 @@ Then write the app batch ([06-write.md](06-write.md)) and come back to step 1 fo
 - [ ] The racheck gate has no `real` or `mod-file` error.
 - [ ] The last cycle's compile (`tools/compile-gate`) exits 0: every changed framework crate and its dependents, then the app selection.
 - [ ] Every component the batch adds has stories that render, checked by the lead.
-- [ ] Plan errors found by the compile are fixed in the plan, and `STATE.md` records them.
+- [ ] Plan errors found by the compile are fixed in the plan, and `log.md` records them.
 
 The cycle that compiles the batch records `tools/track phase 7 "tests and red rounds"` itself; when the gate refuses, its summary names the items: fix them and record the phase. Then go to [08-tests-and-red-rounds.md](08-tests-and-red-rounds.md). `track phase` runs the items a script can check and refuses while one fails ([tools/track.md](../tools/track.md), "The phase gate").

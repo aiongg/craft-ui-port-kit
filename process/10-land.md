@@ -134,7 +134,7 @@ The push starts the repositories' CI. Upstream CI may refuse things a local buil
 
 ## Before the merge: run the app on each platform
 
-The developer runs the landed app once on each platform it ships on (a window opens, the main surface draws, one edit works) before the PRs merge. CI builds the legs; only a run shows a window that opens blank. Record each platform and the result in `STATE.md`.
+The developer runs the landed app once on each platform it ships on (a window opens, the main surface draws, one edit works) before the PRs merge. CI builds the legs; only a run shows a window that opens blank. Record each platform and the result in `log.md`.
 
 ## After landing: follow-up fixes
 
@@ -148,6 +148,6 @@ Work after landing (issues on the landed port, red CI legs, conflicts on the lan
 - [ ] The app's landing branch pins the landed framework revision by git rev, with no local path left, and is pushed.
 - [ ] `cl check all` passed in both landed clones, or each `--skip-check` reason is in `STATE.md`.
 - [ ] The exit gate passed for both landed commits, or the `track phase 9 --force` decision covers what it reported.
-- [ ] The developer ran the app once on each platform it ships on, and the results are in `STATE.md`.
-- [ ] CI results for both repositories are recorded on the dashboard and in `STATE.md`.
+- [ ] The developer ran the app once on each platform it ships on, and the results are in `log.md`.
+- [ ] CI results for both repositories are recorded on the dashboard and in `log.md`.
 - [ ] `tools/track md` has written `STATUS.md` in the workspace.

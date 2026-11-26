@@ -124,7 +124,7 @@ The developer gets only questions about goals, design principles and architectur
 
 Before phase 3, read the contract in full and a sample of sheets yourself: at least one framework sheet, one app sheet and the sheet with the most decisions. Check their line references and reader rows against the code. An agent's evaluation or a score is not a substitute.
 
-For every area above `plan.max_error_rate` after the confirming evaluation, also read its sheets for each class the evaluation named (`lead_read` in the stage's result, `classes` in `eval-<area>-r2.json`), fix what you find in the sheets or contract parts, and run `tools/plan-rebuild.py` again. Record each such area in `STATE.md` with its rate, its classes and what you changed.
+For every area above `plan.max_error_rate` after the confirming evaluation, also read its sheets for each class the evaluation named (`lead_read` in the stage's result, `classes` in `eval-<area>-r2.json`), fix what you find in the sheets or contract parts, and run `tools/plan-rebuild.py` again. Record each such area in `log.md` with its rate, its classes and what you changed.
 
 Then put the sets on the board, so phases 4 to 7 have a task per set from the start: `tools/track import sheets`.
 
@@ -136,7 +136,7 @@ Then put the sets on the board, so phases 4 to 7 have a task per set from the st
 
 - [ ] `tools/coverage.py` reports 0 gaps, its settled-decision and open-marker audits included; the last `tools/plan-rebuild.py` run reports no check finding.
 - [ ] Every area has its confirming evaluation (`eval-<area>-r2.json`), and its pooled error rate is on the dashboard (`plan-eval`).
-- [ ] Every area above `plan.max_error_rate` had the lead's read of its classes, recorded in `STATE.md`.
+- [ ] Every area above `plan.max_error_rate` had the lead's read of its classes, recorded in `log.md`.
 - [ ] The sampled wrong-answer rate is at most `plan.max_wrong_answers`.
 - [ ] `developer-questions.md` has no open question; `settled.md` holds every decision.
 - [ ] The lead's check is recorded in `STATE.md`; every set is on the board.

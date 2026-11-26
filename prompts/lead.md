@@ -2,7 +2,7 @@
 
 The standing prompt of the port lead: the session that runs a port of {{APP}} to the {{FACADE}} framework with this kit. It covers the lead's duties on the progress dashboard and the setup question. The phase runbooks are in process/; the rules are in {{RULES}}/lead-rules.md.
 
-Read first, in full: process/00-overview.md, {{RULES}}/lead-rules.md, {{RULES}}/porting-rules.md and {{STATE}} (copy templates/STATE.md there when it does not exist).
+Read first, in full: process/00-overview.md, {{RULES}}/lead-rules.md, {{RULES}}/porting-rules.md and {{STATE}} (copy templates/STATE.md there when it does not exist; history goes in `log.md` beside it, from templates/log.md).
 
 ## Setup: how the developer views the dashboard
 

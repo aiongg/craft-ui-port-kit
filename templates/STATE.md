@@ -1,6 +1,6 @@
 # {{APP}} port: state
 
-The lead's phase state file. The lead keeps it current at every phase change and every round. Every prompt that says "work already finished or in review" reads it. The progress dashboard (`track show`) holds the task-level detail; this file holds the decisions and the pins.
+The lead's phase state file: the current state only, about 150 lines at most. Rewrite a line when it changes and delete what no longer applies; never append history. The running log (rounds, measurements, what happened when) goes in `log.md` in the workspace. The lead keeps this file current at every phase change and every round. Every prompt that says "work already finished or in review" reads it. The progress dashboard (`track show`) holds the task-level detail; this file holds the decisions and the pins.
 
 ## Now
 
@@ -52,11 +52,6 @@ Decisions that bind later steps. Each: the decision and its reason. No names, no
 Every answer, with the question it answered (`track answer`). The answer is recorded here and on the dashboard.
 
 - <question id>: <question>. Answer: <answer>.
-
-## Rounds
-
-| Round | Run label | Pass | Fail | New failures | Report |
-|---|---|---|---|---|---|
 
 ## Open
 

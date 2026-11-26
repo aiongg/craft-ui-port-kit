@@ -103,7 +103,7 @@ The agents' maps are the plan's foundation, so the lead reads a sample itself be
 - **Tests:** compare two test counts per area with `grep -c '#\[test\]'`.
 - **The index:** its coverage table lists no unmapped entry, and every `SG-n` names real sections.
 
-Fix what you find in the map directly when it is small; rerun the area with a note in its prompt when a pattern repeats. Record each finding class in `STATE.md`.
+Fix what you find in the map directly when it is small; rerun the area with a note in its prompt when a pattern repeats. Record each finding class in `log.md`.
 
 ## Step 7: write the states files
 

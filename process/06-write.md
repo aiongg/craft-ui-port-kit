@@ -56,7 +56,7 @@ Both runners start with the writer canary (`tools/racheck.py canary --sets <list
 
 ## Write order
 
-1. **Pilot first.** Run one area end to end, framework side and app side, through phases 5 to 7 for its framework sets, before writing any other area. The pilot is the shell plus the section of the main surface with the most framework gaps (the top of the index's risk ranking, [02-inventory-and-map.md](02-inventory-and-map.md)): the riskiest design problems show first, while changes are cheap. It touches both repos. Judge its code on its own merits before anything compiles: a fresh Opus reviewer reads the written code against the sheets, decisions and rules ([07-review-combine-compile.md](07-review-combine-compile.md), step 1). A failing review goes back to the plan or the writers, never into a build. The pilot's cost per set, review findings by source and compile errors per 1,000 lines set the projection for the rest; record them in `STATE.md` and update the projection the developer has.
+1. **Pilot first.** Run one area end to end, framework side and app side, through phases 5 to 7 for its framework sets, before writing any other area. The pilot is the shell plus the section of the main surface with the most framework gaps (the top of the index's risk ranking, [02-inventory-and-map.md](02-inventory-and-map.md)): the riskiest design problems show first, while changes are cheap. It touches both repos. Judge its code on its own merits before anything compiles: a fresh Opus reviewer reads the written code against the sheets, decisions and rules ([07-review-combine-compile.md](07-review-combine-compile.md), step 1). A failing review goes back to the plan or the writers, never into a build. The pilot's cost per set, review findings by source and compile errors per 1,000 lines set the projection for the rest; record them in `log.md` and update the projection the developer has.
 2. **All remaining framework sets as one build batch** (two batches when the plan has more than about 60 framework sets; split by area, the riskiest sets in the first). Write the batch, then review, fix, combine, compile, run the framework tests and fix ([07-review-combine-compile.md](07-review-combine-compile.md), [08-tests-and-red-rounds.md](08-tests-and-red-rounds.md)). The app batch setup starts when the framework batch is green.
 3. **App sets, after the framework builds**, written against the real framework code instead of stubs, in one or two build batches. Set each batch up first ([07-review-combine-compile.md](07-review-combine-compile.md), "Setting up an app batch"). Every set still gets its review and fix round as it is written; the build steps (combine, compile, test run) run once per batch, since a warm incremental build costs about the same for 20 sets as for 60.
 
@@ -91,10 +91,10 @@ Record what you did to the batch: `tools/track event decision "<area>: <sets> mo
 ## Exit
 
 - [ ] Every set of the batch has a commit on its branch and a `check.md` with no scripted error.
-- [ ] racheck errors in each set's own files are 0, or explained in `STATE.md`.
+- [ ] racheck errors in each set's own files are 0, or explained in `log.md`.
 - [ ] No set is `blocked`; every BLOCKED or OUT OF TURNS set was rerun or retried.
 - [ ] Every component a set adds has its stories in the set's diff.
 - [ ] For the pilot: the app compiles and runs with the pilot's parts, and their states are captured against production ([09-look-and-behaviour.md](09-look-and-behaviour.md)).
-- [ ] For the pilot: the projection from its measured costs is in `STATE.md` and went to the developer.
+- [ ] For the pilot: the projection from its measured costs is in `log.md` and went to the developer.
 
 Then review, combine and compile the batch: [07-review-combine-compile.md](07-review-combine-compile.md). Phases 5 to 7 repeat for each build batch; record `tools/track phase 6 "review, combine, compile"` when the batch moves on. `track phase` runs the items a script can check and refuses while one fails ([tools/track.md](../tools/track.md), "The phase gate").

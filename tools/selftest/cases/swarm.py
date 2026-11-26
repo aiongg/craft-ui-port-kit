@@ -112,3 +112,26 @@ def case_follow_up_logs(s):
     s.run("swarm.py", "--follow-up", "rfix-g1", "packet-2.md")
     log = (s.work / "swarm" / "jobs" / "log.txt").read_text()
     check("follow-up 1 started" in log and "follow-up 1 done" in log, f"follow-up lines in log.txt: {log}", s.last)
+
+
+def case_bare_bash_refused(s):
+    (s.work / "jobs.json").write_text(json.dumps([{"task": "t1", "prompt": "look", "allow": ["Read", "Bash"]}]))
+    p = s.run("swarm.py", "jobs.json", "--dry-run")
+    check(p.returncode == 2 and "bare Bash" in p.stderr, "a job list granting bare Bash is refused", p)
+    (s.work / "jobs.json").write_text(json.dumps([{"task": "t1", "prompt": "look", "allow": ["Read", "Bash(ls:*)"]}]))
+    check(s.run("swarm.py", "jobs.json", "--dry-run").returncode == 0, "a scoped Bash rule passes", s.last)
+
+
+def case_build_mode_fixer_gets_cl_and_git(s):
+    s.config({"pipeline.fixer_mode": "build"})
+    tree = s.root / "pool" / "1" / "fw"
+    (s.work / "build-pool.json").write_text(json.dumps({"slots": {"1": {"task": "rfix-g1", "since": "x"}}}))
+    s.tree("fwint", {"README": "x\n"})
+    s.config({"pipeline.fixer_mode": "build", "framework.integration": str(s.root / "fwint"),
+              "build.pool_dir": str(s.root / "pool")})
+    jobs(s, "test a\n")
+    p = s.run("swarm.py", "jobs.json")
+    check(p.returncode == 0, "build-mode fixer run", p)
+    allow = calls(s)[0]["argv"][calls(s)[0]["argv"].index("--allowedTools") + 1]
+    check("Bash(cl:*)" in allow and f"Bash(git -C {tree}:*)" in allow, f"cl and git in its slot's tree: {allow}")
+    check("Bash," not in allow + "," and not allow.endswith(",Bash"), f"no bare Bash: {allow}")

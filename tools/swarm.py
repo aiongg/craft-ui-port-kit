@@ -29,8 +29,10 @@ Roles
   A job's role names its model (models.<role>, unless "model" is given) and its tools, from one table, ROLE_TOOLS
   below: every role gets Read, Grep, Glob, Bash, Write and Edit, with pipeline.lookup_tools, Write, Edit and the kit's
   track command auto-approved, and a role in the table also gets its own commands (fixers and the minimal-port writer `git add` and `git commit`, code-only fixers and that writer also `rustfmt`, every role `mkdir -p`,
-  phase 2 sheet fixes and reconciles coverage.py and port-set). A job's own "tools" and
-  "allow" replace these.
+  phase 2 sheet fixes and reconciles coverage.py and port-set). In the fixer mode `build`, a fixer role's job also gets
+  cl (`cl` and build.cl) and `git -C <tree>` for each tree of the build pool slot its task holds, so no job needs bare
+  Bash. A job's own "tools" and "allow" replace these. A job list whose "allow" grants bare `Bash` (every command,
+  unscoped) is refused (exit 2), and so is a follow-up of a job recorded with one.
 
 Each job
   - runs `claude -p` with the prompt on stdin, `--model`, `--output-format json`, `--strict-mcp-config`,
@@ -38,8 +40,8 @@ Each job
     (pipeline.job_max_turns; a job of a fixer role, compile_fix, red_fixer or red_fixer_framework, gets 1.3 times
     pipeline.fixer_calls unless --max-turns or its own max_turns says otherwise), `--add-dir` for the kit, the
     workspace and the snapshots, and `--json-schema` when it has a schema. Tools: Read, Grep, Glob, Bash, Write and Edit; auto-approved: pipeline.lookup_tools, Write, Edit
-    and the kit's track command (a job list's "tools" and "allow" replace these). The kit's tools dir is on PATH and
-    PORT_KIT_CONFIG names port.toml, so `track` calls in the prompt reach the dashboard. Runs under
+    and the kit's track command (a job list's "tools" and "allow" replace these). The kit's tools dir and the directory of build.cl are on
+    PATH and PORT_KIT_CONFIG names port.toml, so `track` calls in the prompt reach the dashboard. Runs under
     build.memory_cap with --memory-gb (default 4) when the key is set.
   - checks the result against the schema; on a mismatch it resumes the same session once (--retries) with the
     errors, then fails the job.
@@ -123,6 +125,7 @@ ROLE_TOOLS = {
     "sheet_fix": ["Bash(python3 -I {kit}/tools/coverage.py:*)", "Bash({kit}/tools/port-set:*)"],
 }
 # Roles whose prompt states a call budget (pipeline.fixer_calls): their jobs get FIXER_TURNS times that many turns.
+# In the fixer mode `build` they also get cl and git scoped to their build slot's trees (build_tools).
 FIXER_ROLES = ("compile_fix", "red_fixer", "red_fixer_framework")
 FIXER_TURNS = 1.3
 TASK_IN_PROMPT = re.compile(r"\btrack\s+(?:step|status|ask)\s+([A-Za-z0-9][A-Za-z0-9._/-]{0,79})\b")
@@ -131,6 +134,25 @@ TASK_IN_PROMPT = re.compile(r"\btrack\s+(?:step|status|ask)\s+([A-Za-z0-9][A-Za-
 def _write(path: Path, text: str) -> None:
     """Files the kit writes are UTF-8 with LF endings on every platform."""
     path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def bare_bash(allow: str | None) -> bool:
+    """True when an allow list grants `Bash` with no command pattern: every shell command, unasked."""
+    return any(x.strip() == "Bash" for x in (allow or "").split(","))
+
+
+def build_tools(cfg: config.Config, job: "Job") -> list[str]:
+    """A fixer role's extra allow rules in the fixer mode `build`: cl, and git in each tree of the build pool slot
+    its task holds (none when it holds no slot: it works code-only that round)."""
+    if job.role not in FIXER_ROLES or cfg.fixer_mode() != "build":
+        return []
+    from portkit.pool import Pool
+    pool = Pool(cfg)
+    held = next((k for k, v in pool.read().get("slots", {}).items() if v.get("task") == job.task), None)
+    if held is None:
+        return []
+    return ["Bash(cl:*)", f"Bash({cfg.path('build.cl')}:*)",
+            *(f"Bash(git -C {v['tree']}:*)" for v in pool.slot(held).values())]
 
 
 def json_from_text(text: str):
@@ -333,7 +355,8 @@ class Swarm:
         cfg = self.cfg
         allow = job.allow or ",".join([cfg.get("pipeline.lookup_tools"), "Write", "Edit",
                                        f"Bash({KIT / 'tools' / 'track'}:*)", "Bash(mkdir -p:*)",
-                                       *(c.replace("{kit}", str(KIT)) for c in ROLE_TOOLS.get(job.role or "", []))])
+                                       *(c.replace("{kit}", str(KIT)) for c in ROLE_TOOLS.get(job.role or "", [])),
+                                       *build_tools(cfg, job)])
         dirs = []
         cwd = Path(job.cwd or cfg.get("work.dir"))
         cands = [str(KIT), cfg.get("work.dir"), cfg.get("framework.snapshot"), cfg.get("app.snapshot"),
@@ -367,7 +390,9 @@ class Swarm:
         # A headless agent is not the pane or the session that started it; hooks and `track usage` read these.
         for k in ("TMUX", "TMUX_PANE", sessions.ENV_SESSION):
             env.pop(k, None)
-        env["PATH"] = f"{KIT / 'tools'}{os.pathsep}{env.get('PATH', '')}"
+        # The kit's tools, then the directory of build.cl, so `cl` runs by name.
+        cl = self.cfg.get("build.cl")
+        env["PATH"] = os.pathsep.join([str(KIT / "tools"), *([str(Path(cl).parent)] if cl else []), env.get("PATH", "")])
         env[config.ENV_AGENT] = "1"
         if self.cfg.file:
             env[config.ENV_CONFIG] = str(self.cfg.file)
@@ -636,6 +661,10 @@ def load_jobs(cfg: config.Config, path: Path) -> list[Job]:
         schema = j.get("schema") or (json.loads(Path(rel(j["schema_file"])).read_text()) if j.get("schema_file") else None)
         tools = j.get("tools")
         allow = j.get("allow")
+        if bare_bash(",".join(allow) if isinstance(allow, list) else allow):
+            print(f"swarm: {path}: job {j['task']}: \"allow\" grants bare Bash (every command); name each command as "
+                  "Bash(<command>:*) instead (rules/lead-rules.md)", file=sys.stderr)
+            raise SystemExit(2)
         jobs.append(Job(prompt=prompt, label=j.get("title") or j["task"], task=j["task"], model=model_for(cfg, j),
                         schema=schema, title=j.get("title"), group=j.get("group") or path.stem,
                         cwd=rel(j["cwd"]) if j.get("cwd") else None, add_dirs=[rel(d) for d in j.get("add_dirs", [])],
@@ -719,6 +748,9 @@ def follow_up(cfg: config.Config, a) -> int:
     if not sid:
         return done(2, f"{jd}: no saved session to resume")
     rec = json.loads((jd / "job.json").read_text())
+    if bare_bash(rec.get("allow")):
+        return done(2, f"{jd}/job.json: \"allow\" grants bare Bash; start the job again from a job list that names "
+                       "each command")
     job = Job(prompt=(jd / "prompt.md").read_text() if (jd / "prompt.md").is_file() else "", label=rec.get("label") or task,
               task=task, model=rec.get("model") or cfg.get("models.default"), schema=rec.get("schema"),
               phase=rec.get("phase"), title=rec.get("label"), group=jd.parent.parent.name, cwd=rec.get("cwd"),

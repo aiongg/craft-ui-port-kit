@@ -34,6 +34,12 @@ The framework may run more than one pass in a frame (a value-edit rerun, a layou
 - **Third-party libraries are forks or crates**, never vendored into craft-libs. The crates the framework already vendors (`vendor/`) stay vendored, including the framework's edits to them.
 - **Fonts go to the craft fonts set**, never into a crate.
 - **The framework's own egui changes** live on a branch of the framework organisation's egui fork, and the framework pins a revision there.
+- **App ports push nothing to the egui fork.** A port that meets an egui limit handles it in the app or framework code, the way production did, or files the egui change for the framework maintainers. Reason: the fork is shared by every app, and its revision moves only through the framework.
+
+## Changes one app needs
+
+- **A framework change only one app needs is an option that app selects**, with the default unchanged for every other app: a named variant, a setting or a feature the app turns on. The default changes only when parity with production in every app needs it.
+- **Its proof renders the changed components, not the whole gallery:** each component the change reaches, with the default the other apps keep, rendered with `cl render <crate> <Component>` in every theme before and after the change, and the two renders match. Reason: a whole-gallery render per change costs a link of every gallery crate and thousands of shots, and proves no more than the changed components do.
 
 ## Landing
 

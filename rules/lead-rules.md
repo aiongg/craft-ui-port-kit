@@ -57,6 +57,8 @@ The lead is the agent session that runs the port (`process/00-overview.md`, "Rol
 - **Merge rounds take up to about 10 finished branches.** The developer gets one update per merge round: what merged, what started, decisions taken. Anything that needs the developer goes to them at once.
 - **The developer never waits on your checks.** Their run command goes out as soon as the shared branch moves, while local checks run in parallel. A failure there goes to them at once with a new head.
 - **No upstream issue, PR or comment about the port** until the developer says so. Prepare the texts for them to read first.
+- **Before every push to a shared PR branch, check who pushed last.** Fetch it and read the head commit's author and committer (`git log -1 --format='%an <%ae> / %cn' <remote>/<branch>`). When someone else pushed last, stop and ask the developer before you push; when you go ahead, build on their commits and never force-push over them.
+- **Launch the app on screen as soon as it compiles.** At the first compile of the app, start the port's binary once, capture it opening (`tools/look calibrate --side port`), and send the developer the command to run it. Green tests do not show that the app starts, lays out its window or opens its panels.
 
 - **One review per piece of work**, when its owner says the goal is met. Not a review per round.
 - **Look at results yourself** (the captures, the pairs, the page, the test counts) before telling the developer anything is done or how it looks. An agent's summary or a score is not a check.

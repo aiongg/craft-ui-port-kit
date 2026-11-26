@@ -98,7 +98,7 @@ Its compile is `tools/compile-gate <batch>-run-1-compile`. The framework half ru
 
 A cycle that exits 2 met a tool failure: cl exited nonzero and printed no `file:line:col: error` line (a manifest, resolution or setup fault), or an integration tree was dirty. Never count it as a pass or as "0 errors"; fix the setup and run the cycle again. Exit 3 is a merge conflict: resolve it on the integration branch, then run the cycle again.
 
-When the batch compiles, the same cycle formats the changed crates, runs clippy and the doc build on them, runs the tests, and records `track phase 7` (the phase gate decides). The red rounds of [08-tests-and-red-rounds.md](08-tests-and-red-rounds.md) continue with the next cycles.
+When the app first compiles, launch it on screen before anything else ([lead-rules.md](../rules/lead-rules.md), "Launch the app on screen as soon as it compiles"). When the batch compiles, the same cycle formats the changed crates, runs clippy and the doc build on them, runs the tests, and records `track phase 7` (the phase gate decides). The red rounds of [08-tests-and-red-rounds.md](08-tests-and-red-rounds.md) continue with the next cycles.
 
 ## Compile errors
 

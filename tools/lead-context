@@ -4,7 +4,8 @@
 The kit's plugin runs it as a SessionStart hook (hooks/hooks.json); Claude Code adds what it prints to the session.
 It reads the hook's JSON on stdin (`source`, `cwd`) and finds port.toml the usual way (PORT_KIT_CONFIG, the session's
 directory or a parent). Outside a port workspace, and in agents the kit starts (PORT_KIT_AGENT set), it prints
-nothing. It prints only text and always exits 0.
+nothing. It prints only text and always exits 0. It also says how far the kit checkout is behind its upstream, as git
+knows it from the last fetch (it never fetches).
 
 usage: lead-context [--source startup|resume|clear|compact] [--cwd DIR] [--session ID] [--take]
                     (without stdin JSON, for a manual run)
@@ -18,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -36,6 +38,34 @@ def hard_rules(skill: Path) -> list[str]:
         first = re.split(r"(?<=\.)\s", b.replace("**", ""), maxsplit=1)[0]
         out.append(first if len(first) <= 220 else first[:217] + "...")
     return out
+
+
+def kit_freshness(kit: Path) -> str | None:
+    """How far the kit checkout is behind its upstream, from what git already knows: no fetch, so the count is as
+    of the last fetch. None when the kit is not a git checkout with an upstream."""
+    def git(*args):
+        try:
+            r = subprocess.run(["git", "-C", str(kit), *args], capture_output=True, text=True, timeout=3)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        return r.stdout.strip() if r.returncode == 0 else None
+    up = git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+    behind = git("rev-list", "--count", "HEAD..@{u}") if up else None
+    if not behind:
+        return None
+    head = git("rev-parse", "--short", "HEAD")
+    fh = git("rev-parse", "--git-path", "FETCH_HEAD")
+    try:
+        days = (time.time() - (kit / fh).stat().st_mtime) / 86400 if fh else None
+    except OSError:
+        days = None
+    when = "" if days is None else f", last fetch {days:.0f} d ago" if days >= 1 else ", fetched today"
+    if int(behind):
+        return (f"Kit {head} is {behind} commit{'' if behind == '1' else 's'} behind {up}{when}: update it (`git -C {kit} pull --ff-only`) "
+                "before the next phase.")
+    if days is None or days >= 1:
+        return f"Kit {head} matches {up} as of its last fetch{when}; `git -C {kit} fetch` checks for newer commits."
+    return None
 
 
 def lead_lock(work: str | None, session: str | None, take: bool) -> str | None:
@@ -79,6 +109,9 @@ def context(source: str, cwd: str, session: str | None = None, take: bool = Fals
                  "Read the files below again before your next step.")
     L.append(f"Craft UI port of {cfg.get('app.name') or 'an app'}: you are its lead (skill craft-ui-port, "
              f"{kit}/skills/craft-ui-port/SKILL.md). Workspace port.toml: {found}")
+    fresh = kit_freshness(kit)
+    if fresh:
+        L.append(fresh)
     st = None
     try:
         s = T.open_store(str(found))

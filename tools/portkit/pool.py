@@ -9,11 +9,16 @@ parent directory of the app tree, and its `[patch]` wins over the manifest's, so
 framework tree is not below it.
 
 State: <work.dir>/build-pool.json, changed only under an flock on <work.dir>/build-pool.lock.
+
+Trim: removes caches the next build does not need from the target dirs of the integration trees and the slots, but
+only from a target dir no build is using: its slot is free, and trim takes every cargo lock in it (`.cargo-lock`, held
+by a running cargo) without waiting, and holds them while it deletes, so no build starts meanwhile.
 """
 from __future__ import annotations
 
 import fcntl
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -26,6 +31,7 @@ from . import track
 
 TOOLS = Path(__file__).resolve().parents[1]
 REPOS = {"fw": "framework.integration", "app": "app.integration"}
+STALE_S = 86400   # incremental units no build wrote for this long are trimmed
 
 
 class PoolError(Exception):
@@ -148,7 +154,18 @@ class Pool:
                     raise PoolError(f"no free build slot ({busy})")
                 slots[held] = {"task": task, "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
                 track.event("build-pool", f"slot {held} taken", task=task)
+        self.reseed(int(held))
         return int(held), self.slot(held)
+
+    def reseed(self, k: int) -> None:
+        """Seed the target dir of each of slot k's trees again when `trim --retire` removed it."""
+        rs = repos(self.cfg)
+        for r, integration in rs.items():
+            tree = tree_of(self.cfg, k, r)
+            if tree.is_dir() and not target_of(tree).exists():
+                _run([str(TOOLS / "seed-target"), str(target_of(tree)), str(warm_target(self.cfg, integration)),
+                      str(tree)], cwd=tree)
+                track.event("build-pool", f"slot {k} {r} target dir seeded again")
 
     def give(self, task: str) -> int | None:
         """Frees the task's slot and detaches its trees; None when it holds none. Refuses while a tree has tracked
@@ -171,6 +188,79 @@ class Pool:
             st["slots"][held] = {"task": None, "since": None}
         track.event("build-pool", f"slot {held} given back", task=task)
         return int(held)
+
+    # ---- trim
+    def targets(self) -> list[tuple[Path, str | None, str | None]]:
+        """Every target dir the pool knows: (dir, the task holding it, its slot), the slot None for an integration
+        tree."""
+        out = [(warm_target(self.cfg, t), None, None) for t in repos(self.cfg).values()]
+        for k, v in sorted(self.read()["slots"].items(), key=lambda kv: int(kv[0])):
+            out += [(Path(t["target"]), v.get("task"), k) for t in self.slot(k).values()]
+        return out
+
+    def trim(self, retire: bool = False, dry_run: bool = False, log=print) -> dict:
+        """Trim every target dir no build is using; with retire, also remove the target dir of the least recently
+        built free slot (take seeds it again). Returns {"freed_gb", "trimmed", "skipped"}."""
+        freed, trimmed, skipped, free_slots = 0, [], [], []
+        for target, task, k in self.targets():
+            if not target.is_dir():
+                continue
+            if task:
+                skipped.append(str(target))
+                log(f"{target}: skipped, held by {task}")
+                continue
+            held = _lock_all(target)
+            if held is None:
+                skipped.append(str(target))
+                log(f"{target}: skipped, a build is running in it")
+                continue
+            try:
+                paths = _trimmable(target)
+                b = sum(_freed_bytes(x) for x in paths)
+                if not dry_run:
+                    for x in paths:
+                        _remove(x)
+            finally:
+                for fd in held:
+                    os.close(fd)
+            freed += b
+            trimmed.append(str(target))
+            log(f"{target}: {'would remove' if dry_run else 'removed'} {len(paths)} paths, frees about {b / 2**30:.1f} GB")
+            if k is not None:
+                free_slots.append((target, k))
+        if retire:
+            freed += self.retire(free_slots, dry_run, log)
+        gb = round(freed / 2**30, 1)
+        if not dry_run:
+            track.event("build-pool", f"trim: about {gb} GB freed in {len(trimmed)} target dirs, {len(skipped)} in use",
+                        data={"freed_gb": gb, "trimmed": len(trimmed), "skipped": len(skipped), "retire": retire})
+        return {"freed_gb": gb, "trimmed": trimmed, "skipped": skipped}
+
+    def retire(self, free: list[tuple[Path, str]], dry_run: bool, log) -> int:
+        """Remove the target dirs of the least recently built free slot, under the pool lock so no take races it."""
+        slots: dict[str, list[Path]] = {}
+        for t, k in free:
+            slots.setdefault(k, []).append(t)
+        for k, ts in sorted(slots.items(), key=lambda kv: max(map(_last_built, kv[1]))):
+            with self.locked() as st:
+                if st["slots"].get(k, {}).get("task"):
+                    continue
+                held = [_lock_all(t) for t in ts]
+                try:
+                    if any(h is None for h in held):
+                        continue
+                    b = sum(_freed_bytes(t) for t in ts)
+                    if not dry_run:
+                        for t in ts:
+                            _remove(t)
+                finally:
+                    for fd in (fd for h in held if h for fd in h):
+                        os.close(fd)
+            log(f"retire: {'would remove' if dry_run else 'removed'} the target dirs of slot {k} "
+                f"({', '.join(map(str, ts))}), frees about {b / 2**30:.1f} GB; `build-pool take` seeds them again")
+            return b
+        log("retire: no free slot to retire")
+        return 0
 
     # ---- size
     def size(self, peak_gb: float) -> dict:
@@ -203,6 +293,89 @@ def _meminfo_gb(field: str) -> float | None:
     except OSError:
         pass
     return None
+
+
+def _lock_all(target: Path) -> list[int] | None:
+    """Take every cargo lock under the target dir without waiting: the open descriptors, or None (all released)
+    when one is held, that is, a build is running there."""
+    fds = []
+    for lock in [*target.glob(".cargo-lock"), *target.glob("*/.cargo-lock"), *target.glob("*/*/.cargo-lock")]:
+        try:
+            fd = os.open(lock, os.O_RDWR)
+        except OSError:
+            continue
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(fd)
+            for f in fds:
+                os.close(f)
+            return None
+        fds.append(fd)
+    return fds
+
+
+def _trimmable(target: Path) -> list[Path]:
+    """What the next build does not need: superseded test executables (all but the newest of each name in a deps
+    dir), examples, docs, wasm output dirs, tmp, and incremental units no build wrote for STALE_S."""
+    out = [p for p in (target / "doc", target / "tmp") if p.is_dir()]
+    out += [p for p in target.glob("wasm32-*") if p.is_dir()]
+    now = time.time()
+    for fp in [*target.glob("*/.fingerprint"), *target.glob("*/*/.fingerprint")]:
+        prof = fp.parent
+        if prof.parent != target and prof.parent.name.startswith("wasm32-"):
+            continue
+        if (prof / "examples").is_dir():
+            out.append(prof / "examples")
+        by_name: dict[str, list[Path]] = {}
+        for exe in (prof / "deps").glob("*-*"):
+            if "." not in exe.name and exe.is_file() and os.access(exe, os.X_OK):
+                by_name.setdefault(exe.name.rsplit("-", 1)[0], []).append(exe)
+        for exes in by_name.values():
+            out += sorted(exes, key=lambda x: x.stat().st_mtime)[:-1]
+        for unit in (prof / "incremental").glob("*"):
+            if unit.is_dir() and now - _newest(unit) > STALE_S:
+                out.append(unit)
+    return out
+
+
+def _newest(d: Path) -> float:
+    t = d.stat().st_mtime
+    for root, dirs, files in os.walk(d):
+        for n in dirs + files:
+            try:
+                t = max(t, os.lstat(os.path.join(root, n)).st_mtime)
+            except OSError:
+                pass
+    return t
+
+
+def _last_built(target: Path) -> float:
+    return max((f.stat().st_mtime for f in [*target.glob("*/.fingerprint"), *target.glob("*/*/.fingerprint")]),
+               default=0.0)
+
+
+def _freed_bytes(p: Path) -> int:
+    """Bytes that deleting p frees: files with no other hard link (seeded target dirs share theirs)."""
+    def one(f):
+        try:
+            st = os.lstat(f)
+        except OSError:
+            return 0
+        return st.st_size if st.st_nlink == 1 else 0
+    if p.is_file():
+        return one(p)
+    return sum(one(os.path.join(r, n)) for r, _, fs in os.walk(p) for n in fs)
+
+
+def _remove(p: Path) -> None:
+    if p.is_dir() and not p.is_symlink():
+        shutil.rmtree(p, ignore_errors=True)
+    else:
+        try:
+            p.unlink()
+        except OSError:
+            pass
 
 
 def _du_gb(d: Path) -> float:

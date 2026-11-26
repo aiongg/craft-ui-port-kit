@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """build-pool: the fixed set of build slots that build-mode fixers and follow-up agents take and give back.
 
-usage: build-pool make [N] | take TASK [--json] | give TASK | status [--json] | size [--peak-gb G]   [--config PORT.TOML]
+usage: build-pool make [N] | take TASK [--json] | give TASK | status [--json] | size [--peak-gb G]
+                  | trim [--retire] [--dry-run]   [--config PORT.TOML]
 
 A slot is one build tree per repo with an integration tree (framework.integration, app.integration), each with its
 own target dir seeded from the integration tree's warm one (tools/seed-target). Slots live under build.pool_dir:
@@ -11,15 +12,23 @@ file. Trees start detached at the integration head; the task switches its tree t
 
   make [N]     add N slots (default build.pool_size). Refuses (exit 2) when an integration tree has no warm target
                dir yet.
-  take TASK    give TASK a free slot, or the slot it already holds, and print its trees and target dirs. Exit 1
-               when no slot is free or no pool exists.
+  take TASK    give TASK a free slot, or the slot it already holds, and print its trees and target dirs. A target
+               dir that `trim --retire` removed is seeded again first. Exit 1 when no slot is free or no pool exists.
   give TASK    free TASK's slot and detach its trees. Exit 1 while a tree has tracked changes other than Cargo.lock.
                A task that holds no slot: a note, exit 0.
   status       the slots, their holders and since when.
+  trim         free disk in the target dirs of the integration trees and the slots that no build is using: a
+               slot held by a task is skipped, and so is a target dir whose cargo lock (`.cargo-lock`) a running
+               build holds; trim holds those locks while it deletes, so no build starts meanwhile. It removes what
+               the next build does not need: superseded test executables (all but the newest of each name),
+               examples, docs, wasm output dirs, tmp, and incremental units no build wrote for a day. Never a whole
+               incremental cache. --retire also removes the target dirs of the least recently built free slot;
+               `take` seeds it again. --dry-run lists and deletes nothing. Prints each target dir and about how much
+               it frees (files with no other hard link; seeded dirs share theirs).
   size         suggest build.pool_size: the smaller of MemAvailable over G (default build.memory_gb, set it to the
                measured peak of one build) and free disk under build.pool_dir over the integration target dirs' size.
 
-State: <work.dir>/build-pool.json, changed under an flock. Each make, take and give posts a `build-pool` event.
+State: <work.dir>/build-pool.json, changed under an flock. Each make, take, give and trim posts a `build-pool` event.
 Exit 0 done, 1 refused, 2 a setup or tool failure.
 """
 from __future__ import annotations
@@ -41,10 +50,12 @@ def show(k: int, slot: dict) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=("make", "take", "give", "status", "size"))
+    ap.add_argument("command", choices=("make", "take", "give", "status", "size", "trim"))
     ap.add_argument("arg", nargs="?")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--peak-gb", type=float)
+    ap.add_argument("--retire", action="store_true")
+    ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--config")
     a = ap.parse_args()
     try:
@@ -72,6 +83,10 @@ def main() -> int:
                 print("no build pool (tools/build-pool make N)")
             for k, v in sorted(st.items(), key=lambda kv: int(kv[0])):
                 print(f"{show(int(k), pool.slot(k))}: " + (f"{v['task']} since {v['since']}" if v["task"] else "free"))
+        elif a.command == "trim":
+            r = pool.trim(retire=a.retire, dry_run=a.dry_run)
+            print(f"trim: about {r['freed_gb']} GB {'to free' if a.dry_run else 'freed'}; {len(r['trimmed'])} target "
+                  f"dirs trimmed, {len(r['skipped'])} in use")
         else:
             r = pool.size(a.peak_gb or float(cfg.get("build.memory_gb")))
             print(json.dumps(r) if a.json else

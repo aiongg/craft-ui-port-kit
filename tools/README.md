@@ -78,7 +78,7 @@ Every long-running tool posts one event to the progress dashboard when it ends, 
 
 | Tool | What it does |
 |---|---|
-| `build-pool make [N] \| take TASK \| give TASK \| status \| size` | The build pool: `build.pool_size` slots under `build.pool_dir`, each one build tree per repo with a seeded target dir; the app tree builds against its slot's framework tree. Tasks take and give back slots under a lock. |
+| `build-pool make [N] \| take TASK \| give TASK \| status \| size \| trim [--retire]` | The build pool: `build.pool_size` slots under `build.pool_dir`, each one build tree per repo with a seeded target dir; the app tree builds against its slot's framework tree. Tasks take and give back slots under a lock. `trim` frees disk only in target dirs no build is using. |
 | `seed-target NEW-TARGET WARM-TARGET [WORKTREE]` | Seeds a cargo target dir from a warm one, so a new worktree reuses the built dependencies. Use the same toolchain. |
 | `capped GB CMD...` | Runs a heavy job in its own systemd scope with a memory cap (Linux). Optional launcher through `build.memory_cap`. |
 | `scip/scipdb.py` | Turns a rust-analyzer SCIP index into sqlite and answers reference queries. `scip_pb2.py` is its generated protobuf module (needs the `protobuf` Python package). |

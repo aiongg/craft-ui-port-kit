@@ -86,7 +86,7 @@ The dashboard (`tools/track.md`) is the developer's view of the port. These duti
 - **Cap the memory of heavy jobs** (rust-analyzer daemons, builds, writer batches) with `build.memory_cap`, so an out-of-memory kill takes the job, not your session.
 - **Headless agents run with the rust-analyzer LSP plugin off** (`templates/claude-settings.json`). Writers get diagnostics from the shared racheck daemons. Stop rust-analyzer servers nothing uses.
 - **Keep build trees few and warm.** One integration tree per repo and a small fixed pool of build trees, each with its own target dir; agents switch branches inside them (`process/11-build-loop.md`).
-- **Watch disk while builds run.** Trim target dirs by what the next build loses, never a whole incremental cache (`process/11-build-loop.md`, "Disk").
+- **Watch disk while builds run.** Free space with `tools/build-pool trim`, never by deleting in a target dir by hand (`process/11-build-loop.md`, "Disk").
 
 ## Records and hand-offs
 

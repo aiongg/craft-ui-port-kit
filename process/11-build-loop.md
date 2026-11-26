@@ -183,12 +183,8 @@ These are the targets every loop is held to. Every agent report and every lead u
 
 - When no planned task needs a worktree any more, remove it and its target dir together.
 - Build outputs, worktrees and captures never go on a RAM-backed `/tmp`.
-- When space runs short while builds run, trim target dirs that are not building, in this order, taking only what the next build does not need:
-  1. superseded test executables (`tools/trash-stale-tests`) and older copies of libraries;
-  2. `debug/examples`, `doc`, wasm output dirs, `tmp`;
-  3. incremental units no build has written for a day;
-  4. still short: retire one whole free build tree's target dir, least recently built first, and seed it again before its next use.
-- Never trim a whole `debug/incremental` of a tree that is in use.
+- When space runs short while builds run, run `tools/build-pool trim`. It trims only target dirs no build is using (a free slot, no running cargo holding the dir's lock), and only what the next build does not need: superseded test executables, examples, docs, wasm output dirs, `tmp`, and incremental units no build wrote for a day. Still short: `tools/build-pool trim --retire` also removes the target dirs of the least recently built free slot, and `build-pool take` seeds them again.
+- Never delete in a target dir by hand: a hand-written delete cannot see which builds are running ("Keep incremental caches" above).
 
 ## What CI covers
 

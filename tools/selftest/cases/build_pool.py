@@ -58,3 +58,54 @@ def case_make_take_give(s):
     check(p.returncode == 0 and json.loads(p.stdout)["slot"] == 1, "the freed slot goes to the next task", p)
     for t in (fw, app):
         check(git(t, "status", "--porcelain") == "", f"{t.name} integration tree unchanged")
+
+
+def case_trim_skips_trees_in_use(s):
+    import fcntl
+    import time
+    fw, app = setup(s)
+    env = {"PATH": f"{STUBS}{os.pathsep}{os.environ['PATH']}"}
+    check(s.run("build-pool", "make", "2", env=env).returncode == 0, "make 2", s.last)
+    pool = s.work / "trees" / "pool"
+    old = time.time() - 3 * 86400
+
+    def litter(target):
+        deps = target / "debug" / "deps"
+        (target / "debug" / ".fingerprint").mkdir(parents=True, exist_ok=True)
+        (target / "debug" / ".cargo-lock").write_text("")
+        for name, t in (("it-aaa", old), ("it-bbb", time.time())):
+            (deps / name).write_text("exe\n")
+            (deps / name).chmod(0o755)
+            os.utime(deps / name, (t, t))
+        (target / "debug" / "examples").mkdir(exist_ok=True)
+        for unit, t in (("old-1", old), ("new-1", time.time())):
+            u = target / "debug" / "incremental" / unit
+            u.mkdir(parents=True, exist_ok=True)
+            (u / "s-1").write_text("x\n")
+            os.utime(u / "s-1", (t, t))
+            os.utime(u, (t, t))
+
+    free, held, busy = pool / "1" / "fw-target", pool / "2" / "fw-target", app.parent / f"{app.name}-target"
+    for t in (free, held, busy):
+        litter(t)
+    s.run("build-pool", "take", "t9")      # slot 1
+    s.run("build-pool", "take", "t8")      # slot 2
+    s.run("build-pool", "give", "t9")      # slot 1 free again, slot 2 held by t8
+    with open(busy / "debug" / ".cargo-lock") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)      # a running cargo in the app integration tree
+        p = s.run("build-pool", "trim")
+    check(p.returncode == 0, "trim", p)
+    deps = free / "debug" / "deps"
+    check(not (deps / "it-aaa").exists() and (deps / "it-bbb").exists(), "the superseded test executable goes", p)
+    check(not (free / "debug" / "examples").exists(), "examples go", p)
+    check(not (free / "debug" / "incremental" / "old-1").exists() and (free / "debug" / "incremental" / "new-1").exists(),
+          "only incremental units unwritten for a day go", p)
+    for t, why in ((held, "held by t8"), (busy, "a build is running")):
+        check((t / "debug" / "deps" / "it-aaa").exists() and (t / "debug" / "incremental" / "old-1").exists(),
+              f"{t} untouched", p)
+        check(why in p.stdout, f"says why {t} is skipped", p)
+    p = s.run("build-pool", "trim", "--retire")
+    check(not free.exists() and not (pool / "1" / "app" / "tree-target").exists() and held.exists(),
+          "retire removes the free slot's target dirs, not the held one's", p)
+    p = s.run("build-pool", "take", "t7", env=env)
+    check(p.returncode == 0 and (free / "debug" / "deps" / "libdep-1.rlib").is_file(), "take seeds it again", p)

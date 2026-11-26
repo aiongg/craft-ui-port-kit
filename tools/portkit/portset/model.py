@@ -66,16 +66,17 @@ def claude(prompt: str, sheet: Sheet, model: str, tools: str, max_turns: int, la
     if not resume:
         sid = str(uuid.uuid4())   # fixed before the start, so a killed call leaves its session to resume or collect
         cmd += ["--session-id", sid]
-        (od / f"{label}.session").write_text(sid)
+        (od / f"{label}.session").write_text(sid, encoding="utf-8")
     # Files, not pipes, and a session of its own: the call outlives the lead's session and keeps its output.
-    (od / f"{label}.prompt").write_text(prompt)
+    (od / f"{label}.prompt").write_text(prompt, encoding="utf-8", newline="\n")
     t0 = time.time()
-    with open(od / f"{label}.prompt") as fin, open(od / f"{label}.stdout", "w") as fout, \
-            open(od / f"{label}.stderr", "w") as ferr:
-        rc = subprocess.Popen(cmd, stdin=fin, stdout=fout, stderr=ferr, text=True, cwd=str(sheet.tree()), env=env,
+    with open(od / f"{label}.prompt", encoding="utf-8") as fin, \
+            open(od / f"{label}.stdout", "w", encoding="utf-8") as fout, open(od / f"{label}.stderr", "w", encoding="utf-8") as ferr:
+        rc = subprocess.Popen(cmd, stdin=fin, stdout=fout, stderr=ferr, text=True, encoding="utf-8", errors="replace", cwd=str(sheet.tree()), env=env,
                               start_new_session=True).wait()
     secs = time.time() - t0
-    r = subprocess.CompletedProcess(cmd, rc, (od / f"{label}.stdout").read_text(), (od / f"{label}.stderr").read_text())
+    r = subprocess.CompletedProcess(cmd, rc, (od / f"{label}.stdout").read_text(encoding="utf-8", errors="replace"),
+                                    (od / f"{label}.stderr").read_text(encoding="utf-8", errors="replace"))
     try:
         d = json.loads(r.stdout)
         if isinstance(d, list):

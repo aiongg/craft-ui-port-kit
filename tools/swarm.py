@@ -29,9 +29,13 @@ Roles
   A job's role names its model (models.<role>, unless "model" is given) and its tools, from one table, ROLE_TOOLS
   below: every role gets Read, Grep, Glob, Bash, Write and Edit, with pipeline.lookup_tools, Write, Edit and the kit's
   track command auto-approved, and a role in the table also gets its own commands (fixers and the minimal-port writer `git add` and `git commit`, code-only fixers and that writer also `rustfmt`, every role `mkdir -p`,
-  phase 2 sheet fixes and reconciles coverage.py and port-set). In the fixer mode `build`, a fixer role's job also gets
-  cl (`cl` and build.cl) and `git -C <tree>` for each tree of the build pool slot its task holds, so no job needs bare
-  Bash. A job's own "tools" and "allow" replace these. A job list whose "allow" grants bare `Bash` (every command,
+  phase 2 sheet fixes and reconciles coverage.py and port-set). In the fixer mode `build`, a fixer role's job runs in
+  the build pool slot its task holds: its working directory is the slot's app tree (the framework tree for
+  red_fixer_framework, or when the pool has no app tree), so `cl` builds there, and it also gets cl (`cl` and
+  build.cl) and `git -C <tree>` for each tree of the slot, so no job needs bare Bash. A build-mode fixer job whose
+  task holds no slot is not started (take one with `build-pool take TASK`). A follow-up runs in the slot the task
+  holds then, in a fresh session when that slot differs from the last one (a session resumes only in its own
+  directory); with no slot it keeps its tree and works code-only, as the cycle's packet says. A job's own "tools" and "allow" replace these. A job list whose "allow" grants bare `Bash` (every command,
   unscoped) is refused (exit 2), and so is a follow-up of a job recorded with one.
 
 Each job
@@ -141,18 +145,31 @@ def bare_bash(allow: str | None) -> bool:
     return any(x.strip() == "Bash" for x in (allow or "").split(","))
 
 
-def build_tools(cfg: config.Config, job: "Job") -> list[str]:
-    """A fixer role's extra allow rules in the fixer mode `build`: cl, and git in each tree of the build pool slot
-    its task holds (none when it holds no slot: it works code-only that round)."""
+def held_slot(cfg: config.Config, job: "Job") -> dict | None:
+    """The trees ({repo: {"tree", "target"}}) of the build pool slot a fixer role's task holds in the fixer mode
+    `build`; None outside that mode, for other roles, or when the task holds no slot."""
     if job.role not in FIXER_ROLES or cfg.fixer_mode() != "build":
-        return []
+        return None
     from portkit.pool import Pool
     pool = Pool(cfg)
     held = next((k for k, v in pool.read().get("slots", {}).items() if v.get("task") == job.task), None)
-    if held is None:
+    return None if held is None else pool.slot(held)
+
+
+def slot_cwd(slot: dict, role: str | None) -> str:
+    """The working directory of a build-mode fixer: its slot's framework tree for red_fixer_framework, else the app
+    tree (the framework tree when the pool has no app tree). cl finds its workspace from the working directory."""
+    repo = "fw" if role == "red_fixer_framework" or "app" not in slot else "app"
+    return slot[repo]["tree"]
+
+
+def build_tools(cfg: config.Config, job: "Job") -> list[str]:
+    """A fixer role's extra allow rules in the fixer mode `build`: cl, and git in each tree of the build pool slot
+    its task holds (none when it holds no slot: it works code-only that round)."""
+    slot = held_slot(cfg, job)
+    if slot is None:
         return []
-    return ["Bash(cl:*)", f"Bash({cfg.path('build.cl')}:*)",
-            *(f"Bash(git -C {v['tree']}:*)" for v in pool.slot(held).values())]
+    return ["Bash(cl:*)", f"Bash({cfg.path('build.cl')}:*)", *(f"Bash(git -C {v['tree']}:*)" for v in slot.values())]
 
 
 def json_from_text(text: str):
@@ -318,8 +335,20 @@ class Swarm:
                     return d.get("value")
             except json.JSONDecodeError:
                 pass
+        slot = held_slot(self.cfg, job)
+        if slot is not None:
+            job.cwd = slot_cwd(slot, job.role)
+        no_slot = (job.role in FIXER_ROLES and self.cfg.fixer_mode() == "build" and slot is None
+                   and f"{job.task} holds no build pool slot, and a build-mode fixer runs in its slot's tree: "
+                       f"`tools/build-pool take {job.task}` first")
         _write(jd / "prompt.md", job.prompt)
         _write(jd / "job.json", json.dumps(job.record(), indent=1))
+        if no_slot and not self.a.dry_run:
+            with self.lock:
+                self.stats["failed"] += 1
+            self.board(job, "failed", no_slot)
+            self.say(f"{job.task}: not run: {no_slot}")
+            return None
         if self.a.dry_run:
             self.say(f"{job.task}: would run {job.model}, max_turns {self.turns(job)}, {len(job.prompt)} chars"
                      f"{', schema' if job.schema else ''}, key {job.key()} ({jd / 'prompt.md'})")
@@ -719,10 +748,10 @@ def last_report(jd: Path) -> str:
     return "(no report was saved)"
 
 
-def fresh_prompt(job, jd: Path, follow: str, ctx: int) -> str:
+def fresh_prompt(job, jd: Path, follow: str, why: str) -> str:
     """A fresh session's prompt: the job's brief, its last report, then the follow-up."""
     return (f"{job.prompt.rstrip()}\n\n## Your earlier session's report\n\nAn earlier session worked on this task and "
-            f"handed back this report. Its context had reached {ctx} tokens, so you start fresh: read what the "
+            f"handed back this report. {why}, so you start fresh: read what the "
             f"report names in your trees and keep what is right.\n\n{last_report(jd).rstrip()}\n\n## Follow-up\n\n"
             f"{follow}")
 
@@ -762,13 +791,23 @@ def follow_up(cfg: config.Config, a) -> int:
     ctx = sessions.last_context(sid, job.cwd or cfg.get("work.dir"))
     limit = int(cfg.get("pipeline.follow_up_max_context"))
     fresh = ctx is not None and ctx >= limit
+    # A build-mode fixer runs in the slot its task holds this round (none: the packet says code-only, and it keeps its
+    # tree). A session resumes only from the directory it ran in, so a new slot starts a fresh session.
+    slot = held_slot(cfg, job)
+    moved = slot is not None and slot_cwd(slot, job.role) != job.cwd
+    if moved:
+        job.cwd = slot_cwd(slot, job.role)
+        _write(jd / "job.json", json.dumps(job.record(), indent=1))
+        fresh = True
     out.update(context=ctx, fresh=fresh)
     if fresh:
-        prompt = fresh_prompt(job, jd, prompt, ctx)
+        prompt = fresh_prompt(job, jd, prompt, "Your build slot changed" if moved else
+                              f"Its context had reached {ctx} tokens")
     _write(jd / f"{tag}-prompt.md", prompt)
     sw = Swarm(cfg, jd.parent.parent, a)
     with track.recorded("swarm follow-up", task=task) as r:
-        sw.board(job, "running", f"follow-up {n} ({job.model})" + (f", fresh session at {ctx} tokens" if fresh else ""))
+        sw.board(job, "running", f"follow-up {n} ({job.model})" + (", fresh session in its new build slot" if moved else
+                                                                     f", fresh session at {ctx} tokens" if fresh else ""))
         sw.log(f"{task}: follow-up {n} started ({job.model}{', fresh session' if fresh else ''})")
         try:
             value, err = sw.call(job, jd, resume=None if fresh else sid, prompt=prompt, tag=tag)

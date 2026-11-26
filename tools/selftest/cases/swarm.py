@@ -122,16 +122,35 @@ def case_bare_bash_refused(s):
     check(s.run("swarm.py", "jobs.json", "--dry-run").returncode == 0, "a scoped Bash rule passes", s.last)
 
 
-def case_build_mode_fixer_gets_cl_and_git(s):
-    s.config({"pipeline.fixer_mode": "build"})
-    tree = s.root / "pool" / "1" / "fw"
-    (s.work / "build-pool.json").write_text(json.dumps({"slots": {"1": {"task": "rfix-g1", "since": "x"}}}))
+def case_build_mode_fixer_runs_in_its_slot(s):
     s.tree("fwint", {"README": "x\n"})
+    s.tree("appint", {"README": "x\n"})
     s.config({"pipeline.fixer_mode": "build", "framework.integration": str(s.root / "fwint"),
-              "build.pool_dir": str(s.root / "pool")})
+              "app.integration": str(s.root / "appint"), "build.pool_dir": str(s.root / "pool")})
+    for k in ("1", "2"):
+        for t in ("fw", "app/tree"):
+            (s.root / "pool" / k / t).mkdir(parents=True)
+    pool = lambda k: (s.work / "build-pool.json").write_text(  # noqa: E731
+        json.dumps({"slots": {k: {"task": "rfix-g1", "since": "x"}}}))
     jobs(s, "test a\n")
     p = s.run("swarm.py", "jobs.json")
-    check(p.returncode == 0, "build-mode fixer run", p)
-    allow = calls(s)[0]["argv"][calls(s)[0]["argv"].index("--allowedTools") + 1]
-    check("Bash(cl:*)" in allow and f"Bash(git -C {tree}:*)" in allow, f"cl and git in its slot's tree: {allow}")
+    check(p.returncode == 0 and "holds no build pool slot" in p.stdout and not calls(s),
+          "a build-mode fixer without a slot is not started", p)
+    pool("1")
+    p = s.run("swarm.py", "jobs.json")
+    check(p.returncode == 0 and len(calls(s)) == 1, "build-mode fixer run", p)
+    first = calls(s)[0]
+    app1 = s.root / "pool" / "1" / "app" / "tree"
+    check(first["cwd"] == str(app1), f"it runs in its slot's app tree: {first['cwd']}")
+    allow = first["argv"][first["argv"].index("--allowedTools") + 1]
+    check("Bash(cl:*)" in allow and f"Bash(git -C {s.root / 'pool' / '1' / 'fw'}:*)" in allow
+          and f"Bash(git -C {app1}:*)" in allow, f"cl and git in its slot's trees: {allow}")
     check("Bash," not in allow + "," and not allow.endswith(",Bash"), f"no bare Bash: {allow}")
+    (s.work / "packet-2.md").write_text("still failing: test a\n")
+    s.run("swarm.py", "--follow-up", "rfix-g1", "packet-2.md")
+    check(calls(s)[1]["cwd"] == str(app1) and "--resume" in calls(s)[1]["argv"], "the same slot resumes in place")
+    pool("2")
+    p = s.run("swarm.py", "--follow-up", "rfix-g1", "packet-2.md")
+    third = calls(s)[2]
+    check(third["cwd"] == str(s.root / "pool" / "2" / "app" / "tree") and "--resume" not in third["argv"]
+          and json.loads(p.stdout.strip().splitlines()[-1])["fresh"], f"a new slot runs there, in a fresh session: {third}", p)

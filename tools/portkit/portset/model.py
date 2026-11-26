@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import time
+import uuid
 from dataclasses import dataclass
 
 from portkit import config as _config
@@ -62,16 +63,26 @@ def claude(prompt: str, sheet: Sheet, model: str, tools: str, max_turns: int, la
     persist = ["--resume", resume] if resume else []
     cmd = ["claude", "-p", "--model", model, "--tools", tools, "--strict-mcp-config", "--output-format", "json",
            "--settings", SETTINGS, *persist, "--max-turns", str(max_turns), *dirs, *extra]
+    if not resume:
+        sid = str(uuid.uuid4())   # fixed before the start, so a killed call leaves its session to resume or collect
+        cmd += ["--session-id", sid]
+        (od / f"{label}.session").write_text(sid)
+    # Files, not pipes, and a session of its own: the call outlives the lead's session and keeps its output.
+    (od / f"{label}.prompt").write_text(prompt)
     t0 = time.time()
-    r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, cwd=str(sheet.tree()), env=env)
+    with open(od / f"{label}.prompt") as fin, open(od / f"{label}.stdout", "w") as fout, \
+            open(od / f"{label}.stderr", "w") as ferr:
+        rc = subprocess.Popen(cmd, stdin=fin, stdout=fout, stderr=ferr, text=True, cwd=str(sheet.tree()), env=env,
+                              start_new_session=True).wait()
     secs = time.time() - t0
+    r = subprocess.CompletedProcess(cmd, rc, (od / f"{label}.stdout").read_text(), (od / f"{label}.stderr").read_text())
     try:
         d = json.loads(r.stdout)
         if isinstance(d, list):
             d = next((x for x in reversed(d) if x.get("type") == "result"), d[-1])
     except (json.JSONDecodeError, IndexError):
         (od / f"{label}.err").write_text(r.stdout + r.stderr)
-        raise SystemExit(f"claude call failed; see {od}/{label}.err")
+        raise SystemExit(f"claude call failed; see {od}/{label}.err" + (f" (session {sid})" if not resume else ""))
     (od / f"{label}.json").write_text(json.dumps(d, indent=1))
     u = d.get("usage", {}) or {}
     cost = float(d.get("total_cost_usd", 0) or 0)

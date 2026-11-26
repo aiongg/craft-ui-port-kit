@@ -43,7 +43,10 @@ Each job
     build.memory_cap with --memory-gb (default 4) when the key is set.
   - checks the result against the schema; on a mismatch it resumes the same session once (--retries) with the
     errors, then fails the job.
-  - keeps its session id in jobs/<key>/session, so a follow-up resumes it.
+  - keeps its session id in jobs/<key>/session, so a follow-up resumes it. The id is fixed before the agent starts
+    and also goes into jobs/<key>/result.json, for failed and killed jobs too.
+  - starts each agent in its own session, reading its prompt from a file and writing to files (jobs/<key>/call-N.out),
+    so an agent keeps running if swarm or the lead's session ends; rerun the same command to collect or resume.
   - logs the call in work.usage_log (the port-set format, `set` = the job's task) and posts a `model-call` event.
   - is one task on the dashboard: `todo` when the script asks for it, `running`, then `done` or `failed`. The
     task id is opts.task when given, else the task named in the prompt's first `track step|status|ask <id>` call,
@@ -72,7 +75,7 @@ Follow-up
   {"task", "ok", "value" (the checked object or reply text; null on failure), "error", "session_id", "cost_usd",
   "job_dir", "context" (tokens, or null when unknown), "fresh" (true when a fresh session was started)}. Exit 0 ok, 1 the call failed, 2 no such task, no saved session, or a usage error.
 
-Output: the run log (phase and log lines) on stdout and in <run dir>/log.txt; at the end, the script's return
+Output: the run log (phase and log lines, follow-ups included) on stdout and in <run dir>/log.txt; at the end, the script's return
 value as JSON on stdout and in <run dir>/result[-<stage>].json. Exit 0 when the script returned (failed jobs are
 counted in the summary and the dashboard event), 1 when it threw, 2 for a usage or setup error.
 """
@@ -91,6 +94,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from collections import Counter
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -210,12 +214,16 @@ class Swarm:
         (run_dir / "jobs").mkdir(parents=True, exist_ok=True)
 
     # ---- output
+    def log(self, line: str) -> None:
+        with self.lock:
+            with open(self.run_dir / "log.txt", "a", encoding="utf-8", newline="\n") as f:
+                f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {line}\n")
+
     def say(self, line: str) -> None:
         stamp = time.strftime("%H:%M:%S", time.gmtime())
         with self.lock:
             print(f"{stamp} {line}", flush=True)
-            with open(self.run_dir / "log.txt", "a", encoding="utf-8", newline="\n") as f:
-                f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {line}\n")
+        self.log(line)
 
     def board(self, job: Job, state: str, note: str | None = None, new: bool = False) -> None:
         if self.store is None or self.a.dry_run:
@@ -307,7 +315,7 @@ class Swarm:
             value, err = None, f"{type(e).__name__}: {e}"
         if err is None:
             _write(res, json.dumps({"ok": True, "task": job.task, "label": job.label, "model": job.model,
-                                       "value": value}, indent=1, ensure_ascii=False))
+                                    "session_id": session_of(jd), "value": value}, indent=1, ensure_ascii=False))
             with self.lock:
                 self.stats["ok"] += 1
             self.board(job, "done")
@@ -315,8 +323,10 @@ class Swarm:
             return value
         with self.lock:
             self.stats["failed"] += 1
+        _write(res, json.dumps({"ok": False, "task": job.task, "label": job.label, "model": job.model,
+                                "session_id": session_of(jd), "error": err}, indent=1, ensure_ascii=False))
         self.board(job, "failed", err[:300])
-        self.say(f"{job.task}: FAILED: {err[:300]}")
+        self.say(f"{job.task}: FAILED: {err[:300]} (session {session_of(jd)})")
         return None
 
     def command(self, job: Job, resume: str | None) -> list[str]:
@@ -395,23 +405,38 @@ class Swarm:
 
     def one_call(self, job: Job, jd: Path, prompt: str, resume: str | None, n: int, tag: str = ""):
         cmd = self.command(job, resume=resume)
+        if not resume:
+            # The session id is fixed before the agent starts, so a killed job still leaves it to resume or collect.
+            sid = str(uuid.uuid4())
+            cmd += ["--session-id", sid]
+            _write(jd / "session", sid)
         cwd = job.cwd or self.cfg.get("work.dir")
+        name = f"{tag or 'call'}-{n}"
+        # The agent reads its prompt from a file and writes to files, never to pipes of this process: it runs in its
+        # own session, so it keeps going and keeps its output when this process or the lead's session ends.
+        _write(jd / f"{name}.prompt", prompt)
         t0 = time.time()
         try:
-            p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 text=True, encoding="utf-8", errors="replace", cwd=cwd, env=self.env(),
-                                 start_new_session=True)
+            with open(jd / f"{name}.prompt", encoding="utf-8") as fin, \
+                    open(jd / f"{name}.out", "w", encoding="utf-8", newline="\n") as fout, \
+                    open(jd / f"{name}.err", "w", encoding="utf-8", newline="\n") as ferr:
+                p = subprocess.Popen(cmd, stdin=fin, stdout=fout, stderr=ferr, text=True, encoding="utf-8",
+                                     errors="replace", cwd=cwd, env=self.env(), start_new_session=True)
         except OSError as e:
             return None, f"cannot start {cmd[0]}: {e}"
         with self.lock:
             self.procs.add(p)
         try:
-            out, errout = p.communicate(prompt)
+            p.wait()
         finally:
             with self.lock:
                 self.procs.discard(p)
+        out = (jd / f"{name}.out").read_text(encoding="utf-8", errors="replace")
+        errout = (jd / f"{name}.err").read_text(encoding="utf-8", errors="replace")
+        (jd / f"{name}.err").unlink()
         secs = time.time() - t0
-        _write(jd / f"{tag or 'call'}-{n}.out", out + ("\n--- stderr ---\n" + errout if errout else ""))
+        if errout:
+            _write(jd / f"{name}.out", out + "\n--- stderr ---\n" + errout)
         try:
             d = json.loads(out)
             if isinstance(d, list):
@@ -712,6 +737,7 @@ def follow_up(cfg: config.Config, a) -> int:
     sw = Swarm(cfg, jd.parent.parent, a)
     with track.recorded("swarm follow-up", task=task) as r:
         sw.board(job, "running", f"follow-up {n} ({job.model})" + (f", fresh session at {ctx} tokens" if fresh else ""))
+        sw.log(f"{task}: follow-up {n} started ({job.model}{', fresh session' if fresh else ''})")
         try:
             value, err = sw.call(job, jd, resume=None if fresh else sid, prompt=prompt, tag=tag)
         except Exception as e:  # report it as the call's failure, in the same JSON shape
@@ -721,6 +747,7 @@ def follow_up(cfg: config.Config, a) -> int:
         _write(jd / f"{tag}.json", json.dumps({k: out[k] for k in ("ok", "value", "session_id")} | {"error": err},
                                                    indent=1, ensure_ascii=False))
         sw.board(job, "done" if err is None else "failed", None if err is None else err[:300])
+        sw.log(f"{task}: follow-up {n} {'done' if err is None else 'FAILED: ' + err[:200]}")
         r.result(f"{task} follow-up {n}: {'ok' if err is None else 'FAILED: ' + err[:200]}", log=str(jd), ok=err is None)
     return done(0 if err is None else 1, err)
 
@@ -783,6 +810,8 @@ def main(argv=None) -> int:
         sw.stop()
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, on_term)
+    if hasattr(signal, "SIGHUP"):
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)   # the lead's terminal closing ends no batch
 
     code = 0
     with track.recorded("swarm") as rec:

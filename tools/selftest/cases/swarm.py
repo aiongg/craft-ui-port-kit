@@ -91,3 +91,24 @@ def case_refuses_unfilled_placeholder(s):
     p = s.run("swarm.py", "jobs.json")
     check(p.returncode == 2 and "p.md" in p.stderr and "{{ROUND}}" in p.stderr and not calls(s),
           "an unfilled placeholder stops the run before any call", p)
+
+
+def case_failed_job_keeps_its_session(s):
+    jobs(s, "test a\n")
+    (s.root / "claude").mkdir(exist_ok=True)
+    (s.root / "claude" / "subtype.txt").write_text("error_max_turns\n")
+    s.run("swarm.py", "jobs.json")
+    rec = json.loads(next((s.work / "swarm").glob("jobs/jobs/*/result.json")).read_text())
+    check(rec["ok"] is False and rec["session_id"] == "session-1" and "turns" in rec["error"], f"failed record: {rec}", s.last)
+    check("--session-id" in calls(s)[0]["argv"], "a fresh call fixes its session id before it starts")
+    jd = next((s.work / "swarm").glob("jobs/jobs/*"))
+    check((jd / "call-0.out").is_file() and (jd / "call-0.prompt").is_file(), "prompt and output are files")
+
+
+def case_follow_up_logs(s):
+    jobs(s, "test a\n")
+    s.run("swarm.py", "jobs.json")
+    (s.work / "packet-2.md").write_text("still failing: test a\n")
+    s.run("swarm.py", "--follow-up", "rfix-g1", "packet-2.md")
+    log = (s.work / "swarm" / "jobs" / "log.txt").read_text()
+    check("follow-up 1 started" in log and "follow-up 1 done" in log, f"follow-up lines in log.txt: {log}", s.last)

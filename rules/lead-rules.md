@@ -89,6 +89,8 @@ The dashboard (`tools/track.md`) is the developer's view of the port. These duti
 
 ## Records and hand-offs
 
-- **`STATE.md` holds the current state and the decisions**: phase, step, next action, pins, decisions, developer answers, open items. Update it at every phase change and every round.
+- **`STATE.md` holds the current state and the decisions**: phase, step, next action, pins, decisions, developer answers, open items. It stays at about 150 lines: rewrite lines that change, delete what no longer applies. Update it at every phase change and every round.
+- **`log.md` in the workspace holds the history**: round results, measurements, finding classes, what happened when. Append to it; never put history in `STATE.md` (`templates/log.md` is its format).
 - **Before a long break**, stop new launches, record the running agents and their task ids in `STATE.md`, and run `track md`.
+- **One lead at a time.** `tools/lead-context` writes `lead.lock` in the workspace (holder session and time) each time a session starts, resumes or compacts, and warns when another session held it within the last two hours. A warned session is not the lead: it does not launch, merge or answer for the port. To take over, end or confirm the end of the other lead's session (stop its monitors), then run `tools/lead-context --take` once.
 - **At a stopping point, write `STATE.md` and continue.** Write the current state and pointers (not copies of earlier hand-offs), run `track md`, and go on with the next step. Only the developer ends the session. After a compaction the SessionStart hook restores your context; a session that starts without context reads `STATE.md` and `track show` before anything else (`process/12-running-agents.md`).

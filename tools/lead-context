@@ -6,7 +6,12 @@ It reads the hook's JSON on stdin (`source`, `cwd`) and finds port.toml the usua
 directory or a parent). Outside a port workspace, and in agents the kit starts (PORT_KIT_AGENT set), it prints
 nothing. It prints only text and always exits 0.
 
-usage: lead-context [--source startup|resume|clear|compact] [--cwd DIR]    (without stdin JSON, for a manual run)
+usage: lead-context [--source startup|resume|clear|compact] [--cwd DIR] [--session ID] [--take]
+                    (without stdin JSON, for a manual run)
+
+One lead at a time: it records the session's id and the time in <work.dir>/lead.lock. When another session holds a lock
+refreshed within the last LOCK_HOURS hours, it prints a warning naming that session and leaves the lock alone;
+--take makes this session the holder. The session id comes from the hook's JSON, --session, or CLAUDE_CODE_SESSION_ID.
 """
 from __future__ import annotations
 
@@ -14,7 +19,10 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
+
+LOCK_HOURS = 2
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -30,7 +38,27 @@ def hard_rules(skill: Path) -> list[str]:
     return out
 
 
-def context(source: str, cwd: str) -> str:
+def lead_lock(work: str | None, session: str | None, take: bool) -> str | None:
+    """Record this session as the port's lead; the warning when another session holds a fresh lock."""
+    if not work or not session or not Path(work).is_dir():
+        return None
+    f = Path(work) / "lead.lock"
+    now = time.time()
+    try:
+        held = json.loads(f.read_text())
+    except (OSError, ValueError):
+        held = {}
+    other = held.get("session")
+    age = now - float(held.get("time") or 0)
+    if other and other != session and age < LOCK_HOURS * 3600 and not take:
+        return (f"WARNING: another session ({other}) was the lead {int(age // 60)} minutes ago ({f}). Two leads "
+                f"launch and merge against each other. Do not act as the lead until that session has stopped; "
+                f"then take over with `lead-context --take` (rules/lead-rules.md, \"One lead at a time\").")
+    f.write_text(json.dumps({"session": session, "time": now}) + "\n")
+    return None
+
+
+def context(source: str, cwd: str, session: str | None = None, take: bool = False) -> str:
     from portkit import config as C
     from portkit import gates
     from portkit import track as T
@@ -43,6 +71,9 @@ def context(source: str, cwd: str) -> str:
     cfg = C.load(str(found))
     kit = C.KIT_ROOT
     L = []
+    warn = lead_lock(cfg.get("work.dir"), session, take)
+    if warn:
+        L.append(warn)
     if source == "compact":
         L.append("Your context was just compacted: the kit's rules and the current runbook are no longer in it. "
                  "Read the files below again before your next step.")
@@ -86,8 +117,9 @@ def context(source: str, cwd: str) -> str:
 
 
 def main() -> int:
-    source, cwd = "startup", os.getcwd()
+    source, cwd, session = "startup", os.getcwd(), os.environ.get("CLAUDE_CODE_SESSION_ID")
     args = sys.argv[1:]
+    take = "--take" in args
     if "-h" in args or "--help" in args:
         print(__doc__.strip())
         return 0
@@ -95,17 +127,19 @@ def main() -> int:
         if flag in args and args.index(flag) + 1 < len(args):
             v = args[args.index(flag) + 1]
             source, cwd = (v, cwd) if flag == "--source" else (source, v)
+    if "--session" in args and args.index("--session") + 1 < len(args):
+        session = args[args.index("--session") + 1]
     if not sys.stdin.isatty():
         try:
             d = json.loads(sys.stdin.read() or "{}")
-            source, cwd = d.get("source") or source, d.get("cwd") or cwd
+            source, cwd, session = d.get("source") or source, d.get("cwd") or cwd, d.get("session_id") or session
         except ValueError:
             pass
     from portkit import config as C
     if os.environ.get(C.ENV_AGENT):
         return 0
     try:
-        sys.stdout.write(context(source, cwd))
+        sys.stdout.write(context(source, cwd, session, take))
     except Exception as e:   # a hook must never stop the session
         print(f"lead-context: {e}")
     return 0

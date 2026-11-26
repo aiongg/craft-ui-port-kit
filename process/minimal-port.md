@@ -107,7 +107,7 @@ It sets every framework dependency to `plan.base`. A dependency counts as a fram
 
 `Cargo.lock` re-resolves in the first build (step 3). When resolution reports a version conflict between the two revisions' requirements, update that one package: `cl cargo update -p <crate>@<old> --precise <new>` (the SoundCraft trial needed `rustix` 1.1.5 to 1.1.6). Commit the lock with the repin.
 
-Then derive the app's package selection for the new manifests with `tools/feature-selection.py` and write it to `[workspace.metadata.cl]` on the port branch ([01-setup.md](01-setup.md) step 6). Every cl command after this point uses it.
+Then derive the app's package selection for the new manifests with `tools/feature-selection.py` (its pin check refuses until the committed manifests and lock resolve with `--locked`, so commit the resolved lock first) and write it to `[workspace.metadata.cl]` on the port branch ([01-setup.md](01-setup.md) step 6). Every cl command after this point uses it.
 
 ## 3. Rewrite
 

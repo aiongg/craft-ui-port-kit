@@ -93,6 +93,16 @@ expect(0, True)
 for d in ("trees/snap-fw", "trees/snap-app", "trees/prod"):
     (W / d).mkdir(parents=True)
 track("status", "setup-pin", "done")
+expect(1, False, "no pin-check run since the phase began")
+(app / ".stub-metadata.json").write_text('{"packages": [], "workspace_members": []}')
+commit(app, "pin")
+subprocess.run([sys.executable, "-I", str(KIT / "tools" / "feature-selection.py")], capture_output=True, cwd=W,
+               env=dict(os.environ, PORT_KIT_CONFIG=str(CFG), CARGO=str(KIT / "tools" / "selftest" / "stubs" / "cargo")))
+expect(1, False, "has no [workspace.metadata.cl] selection")
+manifest = '[workspace]\n[workspace.metadata.cl]\nselection = ["app"]\n'
+(app / "Cargo.toml").write_text(manifest)
+expect(1, False, "has no framework patch")
+(app / "Cargo.toml").write_text(manifest + "# BEGIN port-kit framework patch\n# END port-kit framework patch\n")
 out = expect(1, False, "baseline-failures.txt is missing")
 (W / "baseline-failures.txt").write_text("")
 track("round", "0", "--pass", "5", "--fail", "0")

@@ -84,7 +84,7 @@ The kit tools pass `build.launcher` to cl as `CL_LAUNCHER` and `build.runner` as
 | Key | Type | Default | Read by | Meaning |
 |---|---|---|---|---|
 | `dir` | path | port.toml's directory | all | Workspace root: plans, maps, per-set output, logs, STATE.md. Default: the directory holding port.toml. Placeholder `{{WORK}}`. Env: `PORT_KIT_WORK_DIR`. |
-| `trees` | path | `{work.dir}/trees` | port-set, run-area, combine-area, combine-lost, cross-owner, move-base, racheck.py, init-workspace | Per-set git worktrees (`<set>` and `<set>-<repo>`) and the read-only base checkouts. Placeholder `{{TREES}}`. Env: `PORT_KIT_WORK_TREES`. |
+| `trees` | path | `{work.dir}/trees` | port-set, run-area, combine-area, combine-lost, cross-owner, move-base, racheck.py, init-workspace, feature-selection.py | Per-set git worktrees (`<set>` and `<set>-<repo>`) and the read-only base checkouts. Placeholder `{{TREES}}`. Env: `PORT_KIT_WORK_TREES`. |
 | `inventory` | path | `{work.dir}/inventory` | workflows/phase1-inventory-map.js, render-prompt | Phase 1 chunk inventory (`chunk-NN.json`). Placeholder `{{INVENTORY}}`. Env: `PORT_KIT_WORK_INVENTORY`. |
 | `maps` | path | `{work.dir}/port-map` | coverage.py, render-prompt | Phase 1 area maps (`<area>.md`) and their index (`README.md`). Placeholder `{{MAPS}}`. Env: `PORT_KIT_WORK_MAPS`. |
 | `plan` | path | `{work.dir}/plan` | init-workspace, render-prompt | Phase 2 output root. Placeholder `{{PLAN}}`. Env: `PORT_KIT_WORK_PLAN`. |

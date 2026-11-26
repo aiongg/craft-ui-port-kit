@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Stub cargo for selftest cases: `cargo metadata ...` prints <cwd>/.stub-metadata.json; anything else exits 2."""
+"""Stub cargo for selftest cases: `cargo metadata ...` prints <cwd>/.stub-metadata.json; anything else exits 2.
+With `--locked` and a <cwd>/.stub-lock-stale file, metadata fails as cargo does on a lock that needs updating."""
 import sys
 from pathlib import Path
 
 if sys.argv[1:2] != ["metadata"]:
     sys.exit("stub cargo: only `metadata` is stubbed")
+if "--locked" in sys.argv and (Path.cwd() / ".stub-lock-stale").exists():
+    sys.exit("error: the lock file needs to be updated but --locked was passed to prevent this")
 f = Path.cwd() / ".stub-metadata.json"
 if not f.exists():
     sys.exit("stub cargo: no .stub-metadata.json in the tree")

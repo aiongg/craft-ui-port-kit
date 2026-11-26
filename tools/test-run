@@ -5,7 +5,8 @@ usage: test-run LABEL [--fw [CRATE[:FILTER]] ...] [--fw-all] [--app] [--filter F
                 [--baseline] [--config PORT.TOML]
 
   --app            the app's whole pinned selection (`cl test all`, cl's app mode), run in app.integration. Default
-                   when no --fw or --fw-all is given.
+                   when no --fw or --fw-all is given. A tool failure while the app's root Cargo.toml has no
+                   `[workspace.metadata.cl]` selection (tools/feature-selection.py): no build, no baseline before it.
   --fw CRATE[:F]   framework trials: `cl test CRATE` in framework.integration, with the test filter F when given.
                    Several allowed; each runs on its own. `--fw` with no crate: every workspace package changed
                    between plan.base and HEAD in framework.integration.
@@ -146,6 +147,11 @@ def cl_adds_no_fail_fast(cfg, app: Path, env: dict) -> bool:
 
 def app_part(cfg, rd: Path, filters: list[str], no_run: bool, threads: str) -> dict:
     app = cfg.path("app.integration")
+    why = gates.no_selection(app)
+    if why:
+        print(f"app: TOOL FAILURE: {why}")
+        return {"part": "app", "filter": filters, "status": "tool-failure", "exit": 2, "passed": 0, "failed": 0,
+                "failing": [], "compile_errors": 0, "binaries": {}}
     env = gates.cl_env(cfg)
     build_log = rd / "app.build.log"
     build_log.write_bytes(b"")

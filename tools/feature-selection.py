@@ -2,7 +2,7 @@
 """feature-selection.py: derive the app's package selection for cl's app mode, with no compile.
 
 usage: feature-selection.py [APP_DIR] [--shared CRATE]... [--exclude PACKAGE]... [--offline] [--json]
-                            [--config PORT.TOML]
+                            [--no-pin-check] [--config PORT.TOML]
 
 cl builds every app command with one fixed set of workspace packages, the selection (`selection` in
 `[workspace.metadata.cl]`, process/11-build-loop.md). Cargo unifies a crate's features over the packages a command
@@ -21,20 +21,28 @@ the member turns on in each shared crate. It prints:
   - a `[workspace.metadata.cl]` block with `selection` and `tracked`. `expected_features` is shown as a comment:
     copy the real sets from `cl doctor` after the first warm build.
 
+Pin check, first: the selection needs manifests that resolve on the pinned framework rev. In a temporary detached
+worktree of APP_DIR's HEAD (the committed pin and lock, without the uncommitted local framework patch), it runs
+`cargo metadata --locked`. It refuses (exit 3) when the committed manifests do not resolve (crates or features the app
+uses are gone at the pinned rev: port the manifests first) or when the committed Cargo.lock does not match them
+(commit the resolved lock with the pin), process/01-setup.md step 4. Each check posts a `pin-check` event, which the
+phase 0 exit gate reads. --no-pin-check skips it (a scratch APP_DIR that is no git checkout).
+
 APP_DIR defaults to app.integration from port.toml. `cargo metadata` and `cargo tree` resolve dependencies from
 Cargo.lock and compile nothing, but resolution may need the network (to fetch the registry index or git
 dependencies). --offline passes --offline to both and works when the dependencies are already fetched. CARGO names the cargo binary (default: cargo).
-Exit 2 when cargo fails (the message names the command).
+Exit 2 when cargo fails (the message names the command), 3 when the pin check fails.
 """
 import argparse
 import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from portkit import config  # noqa: E402
+from portkit import config, track  # noqa: E402
 
 DEFAULT_SHARED = ["egui", "eframe"]
 
@@ -49,6 +57,34 @@ def cargo(args: list[str], cwd: str) -> str:
         tail = (r.stderr.strip().splitlines() or ["(no output)"])[-1]
         raise SystemExit(f"feature-selection: `cargo {' '.join(args)}` failed in {cwd}: {tail}")
     return r.stdout
+
+
+def pin_check(ws: str, offline: list[str], scratch: Path) -> str | None:
+    """None when the committed manifests and lock of ws resolve with --locked, else the reason."""
+    exe = os.environ.get("CARGO", "cargo")
+    scratch.mkdir(parents=True, exist_ok=True)
+    tmp = Path(tempfile.mkdtemp(prefix="pin-check-", dir=scratch))
+    add = subprocess.run(["git", "-C", ws, "worktree", "add", "-q", "--detach", str(tmp), "HEAD"],
+                         capture_output=True, text=True)
+    if add.returncode != 0:
+        tmp.rmdir()
+        return f"cannot check out HEAD of {ws}: {add.stderr.strip()[-300:]}"
+    try:
+        def meta(*extra):
+            r = subprocess.run([exe, "metadata", *offline, *extra, "--format-version", "1"], cwd=tmp,
+                               capture_output=True, text=True)
+            return r.returncode, (r.stderr.strip().splitlines() or ["(no output)"])[-1]
+        rc, tail = meta("--locked")
+        if rc == 0:
+            return None
+        rc2, tail2 = meta()
+        if rc2 == 0:
+            return (f"Cargo.lock at HEAD does not match the manifests at HEAD ({tail}): commit the lock resolved for the "
+                    "pin together with the pin")
+        return (f"the manifests at HEAD do not resolve on the pinned framework rev ({tail2}): port the manifests first "
+                "(the crates and features the app names that the rev lacks)")
+    finally:
+        subprocess.run(["git", "-C", ws, "worktree", "remove", "--force", str(tmp)], capture_output=True)
 
 
 def member_features(ws: str, member: str, offline: list[str]) -> dict[str, set[str]]:
@@ -73,6 +109,7 @@ def main(argv=None) -> int:
     ap.add_argument("--exclude", action="append", default=[], metavar="PACKAGE")
     ap.add_argument("--offline", action="store_true")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--no-pin-check", action="store_true")
     ap.add_argument("--config")
     a = ap.parse_args(argv)
 
@@ -88,6 +125,16 @@ def main(argv=None) -> int:
     facade = cfg.get("framework.facade") if cfg else "craft"
     shared = list(dict.fromkeys([*DEFAULT_SHARED, facade, *a.shared]))
     offline = ["--offline"] if a.offline else []
+
+    if not a.no_pin_check:
+        scratch = cfg.path("work.trees") if cfg else Path(tempfile.gettempdir())
+        with track.recorded("pin-check") as rec:
+            why = pin_check(ws, offline, scratch)
+            rec.result(why or f"HEAD of {ws} resolves with --locked", ok=why is None)
+        if why:
+            print(f"feature-selection: pin check failed: {why} (process/01-setup.md, step 4)", file=sys.stderr)
+            return 3
+        print(f"feature-selection: pin check passed: HEAD of {ws} resolves with --locked", file=sys.stderr)
 
     meta = json.loads(cargo(["metadata", *offline, "--format-version", "1", "--no-deps"], ws))
     ids = set(meta.get("workspace_members") or [])

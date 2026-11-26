@@ -70,7 +70,7 @@ The dashboard is the developer's view of the port ([00-overview.md](00-overview.
 5. Put the setup steps on the board, so the long ones are visible while they run:
 
    ```sh
-   tools/track status setup-pin todo "pin the framework rev, port branch"
+   tools/track status setup-pin todo "pin the framework rev, port branch, the pin resolves"
    tools/track status setup-build todo "selection, cl doctor, first warm build"
    tools/track status setup-baseline todo "baseline full test run"
    tools/track status setup-racheck todo "racheck daemons"
@@ -93,9 +93,10 @@ Ask the developer now, in chat, so landing never stops on a question at the end 
 
 1. Note the framework commit: the head of `framework.branch` as it is now. Write it to `plan.base` in `port.toml`. Phases 1 and 2 read the framework at this commit, and the plan's line numbers refer to it. Set `framework.repo` to the remote that has this commit: the pin in step 3 names that URL, and a commit only a fork has does not resolve for anyone building from another URL. Then run `tools/init-workspace <workspace-dir>` again. The rerun writes `plan.base` into the `plan.linebase` file, which `port-set` reads, and refills the pins in `STATE.md` (plan bases, framework branch, port and writing branches) from `port.toml`; the rest of `STATE.md` stays as written.
 2. In the app checkout, create `app.port_branch` from the head of `app.base_branch` (the production branch, chosen in step 2). Write that commit to `plan.app_base`.
-3. On the port branch, pin the app's framework dependency to the `plan.base` commit by git rev, never to a branch name. `tools/land/pin-framework.py` rewrites the app's Cargo manifests for every URL in `framework.patch_urls`. Commit the pin.
-4. Point the app's local builds at the framework integration tree with `tools/patch-framework`. It adds marked override regions and leaves the app's own `[patch]` lines in place (a line an override replaces is commented out and comes back on a rerun), so the app builds against local framework changes without a push. It reads the committed `Cargo.lock`, so a rerun after a build changes nothing; it exits 1 when the lock takes no package from the framework. Do not commit it.
-5. Write the commits to `STATE.md` and record `tools/track event pin "framework <rev>, app <rev>" --task setup-pin`.
+3. On the port branch, pin the app's framework dependency to the `plan.base` commit by git rev, never to a branch name. `tools/land/pin-framework.py` rewrites the app's Cargo manifests for every URL in `framework.patch_urls`. Resolve the lock for the pin, compiling nothing: `cargo metadata --format-version 1 > /dev/null` in the app tree. Commit the manifests and `Cargo.lock` together.
+4. **Check that the pin resolves.** `cargo metadata --locked --format-version 1 > /dev/null` must pass on the committed pin. When crates or features the app names are gone at `plan.base` (the port targets a branch that removed them), port the manifests first: change only the dependency lines and features, on the port branch, until it resolves, and commit. Nothing that builds starts before this holds: no selection, no warm build, no baseline. `tools/feature-selection.py` checks it again on the committed `HEAD` and refuses until it holds; the phase 0 exit gate reads its `pin-check` event.
+5. Point the app's local builds at the framework integration tree with `tools/patch-framework`. It adds marked override regions and leaves the app's own `[patch]` lines in place (a line an override replaces is commented out and comes back on a rerun), so the app builds against local framework changes without a push. It reads the committed `Cargo.lock`, so a rerun after a build changes nothing; it exits 1 when the lock takes no package from the framework. Do not commit it. From here on the pin stays at `plan.base` until landing, and framework changes reach the app through this patch ([11-build-loop.md](11-build-loop.md), "Target dirs and trees").
+6. Write the commits to `STATE.md` and record `tools/track event pin "framework <rev>, app <rev>" --task setup-pin`.
 
 ## 5. Make the read-only checkouts
 
@@ -118,7 +119,7 @@ tools/make-snapshots
 
 Every cargo command goes through the framework's `cl` ([11-build-loop.md](11-build-loop.md) explains why). In an app workspace, cl reads the app's package selection from `[workspace.metadata.cl]` in the app's root `Cargo.toml`.
 
-1. Derive the selection with no compile: `tools/feature-selection.py` runs `cargo tree` per workspace member, which resolves dependencies and may need the network (add `--offline` when they are already fetched). It prints every workspace package that contributes a feature to a crate the framework shares (egui, eframe, the facade, the I/O crates). Write the result into `[workspace.metadata.cl]` on the port branch.
+1. Derive the selection with no compile: `tools/feature-selection.py` first repeats the pin check of step 4 (it refuses with exit 3 until the committed pin resolves), then runs `cargo tree` per workspace member, which resolves dependencies and may need the network (add `--offline` when they are already fetched). It prints every workspace package that contributes a feature to a crate the framework shares (egui, eframe, the facade, the I/O crates). Write the result into `[workspace.metadata.cl]` on the port branch and commit it. `tools/test-run --app` refuses to build while the selection is missing.
 2. Check the environment traps listed in 11-build-loop.md: build scripts that track environment variables (`rerun-if-env-changed`), the app's own build script environment against the test environment, and never `-p <one crate>`. Put what you find in `unset_env` or `set_env` of `[workspace.metadata.cl]`.
 3. Run `cl doctor` in the app integration tree. It must report one feature resolution.
 4. Make the first warm build in the app integration tree as a background task: `cl test all --no-run`. Set `build.launcher`, `build.runner` and `build.memory_cap` first if this machine shares its cores or memory with other work.
@@ -189,7 +190,8 @@ Check each item, then record `tools/track phase 1 "inventory"` and go to [02-inv
 - [ ] `port.toml` has every required key, `plan.base` and `plan.app_base`.
 - [ ] The landing questions are answered and recorded ([step 3a](#3a-ask-the-landing-questions)).
 - [ ] The dashboard is published, `track.how_served` is recorded, and the developer has the address.
-- [ ] The port branch pins the framework at `plan.base` by rev; the local patch points at `framework.integration`.
+- [ ] The port branch pins the framework at `plan.base` by rev, and the committed pin resolves with `--locked` (the `pin-check` event of `feature-selection.py`); the local patch points at `framework.integration`.
+- [ ] The app's root `Cargo.toml` has its `[workspace.metadata.cl]` selection.
 - [ ] The snapshots and the production reference exist at their commits.
 - [ ] `cl doctor` is clean after the warm build.
 - [ ] `build.pool_size` is recorded; `tools/build-pool make` runs as soon as the framework baseline has finished, before the first fixer in the mode `build`.

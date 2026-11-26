@@ -36,7 +36,7 @@ def run_log(s, keys_counts):
 
 
 def case_removed_mod_tests_is_refused_until_ruled(s):
-    app = s.tree("app", {"Cargo.toml": "[workspace]\n", "app/Cargo.toml": "[package]\nname = \"app\"\n",
+    app = s.tree("app", {"Cargo.toml": "[workspace]\n[workspace.metadata.cl]\nselection = [\"app\"]\n", "app/Cargo.toml": "[package]\nname = \"app\"\n",
                          "app/src/canvas.rs": "\n", "app/src/other.rs": "\n", "app/tests/it/canvas.rs": "\n"})
     s.tree("fw", {"Cargo.toml": "\n"})
     git(app, "branch", "base")

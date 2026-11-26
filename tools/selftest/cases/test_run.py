@@ -18,7 +18,7 @@ def setup(s):
         shutil.copy(f, s.root / "cl-logs" / f.name)
     fw = s.tree("fw", {".stub-metadata.json": cargo_metadata([{"name": "crate-a", "dir": "crates/a"}]),
                        "crates/a/Cargo.toml": "[package]\nname = \"crate-a\"\n", "crates/a/src/lib.rs": "\n"})
-    app = s.tree("app", {"Cargo.toml": "[workspace]\n"})
+    app = s.tree("app", {"Cargo.toml": "[workspace]\n[workspace.metadata.cl]\nselection = [\"app\"]\n"})
     return fw, app
 
 
@@ -80,3 +80,10 @@ def case_no_fail_fast_once(s):
     s.cl_log("--dry-run-test", "cargo test --workspace --no-fail-fast\n")
     s.run("test-run", "r2", "--app")
     check("--no-fail-fast" not in test_call(), f"left out when cl adds it: {test_call()}")
+
+
+def case_app_run_needs_the_selection(s):
+    s.tree("app", {"Cargo.toml": "[workspace]\n"})
+    p = s.run("test-run", "warm", "--app", "--no-run")
+    check(p.returncode == 2 and "no [workspace.metadata.cl] selection" in p.stdout and not s.cl_calls(),
+          "an app run without the selection is a tool failure and builds nothing", p)

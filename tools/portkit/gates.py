@@ -84,6 +84,25 @@ def by_package(tree: Path, errors: list[str]) -> dict[str, list[str]]:
     return out
 
 
+def app_selection(tree: Path) -> list[str] | None:
+    """`selection` of `[workspace.metadata.cl]` in the app tree's root Cargo.toml, which cl's app mode builds every
+    command with; None when it is missing or empty."""
+    try:
+        meta = tomllib.loads((Path(tree) / "Cargo.toml").read_text())
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    sel = meta.get("workspace", {}).get("metadata", {}).get("cl", {}).get("selection")
+    return sel if isinstance(sel, list) and sel else None
+
+
+def no_selection(tree: Path) -> str | None:
+    """Why the app tree may not build yet: no selection (tools/feature-selection.py, process/01-setup.md step 6)."""
+    if app_selection(tree) is not None:
+        return None
+    return (f"{tree}/Cargo.toml has no [workspace.metadata.cl] selection: derive it with tools/feature-selection.py "
+            "and commit it on the port branch first (process/01-setup.md, step 6)")
+
+
 def write_summary(rd: Path, data: dict) -> Path:
     """<run dir>/summary.json, the machine-readable result of a gate or test run."""
     f = rd / "summary.json"
@@ -241,6 +260,17 @@ def x_how_served(ctx):
 
 def x_snapshots(ctx):
     return _missing(*(ctx.cfg.path(k) for k in ("framework.snapshot", "app.snapshot", "app.production")))
+
+
+def x_app_build_setup(ctx):
+    app = ctx.cfg.path("app.integration")
+    why = no_selection(app)
+    if why:
+        return why
+    # tools/patch-framework's marker: the app tree builds against framework.integration, not the pinned git rev.
+    if "# BEGIN port-kit framework patch" not in (app / "Cargo.toml").read_text():
+        return f"{app}/Cargo.toml has no framework patch (tools/patch-framework, process/01-setup.md step 4)"
+    return None
 
 
 def x_baseline(ctx):
@@ -568,6 +598,8 @@ PHASE_EXITS: list[ExitCheck] = [
     ExitCheck(0, "port.toml has every required key, plan.base and plan.app_base", x_keys),
     ExitCheck(0, "track.how_served is recorded", x_how_served),
     ExitCheck(0, "The snapshots and the production reference exist", x_snapshots),
+    ExitCheck(0, "The pinned manifests resolve with --locked (feature-selection.py's pin check)", _ok_since("pin-check")),
+    ExitCheck(0, "The app manifest has its cl selection and the framework patch", x_app_build_setup),
     ExitCheck(0, "work.baseline_failures exists and the baseline counts are on the dashboard", x_baseline),
     ExitCheck(0, "Every setup task on the board is done", x_setup_done),
     ExitCheck(0, "The look driver and the production build with its control hooks exist", x_look_setup),

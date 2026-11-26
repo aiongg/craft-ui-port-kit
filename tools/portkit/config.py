@@ -71,7 +71,7 @@ KEYS: list[Key] = [
     # ---- work: the workspace layout (everything the port writes outside the two repos)
     K("work.dir", None, "path", "all", "Workspace root: plans, maps, per-set output, logs, STATE.md. Default: the directory "
       "holding port.toml.", placeholder="WORK", default_doc="port.toml's directory"),
-    K("work.trees", "{work.dir}/trees", "path", "port-set run-area combine-area combine-lost cross-owner move-base racheck.py init-workspace",
+    K("work.trees", "{work.dir}/trees", "path", "port-set run-area combine-area combine-lost cross-owner move-base racheck.py init-workspace feature-selection.py",
       "Per-set git worktrees (`<set>` and `<set>-<repo>`) and the read-only base checkouts.", placeholder="TREES"),
     K("work.inventory", "{work.dir}/inventory", "path", "workflows/phase1-inventory-map.js render-prompt",
       "Phase 1 chunk inventory (`chunk-NN.json`).", placeholder="INVENTORY"),
